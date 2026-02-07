@@ -1005,9 +1005,9 @@ if __name__ == "__main__":
         # exit(1)
     
     # Test parameters
-    N = 10_000
+    N = 50_000
     n_warmup = 1
-    n_bench = 5
+    n_bench = 3
     
     print(f"\nTesting with N={N:,} particles")
     print(f"Warmup: {n_warmup} iterations")

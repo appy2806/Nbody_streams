@@ -1,0 +1,7 @@
+# Ignore local / legacy files
+collisionless_Nbody.py
+__pycache__/
+
+legacy/__pycache__/
+legacy/nbody_forces_gpu_old.py
+legacy/nbody_forces_gpu_stripped.py
