@@ -5,3 +5,9 @@ tests_nbody/
 legacy/__pycache__/
 legacy/nbody_forces_gpu_old.py
 legacy/nbody_forces_gpu_stripped.py
+.vscode/
+test_orbit/
+test_plummer/
+*.npz
+*.h5
+*.times

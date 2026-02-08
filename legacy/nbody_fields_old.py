@@ -975,8 +975,8 @@ def compute_nbody_forces_cpu(
         - 'spline': Cubic spline kernel (Monaghan 1992), compact support.
     nthreads : int or None, optional
         Number of threads for numba parallel loops.
-    precision : str, optional
-        Floating point precision to use for computation. Default 'float64'.
+    dtype : {'float64', 'float32'}, optional
+        Floating type to use for computation. Default 'float64'.
 
     Returns
     -------
@@ -1012,7 +1012,7 @@ def compute_nbody_potential_cpu(
     G: float = G_DEFAULT,
     kernel: KERNEL_TYPES = 'spline',
     nthreads: int | None = None,
-    precision: str = 'float64'
+    dtype: str = 'float64'
 ) -> NDArray:
     """
     Compute gravitational potential using CPU parallelization (Numba).
@@ -1034,8 +1034,8 @@ def compute_nbody_potential_cpu(
         Potential kernel type. Default: 'spline'.
     nthreads : int, optional
         Number of CPU threads. Default: None (use all).
-    precision : str, optional
-        Floating point precision to use for computation. Default: 'float64'.
+    dtype : str, optional
+        'float32' or 'float64'. Default: 'float64'.
     
     Returns
     -------
@@ -1053,7 +1053,7 @@ def compute_nbody_potential_cpu(
         raise ImportError("Numba required for CPU version. Install: pip install numba")
 
     # Validate dtype
-    validated = _validate_inputs(pos, mass, softening, precision, kernel)
+    validated = _validate_inputs(pos, mass, softening, dtype, kernel)
     pos_cpu, mass_cpu, h_cpu, N = _prepare_cpu_arrays(validated)
     kernel_id = validated['kernel_id']    
     dtype_np = validated['dtype_np']
@@ -1064,7 +1064,6 @@ def compute_nbody_potential_cpu(
     potential = _compute_potential_cpu(pos_cpu, mass_cpu, h_cpu, kernel_id, dtype_np(eps2))
     
     return G * potential
-
 
 def get_gpu_info() -> dict:
     """
@@ -1401,7 +1400,7 @@ if __name__ == "__main__":
         for _ in range(n_warmup):
             _ = compute_nbody_forces_cpu(
                 pos_f64, mass_f64, softening=0.01,
-                nthreads=cpu_threads, kernel='spline', precision='float64',
+                nthreads=cpu_threads, kernel='spline', precision='float64'
             )
         
         # Benchmark
@@ -1411,7 +1410,7 @@ if __name__ == "__main__":
             
             acc_cpu = compute_nbody_forces_cpu(
                 pos_f64, mass_f64, softening=0.01,
-                nthreads=cpu_threads, kernel='spline', precision='float64',
+                nthreads=cpu_threads, kernel='spline', precision='float64'
             )
             
             t1 = time.perf_counter()

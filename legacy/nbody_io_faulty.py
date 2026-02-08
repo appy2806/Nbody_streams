@@ -499,7 +499,54 @@ class ParticleReader:
             print("✅  ...extraction complete.")
 
         return orbits
+
+# ============================================================================
+# Helper function for saving snapshots in a format compatible with ParticleReader.
+# ============================================================================
+
+def _update_snapshot_times(output_dir: Path, snap_index: int, time: float) -> None:
+    """
+    Fast append-only version. Sort at the end with _finalize_snapshot_times().
+    """
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    times_path = out / "snapshot.times"
     
+    # Simple append - no reading/sorting during run
+    with open(times_path, 'a') as f:
+        if not times_path.exists() or times_path.stat().st_size == 0:
+            f.write("# snap_index time\n")
+        f.write(f"{int(snap_index)} {float(time):.10e}\n")
+
+def _finalize_snapshot_times(output_dir: Path) -> None:
+    """Call this ONCE at the end of run_nbody_gpu."""
+    out = Path(output_dir)
+    times_path = out / "snapshot.times"
+    
+    if not times_path.exists():
+        return
+    
+    # Read, deduplicate, sort, rewrite
+    try:
+        arr = np.loadtxt(str(times_path), comments="#")
+        if arr.ndim == 1 and arr.size == 2:
+            arr = arr.reshape(1, 2)
+    except Exception:
+        return
+    
+    if arr.size == 0:
+        return
+    
+    # Remove duplicates (keep last occurrence) and sort
+    snap_ids = arr[:, 0].astype(int)
+    _, unique_indices = np.unique(snap_ids, return_index=True)
+    arr = arr[unique_indices]
+    arr = arr[np.argsort(arr[:, 0])]
+    
+    # Rewrite sorted
+    np.savetxt(str(times_path), arr, fmt="%d %.10e", 
+               header="snap_index time", comments="# ")
+
 def _save_snapshot(
     phase_space: np.ndarray,
     snap_index: int,
@@ -516,6 +563,7 @@ def _save_snapshot(
     single_file: bool | None = None,
     num_files_to_write: int | None = None,
     total_expected_snapshots: int | None = None,
+    compression: str | None = None,  # NEW: allow disabling compression
 ) -> None:
     """
     Write snapshot(s) compatible with ParticleReader.
@@ -581,8 +629,12 @@ def _save_snapshot(
         if dset_name in snaps:
             # do not overwrite existing dataset
             return
-        snaps.create_dataset(dset_name, data=phase_space, compression="gzip")
-
+        
+        # Create dataset with optional compression
+        if compression:
+            snaps.create_dataset(dset_name, data=phase_space, compression=compression)
+        else:
+            snaps.create_dataset(dset_name, data=phase_space)
         # write properties only if not present
         props = f.require_group("properties")
         if "dark" not in props:
@@ -655,42 +707,3 @@ def _load_restart(output_dir: Path) -> tuple[np.ndarray, float, int, int] | None
         snapshot_counter = int(data["snapshot_counter"]) if "snapshot_counter" in data.files else 0
         return phase_space, time, step, snapshot_counter
     return None
-
-def _update_snapshot_times(output_dir: Path, snap_index: int, time: float) -> None:
-    """
-    Append or update snapshot.times in output_dir.
-    Ensures unique snap_index entries and does not clobber existing file.
-    Format: two-columns 'snap_index time' as integers and floats.
-    """
-    out = Path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    times_path = out / "snapshot.times"
-
-    # load existing if present
-    if times_path.exists():
-        try:
-            arr = np.loadtxt(str(times_path), comments="#")
-            if arr.ndim == 1 and arr.size == 2:
-                arr = arr.reshape(1, 2)
-        except Exception:
-            arr = np.empty((0, 2))
-    else:
-        arr = np.empty((0, 2))
-
-    # make sure arr is 2D
-    if arr.size == 0:
-        arr2 = np.array([[int(snap_index), float(time)]], dtype=float)
-    else:
-        # update or append
-        # ensure integer snap indices in first column
-        snap_ids = arr[:, 0].astype(int)
-        mask = snap_ids == int(snap_index)
-        if mask.any():
-            arr[mask, 1] = float(time)
-            arr2 = arr
-        else:
-            arr2 = np.vstack([arr, [int(snap_index), float(time)]])
-
-    # sort rows by snap index
-    arr2 = arr2[np.argsort(arr2[:, 0])]
-    np.savetxt(str(times_path), arr2, fmt="%d %.10e", header="snap_index time", comments="# ")

@@ -7,8 +7,10 @@ for self-gravity, with optional external time-evolving potentials via Agama.
 
 Requirements
 ------------
-- nbody_forces_gpu module (for GPU self-gravity)
+- nbody_fields module (for GPU self-gravity)
 - CuPy (for GPU integration)
+- Numba (for CPU fallback and direct summation)
+- pyfalcon (optional, for tree code method on CPU)
 - Agama (optional, for external potentials)
 - NumPy
 
@@ -26,9 +28,13 @@ import warnings
 import time as pytime
 import h5py # For HDF5 snapshot output (if needed)
 
+from nbody_io import _save_snapshot, _update_snapshot_times, _finalize_snapshot_times, _save_restart, _load_restart
+
 try:
     import cupy as cp
     CUPY_AVAILABLE = True
+    from queue import Queue
+    from threading import Thread
 except ImportError:
     CUPY_AVAILABLE = False
     warnings.warn("CuPy not available. GPU acceleration disabled.", ImportWarning)
@@ -39,13 +45,12 @@ try:
 except ImportError:
     AGAMA_AVAILABLE = False
 
-from nbody_fields import compute_nbody_forces_gpu, compute_nbody_forces_cpu 
-
 try:
-    from nbody_io import _save_snapshot, _save_restart, _load_restart, _update_snapshot_times
+    from nbody_fields import compute_nbody_forces_gpu, compute_nbody_forces_cpu
+    GPU_FORCES_AVAILABLE = True
 except ImportError:
-    warnings.warn("nbody_io module not found. Using simplistic snapshot saver.", ImportWarning)
-    _save_snapshot = _save_snapshot_simplistic
+    GPU_FORCES_AVAILABLE = False
+    warnings.warn("nbody_fields not available. GPU forces disabled.", ImportWarning)
 
 try:
     import pyfalcon
@@ -54,27 +59,11 @@ except ImportError:
     HAS_FALCON = False
     warnings.warn("pyfalcon not available. Tree code is disabled. Please use a limited number of particles.", ImportWarning)
 
-# ============================================================================
-# CONSTANTS AND TYPE DEFINITIONS
-# ============================================================================
-
-# Default gravitational constant (kpc, km/s, Msun units)
-G_DEFAULT = 4.300917270069976e-06 # double precision value for accuracy, but we will use float32 in GPU kernel for performance
-# Kernel type mapping
-KERNEL_TYPES = Literal['newtonian', 'plummer', 'dehnen_k1', 'dehnen_k2', 'spline']
- 
-# Define this once at the top of your function or module
-_PRECISION_MAP = {
-    'float64': (cp.float64, np.float64),
-    'float32': (cp.float32, np.float32),
-    'float32_kahan': (cp.float32, np.float32)  # Same storage as float32!
-}
 NBODY_UNITS = {
     'kpc': 1.0, # length unit
     'Msun': 1.0, # mass unit
     'kpc / (km/s)': 1.0, # time unit (derived from length and velocity) 
     'km/s': 1, # velocity unit
-    'G': G_DEFAULT, # gravitational constant in these units
 }
 
 # ============================================================================
@@ -106,6 +95,22 @@ def _save_snapshot_simplistic(
     filename = output_dir / f"snap_{snapshot_num:04d}.nbody"
     header = f"t={time:.12e}\nx y z vx vy vz"
     np.savetxt(filename, phase_space, header=header, fmt='%.12e')
+
+# ============================================================================
+# CONSTANTS AND TYPE DEFINITIONS
+# ============================================================================
+
+# Default gravitational constant (kpc, km/s, Msun units)
+G_DEFAULT = 4.300917270069976e-06 # double precision value for accuracy, but we will use float32 in GPU kernel for performance
+# Kernel type mapping
+KERNEL_TYPES = Literal['newtonian', 'plummer', 'dehnen_k1', 'dehnen_k2', 'spline']
+ 
+# Define this once at the top of your function or module
+_PRECISION_MAP = {
+    'float64': (cp.float64, np.float64),
+    'float32': (cp.float32, np.float32),
+    'float32_kahan': (cp.float32, np.float32)  # Same storage as float32!
+}
 
 # ==========================================================================
 # ACCELERATION COMPUTATION FUNCTIONS
@@ -168,7 +173,6 @@ def _compute_accelerations_gpu(
     
     dtype, dtype_np = _PRECISION_MAP[prec_key]
 
-
     # Convert mass to GPU if needed
     mass_gpu = cp.asarray(mass, dtype=dtype)
     
@@ -180,16 +184,17 @@ def _compute_accelerations_gpu(
         G,
         precision,
         kernel_type,
-        return_cupy=True  # Return CuPy array directly
-    ).astype(cp.float64, copy=False) # Convert to float64
+        return_cupy=True,  # Return CuPy array directly
+        skip_validation=True,  # Assume already validated
+    ).astype(dtype, copy=False) # Convert to requested precision
     
     # External potential (if provided)
     if external_potential is not None:
         # Update external forces at specified interval
         if step % external_update_interval == 0 or cached_external_acc is None:
-            pos_cpu_f64 = pos_gpu.get()  # Only transfer when needed
-            acc_ext_cpu = external_potential.force(pos_cpu_f64, t=time)
-            new_cached_external = cp.asarray(acc_ext_cpu, dtype=cp.float64)
+            pos_cpu = pos_gpu.get()  # Only transfer when needed
+            acc_ext_cpu = external_potential.force(pos_cpu, t=time)
+            new_cached_external = cp.asarray(acc_ext_cpu, dtype=dtype)
         else:
             new_cached_external = cached_external_acc
         
@@ -321,6 +326,8 @@ def run_nbody_gpu(
     output_dir: str = "./output",
     snapshots: int = 10,
     num_files_to_write: int = 1,
+    async_io: bool = True,
+    snapshot_buffer_size: int = 20,
     restart_interval: int = 1000,
     continue_run: bool = False,
     verbose: bool = True,
@@ -332,6 +339,431 @@ def run_nbody_gpu(
     Positions and velocities maintained in double precision (float64), while
     force calculations use single precision (float32) for speed.
     
+    Parameters
+    ----------
+    phase_space : np.ndarray, shape (N, 6)
+        Initial conditions [x, y, z, vx, vy, vz] in double precision.
+    masses : np.ndarray, shape (N,)
+        Particle masses (will be converted to float32 for force calculation).
+    time_start : float
+        Start time.
+    time_end : float
+        End time.
+    dt : float
+        Timestep.
+    eps_softening : float | np.ndarray
+        Gravitational softening length. Scalar or per-particle array.
+    G : float, optional
+        Gravitational constant. Default: 4.30092e-6 (kpc, km/s, Msun units).
+    precision : {'float32', 'float64', 'float32_kahan'}, optional
+        Floating point precision for acceleration computation. Default is 'float32_kahan'.
+        'float32_kahan' uses Kahan summation for improved accuracy in float32 mode.
+    kernel : str, optional
+        Force softening kernel. Options: 'newtonian', 'plummer', 'dehnen_k1',
+        'dehnen_k2', 'spline'. Default: 'spline'.
+    external_potential : agama.Potential | None, optional
+        External time-dependent potential. Default: None.
+    external_update_interval : int, optional
+        Update external forces every N steps (reduces Agama overhead).
+        Default: 1 (update every step). Try 5-10 for slowly-varying potentials.
+    output_dir : str, optional
+        Output directory. Default: './output'.
+    snapshots : int, optional
+        Number of snapshots to save (evenly spaced). Default: 10.
+    num_files_to_write : int, optional
+        Number of snapshot files to write (for load balancing). Default: 1.
+    async_io: bool = True,  
+        Enable async I/O
+    snapshot_buffer_size: int = 20,  
+        Queue size for async snapshots.
+    restart_interval : int, optional
+        Save restart file every N steps. Default: 1000.
+    continue_run : bool, optional
+        Resume from restart file if exists. Default: False.
+    verbose : bool, optional
+        Print progress information. Default: True.
+    
+    Returns
+    -------
+    np.ndarray, shape (N, 6)
+        Final phase space coordinates.
+    
+    Raises
+    ------
+    ImportError
+        If required packages (CuPy, nbody_forces_gpu) not available.
+    ValueError
+        If input arrays have invalid shapes.
+    
+    Notes
+    -----
+    **Integration Scheme:**
+    Uses symplectic kick-drift-kick (KDK) leapfrog integrator, which is
+    second-order accurate and conserves energy well for Hamiltonian systems.
+    
+    **GPU Memory Management:**
+    - Positions/velocities kept on GPU throughout integration
+    - Only transferred to CPU for snapshots and restart files
+    - External forces computed on CPU (Agama) and transferred to GPU
+    
+    **Performance:**
+    - Self-gravity: ~3-50ms depending on N (10K-80K particles)
+    - External forces: ~10-20ms on 16 CPU cores (if Agama used)
+    - KDK operations: ~0.01ms (negligible)
+    
+    Use `external_update_interval > 1` to reduce overhead if external
+    potential changes slowly compared to self-gravity.
+    
+    **Unit Consistency:**
+    Ensure G matches your unit system. Common values:
+    - kpc, km/s, Msun: G = 4.30092e-6
+    - kpc, Msun, Gyr: G = 4.302e-6
+    - N-body units: G = 1.0
+    
+    Examples
+    --------
+    Simple self-gravity simulation:
+    
+    >>> import numpy as np
+    >>> N = 10000
+    >>> phase_space = np.random.randn(N, 6)
+    >>> masses = np.ones(N)
+    >>> final = run_nbody_gpu(phase_space, masses, 0.0, 0.1, 1e-4, 
+    ...                       eps_softening=0.01, snapshots=10)
+    
+    With external potential (Agama):
+    
+    >>> import agama
+    >>> agama.setUnits(mass=1, length=1, velocity=1)
+    >>> pot = agama.Potential(type='NFW', mass=1e12, scaleRadius=20.0)
+    >>> final = run_nbody_gpu(phase_space, masses, 0.0, 0.1, 1e-4,
+    ...                       eps_softening=0.01, external_potential=pot,
+    ...                       external_update_interval=5)
+    
+    Resume from crash:
+    
+    >>> final = run_nbody_gpu(phase_space, masses, 0.0, 0.1, 1e-4,
+    ...                       eps_softening=0.01, continue_run=True)
+    
+    See Also
+    --------
+    nbody_forces_gpu.compute_nbody_forces_gpu : GPU force computation
+    """
+    # Validate dependencies
+    if not CUPY_AVAILABLE:
+        raise ImportError("CuPy required for GPU integration. Install: pip install cupy-cuda13x")
+    
+    if not GPU_FORCES_AVAILABLE:
+        raise ImportError("nbody_forces_gpu module required. Ensure it's in your path.")
+    
+    # precision mapping - default to float32 for GPU performance, but allow float64 for accuracy if needed
+    prec_key = precision.lower()
+    if prec_key not in _PRECISION_MAP:
+        raise ValueError(f"Precision must be one of {list(_PRECISION_MAP.keys())}")     
+    
+    dtype, dtype_np = _PRECISION_MAP[prec_key]
+
+    # Validate inputs
+    phase_space = np.asarray(phase_space, dtype=dtype_np)
+    if phase_space.ndim != 2 or phase_space.shape[1] != 6:
+        raise ValueError(f"phase_space must be (N, 6), got {phase_space.shape}")
+    
+    masses = np.asarray(masses, dtype=dtype_np)
+    N = phase_space.shape[0]
+    
+    if masses.shape[0] != N:
+        raise ValueError(f"masses must have length N={N}, got {masses.shape[0]}")
+    
+    if external_potential is not None and not AGAMA_AVAILABLE:
+        raise ImportError("Agama required for external_potential. Install Agama.")
+        
+    output_path = Path(output_dir)
+
+    start_step = 0
+    time = time_start
+    snapshot_counter = None
+
+    # Load restart if requested
+    if continue_run:
+        restart_data = _load_restart(output_path)
+        if restart_data is not None:
+            xv, time, start_step, saved_snap_counter = restart_data
+            snapshot_counter = int(saved_snap_counter) # Update snapshot counter from restart file
+            if verbose:
+                print(f"✓ Resuming from step {start_step}, time {time:.6e}")
+    else:
+        xv = phase_space.copy()  # Ensure we have a local copy to modify
+    
+    # Compute steps reliably (use round to avoid off-by-one)
+    total_steps = int(round((time_end - time_start) / dt))
+    remaining_steps = total_steps - start_step
+        
+    # Compute snapshot steps (evenly spaced from 0 to total_steps)
+    if snapshots > 1:
+        snapshot_steps = np.round(np.linspace(0, total_steps, snapshots)).astype(int)
+    else:
+        snapshot_steps = np.array([total_steps], dtype=int)
+
+     # If not resuming from restart, initialize snapshot_counter from start_step
+    if snapshot_counter is None:
+        # For a fresh run, start at 0
+        # For a resumed run, count how many snapshots should have been written already
+        snapshot_counter = int(np.searchsorted(snapshot_steps, start_step, side="left"))  
+
+    if verbose:
+        print("="*80)
+        print("GPU N-body Integration")
+        print("="*80)
+        print(f"Particles: {N:,}")
+        print(f"Time: {time_start:.3e} → {time_end:.3e} (dt={dt:.3e})")
+        print(f"Steps: {total_steps:,} ({remaining_steps:,} remaining)")
+        print(f"Kernel: {kernel}, Softening: {eps_softening if np.isscalar(eps_softening) else 'variable'}")
+        print(f"External potential: {'Yes' if external_potential is not None else 'No'}")
+        if external_potential is not None:
+            print(f"  Update interval: every {external_update_interval} steps")
+        print(f"Snapshots: {snapshots} (every ~{total_steps//snapshots:,} steps)")
+        print(f"Restart files: every {restart_interval} steps")
+        print("="*80)
+
+    # === Setup async writer thread in enabled ===
+    snapshot_queue = None
+    writer_thread = None
+    
+    if async_io:
+        snapshot_queue = Queue(maxsize=snapshot_buffer_size)
+        
+        def snapshot_writer():
+            """Background thread that writes snapshots."""
+            while True:
+                item = snapshot_queue.get()
+                if item is None:  # Poison pill to stop thread
+                    snapshot_queue.task_done()
+                    break
+                
+                snap_id, xv_cpu, snap_time, params = item
+                # Write snapshot with all parameters
+                _save_snapshot(
+                    xv_cpu, snap_id, snap_time, output_path,
+                    mass_dark=params['mass_dark'],        # ← From params
+                    num_dark=params['num_dark'],          # ← From params
+                    eps_dark=params['eps_dark'],          # ← From params
+                    time_step=params['time_step'],        # ← From params
+                    num_files_to_write=params['num_files'],
+                    total_expected_snapshots=params['total_snaps'],
+                )
+                
+                # Update times file (fast now!)
+                _update_snapshot_times(output_path, snap_id, snap_time)
+                
+                snapshot_queue.task_done()
+        
+        writer_thread = Thread(target=snapshot_writer, daemon=True)
+        writer_thread.start()
+        
+        if verbose:
+            print(f"✓ Async I/O enabled (buffer size: {snapshot_buffer_size})")
+
+    # Transfer to GPU
+    if verbose:
+        print("\nTransferring data to GPU...")
+    
+    # transfer the arrays once. The GPU force kernel will read from these directly, and we will keep them on GPU for the entire integration.
+    pos_gpu = cp.asarray(xv[:, :3], dtype=dtype)
+    vel_gpu = cp.asarray(xv[:, 3:6], dtype=dtype)
+    mass_gpu = cp.asarray(masses, dtype=dtype) # float32 is enough. 
+    dt_gpu = cp.asarray(dt, dtype=dtype)
+    # Pre-create softening array for skip_validation path
+    h_gpu = cp.full(N, eps_softening, dtype=dtype)
+    
+    # Initial acceleration (with warmup)
+    if verbose:
+        print("Computing initial forces (compiling CUDA kernel)...")
+    
+    acc_gpu, cached_external_acc = _compute_accelerations_gpu(  
+        pos_gpu, mass_gpu, h_gpu, G, precision, kernel,
+        external_potential, time, external_update_interval, start_step, None     
+    )
+    
+    # Warmup complete, start timing
+    if verbose:
+        print("\nStarting integration...")
+
+    # Helper function to save snapshot (sync or async)
+    def save_snapshot_helper(snap_id, pos_gpu, vel_gpu, snap_time):
+        xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
+        
+        if async_io:
+            # Put in queue for background thread
+            params = {
+                'num_files': num_files_to_write,
+                'total_snaps': snapshots,
+                'mass_dark': float(masses[0]),  # ← Add this
+                'num_dark': N,                   # ← Add this
+                'eps_dark': eps_softening if np.isscalar(eps_softening) else eps_softening[0],  # ← Add this
+                'time_step': dt,                 # ← Add this
+            }
+            snapshot_queue.put((snap_id, xv_cpu, snap_time, params))
+        else:
+            # Synchronous write (old way)
+            _save_snapshot(
+                xv_cpu, snap_id, snap_time, output_path,
+                mass_dark=float(masses[0]),
+                num_dark=N,
+                eps_dark=eps_softening if np.isscalar(eps_softening) else eps_softening[0],
+                time_step=dt,
+                num_files_to_write=num_files_to_write,
+                total_expected_snapshots=snapshots,
+            )
+            _update_snapshot_times(output_path, snap_id, snap_time)
+    
+    # Save initial snapshot if requested (global index at snapshot_steps[snapshot_counter] == start_step)
+    if snapshot_counter < len(snapshot_steps) and snapshot_steps[snapshot_counter] == start_step:
+        if verbose:
+            print(f"writing snapshot snap: {snapshot_counter} at step {start_step}, time {time:.6e}...")
+        save_snapshot_helper(snapshot_counter, pos_gpu, vel_gpu, time)
+        snapshot_counter += 1
+    
+    # ============================================================================
+    # Main integration loop: iterate over the remaining steps (1..remaining_steps)
+    # ============================================================================
+    t_start = pytime.perf_counter()
+    for step_i in range(1, remaining_steps + 1):
+        current_step = start_step + step_i
+        
+        # === KDK Leapfrog (all on GPU) ===
+        
+        # Kick (half-step)
+        vel_gpu += acc_gpu * (dt_gpu / 2)
+        
+        # Drift (full-step)
+        pos_gpu += vel_gpu * dt_gpu
+        
+        # Update time
+        time += dt
+        
+        # Compute new accelerations
+        acc_gpu, cached_external_acc = _compute_accelerations_gpu(
+            pos_gpu, mass_gpu, h_gpu, G, precision, kernel,
+            external_potential, time, external_update_interval,
+            current_step, cached_external_acc
+        )
+        
+        # Kick (half-step)
+        vel_gpu += acc_gpu * (dt_gpu / 2)
+        
+        # === I/O Operations ===
+        # === Snapshot saving ===
+        while snapshot_counter < len(snapshot_steps) and current_step >= snapshot_steps[snapshot_counter]:
+            if verbose:
+                if async_io:
+                    queue_size = snapshot_queue.qsize()
+                    print(f"→ Queuing snap.{snapshot_counter:03d} at step {current_step}, "
+                          f"time {time:.6e} (queue: {queue_size}/{snapshot_buffer_size})")
+                else:
+                    print(f"→ Saving snap.{snapshot_counter:03d} at step {current_step}, time {time:.6e}")
+            
+            save_snapshot_helper(snapshot_counter, pos_gpu, vel_gpu, time)
+            snapshot_counter += 1
+
+        # Progress update
+        if verbose and step_i % max(1, remaining_steps // 50) == 0:
+            elapsed = pytime.perf_counter() - t_start
+            rate = step_i / elapsed if elapsed > 0 else 0
+            eta = (remaining_steps - step_i) / rate if rate > 0 else 0
+            avg_step_time = elapsed / step_i if step_i > 0 else 0
+            print(f"  Step {current_step:>6}/{total_steps} | "
+                f"t={time:.4e} | "
+                f"Snapshots: {snapshot_counter}/{len(snapshot_steps)} | "
+                f"{rate:.1f} steps/s | "
+                f"avg {avg_step_time*1000:.1f}ms/step | "
+                f"ETA {eta:.0f}s")
+                
+        # Save restart file
+        if current_step > 0 and (current_step % restart_interval) == 0:
+            xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
+            _save_restart(xv_cpu, time, current_step, output_path, snapshot_counter)
+    # =============================================================================
+    # End of integration loop
+    # =============================================================================
+
+    # === Final snapshot ===
+    if snapshot_counter < len(snapshot_steps) and snapshot_steps[-1] == total_steps:
+        snap_id = snapshot_counter
+        if verbose:
+            print(f"→ Saving final snap.{snap_id:03d} at step {total_steps}, time {time:.6e}")
+        save_snapshot_helper(snap_id, pos_gpu, vel_gpu, time)
+        snapshot_counter += 1
+    
+    # === Wait for all snapshots to finish writing ===
+    if async_io:
+        if verbose:
+            remaining = snapshot_queue.qsize()
+            if remaining > 0:
+                print(f"\nWaiting for {remaining} snapshots to finish writing...")
+        
+        snapshot_queue.join()  # Block until all snapshots written
+        snapshot_queue.put(None)  # Stop writer thread
+        writer_thread.join(timeout=30)  # Wait max 30s for thread to finish
+        
+        if verbose:
+            print("✓ All snapshots written")
+    
+    # === Finalize snapshot.times file ===
+    if verbose:
+        print("Finalizing snapshot.times...")
+    _finalize_snapshot_times(output_path)
+    
+    # Final restart
+    _save_restart(
+        np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)]),
+        time, total_steps, output_path, snapshot_counter
+    )
+
+    if verbose:
+        t_end = pytime.perf_counter()
+        total_time = t_end - t_start
+        avg_step_time = total_time / remaining_steps if remaining_steps > 0 else 0
+        
+        print("\n" + "="*80)
+        print("Integration Complete")
+        print("="*80)
+        print(f"Final time: {time:.6e}")
+        print(f"Total wall time: {total_time:.2f} s")
+        print(f"Steps per second: {remaining_steps / total_time:.1f}")
+        print(f"Average step time: {avg_step_time*1000:.1f} ms")
+        print(f"Snapshots saved: {snapshot_counter}")
+        print("="*80)
+    
+    # Return final state
+    xv_final = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
+    return xv_final
+
+def run_nbody_gpu_legacy(
+    phase_space: np.ndarray,
+    masses: np.ndarray,
+    time_start: float,
+    time_end: float,
+    dt: float,
+    eps_softening: float | np.ndarray,
+    G: float = G_DEFAULT,
+    precision: Literal['float32', 'float64', 'float32_kahan'] = 'float32_kahan',
+    kernel: Literal['newtonian', 'plummer', 'dehnen_k1', 'dehnen_k2', 'spline'] = 'spline',
+    external_potential: 'agama.Potential | None' = None,
+    external_update_interval: int = 1,
+    output_dir: str = "./output",
+    snapshots: int = 10,
+    num_files_to_write: int = 1,
+    restart_interval: int = 1000,
+    continue_run: bool = False,
+    verbose: bool = True,
+) -> np.ndarray:
+    """
+    Run GPU-accelerated N-body simulation with leapfrog (KDK) integration.
+    
+    Uses CUDA for self-gravity computation and CuPy for integration on GPU.
+    Positions and velocities maintained in double precision (float64), while
+    force calculations use single precision (float32) for speed.
+
     Parameters
     ----------
     phase_space : np.ndarray, shape (N, 6)
@@ -441,13 +873,23 @@ def run_nbody_gpu(
     # Validate dependencies
     if not CUPY_AVAILABLE:
         raise ImportError("CuPy required for GPU integration. Install: pip install cupy-cuda13x")
-        
+    
+    if not GPU_FORCES_AVAILABLE:
+        raise ImportError("nbody_forces_gpu module required. Ensure it's in your path.")
+    
+    # precision mapping - default to float32 for GPU performance, but allow float64 for accuracy if needed
+    prec_key = precision.lower()
+    if prec_key not in _PRECISION_MAP:
+        raise ValueError(f"Precision must be one of {list(_PRECISION_MAP.keys())}")     
+    
+    dtype, dtype_np = _PRECISION_MAP[prec_key]
+
     # Validate inputs
-    phase_space = np.asarray(phase_space, dtype=np.float64)
+    phase_space = np.asarray(phase_space, dtype=dtype_np)
     if phase_space.ndim != 2 or phase_space.shape[1] != 6:
         raise ValueError(f"phase_space must be (N, 6), got {phase_space.shape}")
     
-    masses = np.asarray(masses, dtype=np.float32)
+    masses = np.asarray(masses, dtype=dtype_np)
     N = phase_space.shape[0]
     
     if masses.shape[0] != N:
@@ -472,7 +914,6 @@ def run_nbody_gpu(
                 print(f"✓ Resuming from step {start_step}, time {time:.6e}")
     else:
         xv = phase_space.copy()  # Ensure we have a local copy to modify
-    
     
     # Compute steps reliably (use round to avoid off-by-one)
     total_steps = int(round((time_end - time_start) / dt))
@@ -508,18 +949,21 @@ def run_nbody_gpu(
     # Transfer to GPU
     if verbose:
         print("\nTransferring data to GPU...")
-        
-    pos_gpu = cp.asarray(xv[:, :3], dtype=cp.float64)
-    vel_gpu = cp.asarray(xv[:, 3:6], dtype=cp.float64)
-    mass_gpu = cp.asarray(masses, dtype=cp.float64) # float32 is enough. 
-    dt_gpu = cp.float64(dt)
+    
+    # transfer the arrays once. The GPU force kernel will read from these directly, and we will keep them on GPU for the entire integration.
+    pos_gpu = cp.asarray(xv[:, :3], dtype=dtype)
+    vel_gpu = cp.asarray(xv[:, 3:6], dtype=dtype)
+    mass_gpu = cp.asarray(masses, dtype=dtype) # float32 is enough. 
+    dt_gpu = cp.asarray(dt, dtype=dtype)
+    # Pre-create softening array for skip_validation path
+    h_gpu = cp.full(N, eps_softening, dtype=dtype)
     
     # Initial acceleration (with warmup)
     if verbose:
         print("Computing initial forces (compiling CUDA kernel)...")
     
     acc_gpu, cached_external_acc = _compute_accelerations_gpu(  
-        pos_gpu, mass_gpu, eps_softening, G, precision, kernel,
+        pos_gpu, mass_gpu, h_gpu, G, precision, kernel,
         external_potential, time, external_update_interval, start_step, None     
     )
     
@@ -533,7 +977,6 @@ def run_nbody_gpu(
         if verbose:
             print(f"writing snapshot snap: {snapshot_counter} at step {start_step}, time {time:.6e}...")
         _save_snapshot(xv_cpu, snapshot_counter, time, output_path,
-                       mass_dark=masses[0],  # dark mass in this code path
                        num_files_to_write=num_files_to_write,
                        total_expected_snapshots=snapshots)
         _update_snapshot_times(output_path, snapshot_counter, time)
@@ -559,7 +1002,7 @@ def run_nbody_gpu(
         
         # Compute new accelerations
         acc_gpu, cached_external_acc = _compute_accelerations_gpu(
-            pos_gpu, mass_gpu, eps_softening, G, precision, kernel,
+            pos_gpu, mass_gpu, h_gpu, dtype(G), precision, kernel,
             external_potential, time, external_update_interval,
             current_step, cached_external_acc
         )
@@ -573,7 +1016,6 @@ def run_nbody_gpu(
             xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
             _save_snapshot(xv_cpu, snapshot_counter, time, output_path,
                            num_files_to_write=num_files_to_write,
-                           mass_dark=masses[0],  # dark mass in this code path
                            total_expected_snapshots=snapshots)
             _update_snapshot_times(output_path, snapshot_counter, time)
             if verbose:
@@ -582,7 +1024,7 @@ def run_nbody_gpu(
             snapshot_counter += 1
 
         # Progress update
-        if verbose and step_i % max(1, remaining_steps // 20) == 0:
+        if verbose and step_i % max(1, remaining_steps // 50) == 0:
             elapsed = pytime.perf_counter() - t_start
             rate = step_i / elapsed if elapsed > 0 else 0
             eta = (remaining_steps - step_i) / rate if rate > 0 else 0
@@ -602,13 +1044,12 @@ def run_nbody_gpu(
     # End of integration loop
     # =============================================================================
 
-    # ensure final snapshot saved (if last snapshot maps to total_steps and wasn't saved)
+     # ensure final snapshot saved (if last snapshot maps to total_steps and wasn't saved)
     if snapshot_counter < len(snapshot_steps) and snapshot_steps[-1] == total_steps:
         xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
         if verbose:
             print(f"<=Saving final snapshot snap.{snapshot_counter:03d} at step {total_steps}, time {time:.6e}=>")
         _save_snapshot(xv_cpu, snapshot_counter, time, output_path,
-                       mass_dark=masses[0],  # dark mass in this code path
                        num_files_to_write=num_files_to_write,
                        total_expected_snapshots=snapshots)
         _update_snapshot_times(output_path, snapshot_counter, time)
@@ -1064,7 +1505,7 @@ def place_on_orbit(
 
 __all__ = [
     'run_nbody_gpu',
-    'run_nbody_cpu',
+    'run_nbody_cpu'
     'G_DEFAULT',
     'NBODY_UNITS',
 ]
@@ -1080,7 +1521,7 @@ if __name__ == "__main__":
     N = 10_000
     xv, masses = make_plummer_sphere(N, M_total=1e6, a=1.0)
     
-    final = run_nbody_gpu(
+    final = run_nbody_gpu_legacy(
         phase_space=xv,
         masses=masses,
         time_start=0.0,
@@ -1091,7 +1532,7 @@ if __name__ == "__main__":
         kernel='spline',
         snapshots=5,
         restart_interval=50,
-        output_dir="./test_plummer",
+        output_dir="./test_plummer_gpu",
         verbose=True,
     )
     
@@ -1101,45 +1542,45 @@ if __name__ == "__main__":
     print(f"  RMS position: {np.std(final[:, :3]):.3f}")
     print(f"  RMS velocity: {np.std(final[:, 3:6]):.3f}")
     
-    # Test 2: With external potential (if Agama available)
-    if AGAMA_AVAILABLE:
-        print("\n### Test 2: Plummer with external NFW (on orbit) ###\n")
+    # # Test 2: With external potential (if Agama available)
+    # if AGAMA_AVAILABLE:
+    #     print("\n### Test 2: Plummer with external NFW (on orbit) ###\n")
         
-        # External NFW potential
-        agama.setUnits(mass=1, length=1, velocity=1)
-        pot_nfw = agama.Potential(type='NFW', mass=1e12, scaleRadius=20.0) 
+    #     # External NFW potential
+    #     agama.setUnits(mass=1, length=1, velocity=1)
+    #     pot_nfw = agama.Potential(type='NFW', mass=1e12, scaleRadius=20.0) 
         
-        # Simple orbit: place cluster at (30, 0, 0) with tangential velocity
-        xv_orbit = xv.copy()
-        xv_orbit[:, 0] += 30.0  # Shift 30 kpc in x
-        xv_orbit[:, 4] += 150.0  # Add 150 km/s in y (tangential)
+    #     # Simple orbit: place cluster at (30, 0, 0) with tangential velocity
+    #     xv_orbit = xv.copy()
+    #     xv_orbit[:, 0] += 30.0  # Shift 30 kpc in x
+    #     xv_orbit[:, 4] += 150.0  # Add 150 km/s in y (tangential)
         
-        print(f"Initial orbit state:")
-        print(f"  COM position: {xv_orbit[:, :3].mean(axis=0)}")
-        print(f"  COM velocity: {xv_orbit[:, 3:6].mean(axis=0)}")
+    #     print(f"Initial orbit state:")
+    #     print(f"  COM position: {xv_orbit[:, :3].mean(axis=0)}")
+    #     print(f"  COM velocity: {xv_orbit[:, 3:6].mean(axis=0)}")
         
-        final_orbit = run_nbody_gpu(    
-            phase_space=xv_orbit,
-            masses=masses,
-            time_start=0.0,
-            time_end=0.01,
-            dt=1e-4,
-            eps_softening=0.01,
-            G=1.0,
-            kernel='spline',
-            external_potential=pot_nfw,
-            external_update_interval=1,  # Update external forces every 5 steps
-            snapshots=5,
-            restart_interval=50,
-            output_dir="./test_orbit",
-            verbose=True,
-        )
+    #     final_orbit = run_nbody_gpu(    
+    #         phase_space=xv_orbit,
+    #         masses=masses,
+    #         time_start=0.0,
+    #         time_end=0.01,
+    #         dt=1e-4,
+    #         eps_softening=0.01,
+    #         G=1.0,
+    #         kernel='spline',
+    #         external_potential=pot_nfw,
+    #         external_update_interval=1,  # Update external forces every 5 steps
+    #         snapshots=5,
+    #         restart_interval=50,
+    #         output_dir="./tests_nbody/test_orbit_gpu",
+    #         verbose=True,
+    #     )
         
-        print(f"\nFinal orbit state:")
-        print(f"  COM position: {final_orbit[:, :3].mean(axis=0)}")
-        print(f"  COM velocity: {final_orbit[:, 3:6].mean(axis=0)}")
-        print(f"  COM displacement: {np.linalg.norm(final_orbit[:, :3].mean(axis=0) - xv_orbit[:, :3].mean(axis=0)):.3f} kpc")
-
+    #     print(f"\nFinal orbit state:")
+    #     print(f"  COM position: {final_orbit[:, :3].mean(axis=0)}")
+    #     print(f"  COM velocity: {final_orbit[:, 3:6].mean(axis=0)}")
+    #     print(f"  COM displacement: {np.linalg.norm(final_orbit[:, :3].mean(axis=0) - xv_orbit[:, :3].mean(axis=0)):.3f} kpc")
+    
     print("="*80)
     print("CPU N-body Integration - Direct Run")
     print("="*80)
@@ -1168,7 +1609,37 @@ if __name__ == "__main__":
     print(f"  COM velocity: {final[:, 3:6].mean(axis=0)}")
     print(f"  RMS position: {np.std(final[:, :3]):.3f}")
     print(f"  RMS velocity: {np.std(final[:, 3:6]):.3f}")
+
+
     
-    print("\n" + "="*80)
-    print("Tests complete! ✓")
-    print("="*80)
+    # print("\n" + "="*80)
+    # print("Tests complete! ✓")
+    # print("="*80)
+    # print("CPU N-body Integration - Tree Run")
+    # print("="*80)
+    
+    # N = 10_000
+    # xv, masses = make_plummer_sphere(N, M_total=1e6, a=1.0)
+    
+    # final = run_nbody_cpu(
+    #     phase_space=xv,
+    #     masses=masses,
+    #     time_start=0.0,
+    #     time_end=0.01,
+    #     dt=1e-4,
+    #     eps_softening=0.01,
+    #     G=1.0,
+    #     kernel=1,
+    #     snapshots=5,
+    #     method='tree',
+    #     restart_interval=50,
+    #     num_files_to_write=2,  # Test multi-file snapshot writing
+    #     output_dir="./tests_nbody/test_plummer_tree",
+    #     verbose=True,
+    # )
+
+    # print(f"\nFinal state check:")
+    # print(f"  COM position: {final[:, :3].mean(axis=0)}")
+    # print(f"  COM velocity: {final[:, 3:6].mean(axis=0)}")
+    # print(f"  RMS position: {np.std(final[:, :3]):.3f}")
+    # print(f"  RMS velocity: {np.std(final[:, 3:6]):.3f}")
