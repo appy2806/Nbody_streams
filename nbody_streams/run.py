@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """
+nbody_streams.run
+
 GPU-accelerated N-body simulation with leapfrog (KDK) integration.
 
 Provides high-performance N-body integration using CUDA-accelerated direct summation
@@ -26,6 +28,9 @@ import warnings
 import time as pytime
 import h5py # For HDF5 snapshot output (if needed)
 
+from .fields import compute_nbody_forces_gpu, compute_nbody_forces_cpu 
+from .io import _save_snapshot, _save_restart, _load_restart, _update_snapshot_times
+
 try:
     import cupy as cp
     CUPY_AVAILABLE = True
@@ -38,14 +43,6 @@ try:
     AGAMA_AVAILABLE = True
 except ImportError:
     AGAMA_AVAILABLE = False
-
-from nbody_fields import compute_nbody_forces_gpu, compute_nbody_forces_cpu 
-
-try:
-    from nbody_io import _save_snapshot, _save_restart, _load_restart, _update_snapshot_times
-except ImportError:
-    warnings.warn("nbody_io module not found. Using simplistic snapshot saver.", ImportWarning)
-    _save_snapshot = _save_snapshot_simplistic
 
 try:
     import pyfalcon
@@ -114,7 +111,7 @@ def _save_snapshot_simplistic(
 def _compute_accelerations_gpu(
     pos_gpu: cp.ndarray,
     mass: np.ndarray,
-    eps_softening: float | np.ndarray,
+    softening: float | np.ndarray,
     G: float,
     precision: Literal['float32', 'float64', 'float32_kahan'],
     kernel_type: str,
@@ -136,7 +133,7 @@ def _compute_accelerations_gpu(
         Positions on GPU (float64).
     mass : np.ndarray, shape (N,)
         Particle masses (float32).
-    eps_softening : float | np.ndarray
+    softening : float | np.ndarray
         Softening length(s).
     G : float
         Gravitational constant.
@@ -176,7 +173,7 @@ def _compute_accelerations_gpu(
     acc_self_gpu = compute_nbody_forces_gpu(
         pos_gpu.astype(dtype),  # Convert on GPU
         mass_gpu,
-        eps_softening,
+        softening,
         G,
         precision,
         kernel_type,
@@ -201,7 +198,7 @@ def _compute_accelerations_gpu(
 def _compute_accelerations_tree(
     pos_cpu: np.ndarray,
     mass: np.ndarray,
-    eps_softening: float | np.ndarray,
+    softening: float | np.ndarray,
     theta: float,
     kernel: int,
     G: float,
@@ -217,7 +214,7 @@ def _compute_accelerations_tree(
         Particle positions, shape (N, 3).
     mass : np.ndarray
         Particle masses, shape (N,).
-    eps_softening : float | np.ndarray
+    softening : float | np.ndarray
         Softening length(s).
     theta : float
         Opening angle for tree algorithm.
@@ -239,7 +236,7 @@ def _compute_accelerations_tree(
     acc, _ = pyfalcon.gravity(
         pos_cpu, 
         G * mass, 
-        eps=eps_softening, 
+        eps=softening, 
         theta=theta,
         kernel=kernel
     )
@@ -253,7 +250,7 @@ def _compute_accelerations_tree(
 def _compute_accelerations_cpu(
     pos_cpu: np.ndarray,
     mass: np.ndarray,
-    eps_softening: float | np.ndarray,
+    softening: float | np.ndarray,
     G: float,
     kernel_type: str,
     nthreads: int | None,
@@ -269,7 +266,7 @@ def _compute_accelerations_cpu(
         Particle positions, shape (N, 3).
     masses : np.ndarray
         Particle masses, shape (N,).
-    eps_softening : float | np.ndarray
+    softening : float | np.ndarray
         Softening length(s).
     G : float
         Gravitational constant.
@@ -291,7 +288,7 @@ def _compute_accelerations_cpu(
     acc = compute_nbody_forces_cpu(
         pos=pos_cpu,
         mass=mass,
-        softening=eps_softening,
+        softening=softening,
         G=G,
         kernel=kernel_type,
         nthreads=nthreads,
@@ -312,7 +309,7 @@ def run_nbody_gpu(
     time_start: float,
     time_end: float,
     dt: float,
-    eps_softening: float | np.ndarray,
+    softening: float | np.ndarray,
     G: float = G_DEFAULT,
     precision: Literal['float32', 'float64', 'float32_kahan'] = 'float32_kahan',
     kernel: Literal['newtonian', 'plummer', 'dehnen_k1', 'dehnen_k2', 'spline'] = 'spline',
@@ -344,7 +341,7 @@ def run_nbody_gpu(
         End time.
     dt : float
         Timestep.
-    eps_softening : float | np.ndarray
+    softening : float | np.ndarray
         Gravitational softening length. Scalar or per-particle array.
     G : float, optional
         Gravitational constant. Default: 4.30092e-6 (kpc, km/s, Msun units).
@@ -418,7 +415,7 @@ def run_nbody_gpu(
     >>> phase_space = np.random.randn(N, 6)
     >>> masses = np.ones(N)
     >>> final = run_nbody_gpu(phase_space, masses, 0.0, 0.1, 1e-4, 
-    ...                       eps_softening=0.01, snapshots=10)
+    ...                       softening=0.01, snapshots=10)
     
     With external potential (Agama):
     
@@ -426,13 +423,13 @@ def run_nbody_gpu(
     >>> agama.setUnits(mass=1, length=1, velocity=1)
     >>> pot = agama.Potential(type='NFW', mass=1e12, scaleRadius=20.0)
     >>> final = run_nbody_gpu(phase_space, masses, 0.0, 0.1, 1e-4,
-    ...                       eps_softening=0.01, external_potential=pot,
+    ...                       softening=0.01, external_potential=pot,
     ...                       external_update_interval=5)
     
     Resume from crash:
     
     >>> final = run_nbody_gpu(phase_space, masses, 0.0, 0.1, 1e-4,
-    ...                       eps_softening=0.01, continue_run=True)
+    ...                       softening=0.01, continue_run=True)
     
     See Also
     --------
@@ -497,7 +494,7 @@ def run_nbody_gpu(
         print(f"Particles: {N:,}")
         print(f"Time: {time_start:.3e} → {time_end:.3e} (dt={dt:.3e})")
         print(f"Steps: {total_steps:,} ({remaining_steps:,} remaining)")
-        print(f"Kernel: {kernel}, Softening: {eps_softening if np.isscalar(eps_softening) else 'variable'}")
+        print(f"Kernel: {kernel}, Softening: {softening if np.isscalar(softening) else 'variable'}")
         print(f"External potential: {'Yes' if external_potential is not None else 'No'}")
         if external_potential is not None:
             print(f"  Update interval: every {external_update_interval} steps")
@@ -519,7 +516,7 @@ def run_nbody_gpu(
         print("Computing initial forces (compiling CUDA kernel)...")
     
     acc_gpu, cached_external_acc = _compute_accelerations_gpu(  
-        pos_gpu, mass_gpu, eps_softening, G, precision, kernel,
+        pos_gpu, mass_gpu, softening, G, precision, kernel,
         external_potential, time, external_update_interval, start_step, None     
     )
     
@@ -559,7 +556,7 @@ def run_nbody_gpu(
         
         # Compute new accelerations
         acc_gpu, cached_external_acc = _compute_accelerations_gpu(
-            pos_gpu, mass_gpu, eps_softening, G, precision, kernel,
+            pos_gpu, mass_gpu, softening, G, precision, kernel,
             external_potential, time, external_update_interval,
             current_step, cached_external_acc
         )
@@ -642,7 +639,7 @@ def run_nbody_cpu(
     time_start: float,
     time_end: float,
     dt: float,
-    eps_softening: float | np.ndarray,
+    softening: float | np.ndarray,
     G: float = 4.302e-6,
     method: str = "direct",
     theta: float = 0.6,
@@ -671,7 +668,7 @@ def run_nbody_cpu(
         End time in Gyr | kpc/(km/s).
     dt : float
         Time step in Gyr | kpc/(km/s).
-    eps_softening : float | np.ndarray
+    softening : float | np.ndarray
         Gravitational softening length. Can be a single value or array of shape (N,).
     G : float, optional
         Gravitational constant (default: 4.302e-6 kpc^3 / (Msun Gyr^2)).
@@ -742,22 +739,22 @@ def run_nbody_cpu(
     >>> # Simple self-gravity simulation with tree method (default)
     >>> phase_space = np.random.randn(1000, 6)
     >>> masses = np.ones(1000) * 1e5
-    >>> final_state = run_nbody(phase_space, masses, 0.0, 0.1, 1e-4, eps_softening=0.01)
+    >>> final_state = run_nbody(phase_space, masses, 0.0, 0.1, 1e-4, softening=0.01)
     
     >>> # Small system with direct method for better accuracy
     >>> final_state = run_nbody(phase_space, masses, 0.0, 0.1, 1e-4, 
-    ...                          eps_softening=0.01, method='direct', 
+    ...                          softening=0.01, method='direct', 
     ...                          kernel='spline', nthreads=48)
     
     >>> # With external time-evolving potential (matching agama's G)
     >>> pot = agama.Potential(type='Dehnen', mass=1e12, scaleRadius=10.0)
     >>> final_state = run_nbody(phase_space, masses, 0.0, 0.1, 1e-4, 
-    ...                          eps_softening=0.01, G=agama.G, 
+    ...                          softening=0.01, G=agama.G, 
     ...                          external_potential=pot)
     
     >>> # Different unit system (kpc, Msun, Myr)
     >>> final_state = run_nbody(phase_space, masses, 0.0, 100.0, 0.1, 
-    ...                          eps_softening=0.01, G=4.302)
+    ...                          softening=0.01, G=4.302)
     """
     # Validate method
     if method not in ['tree', 'direct']:
@@ -814,7 +811,7 @@ def run_nbody_cpu(
         print(f"Particles: {N:,}")
         print(f"Time: {time_start:.3e} → {time_end:.3e} (dt={dt:.3e})")
         print(f"Steps: {total_steps:,} ({remaining_steps:,} remaining)")
-        print(f"Kernel: {kernel}, Softening: {eps_softening if np.isscalar(eps_softening) else 'variable'}")
+        print(f"Kernel: {kernel}, Softening: {softening if np.isscalar(softening) else 'variable'}")
         print(f"External potential: {'Yes' if external_potential is not None else 'No'}")
         if external_potential is not None:
             print(f"  Update interval: every {external_update_interval} steps")
@@ -830,12 +827,12 @@ def run_nbody_cpu(
     if method == 'tree':
         if verbose: print(f"Using tree method (theta={theta}, kernel={kernel})")
         compute_acc = lambda pos, t: _compute_accelerations_tree(
-            pos, masses, eps_softening, theta, kernel, G, external_potential, t
+            pos, masses, softening, theta, kernel, G, external_potential, t
         )
     else:  # method == 'direct'
         if verbose: print(f"Using direct method (kernel={kernel}, nthreads={nthreads})")
         compute_acc = lambda pos, t: _compute_accelerations_cpu(
-            pos, masses, eps_softening, G, kernel, nthreads, external_potential, t
+            pos, masses, softening, G, kernel, nthreads, external_potential, t
         )
     
     # Initial acceleration
@@ -1086,7 +1083,7 @@ if __name__ == "__main__":
         time_start=0.0,
         time_end=0.01,
         dt=1e-4,
-        eps_softening=0.01,
+        softening=0.01,
         G=1.0,
         kernel='spline',
         snapshots=5,
@@ -1124,7 +1121,7 @@ if __name__ == "__main__":
             time_start=0.0,
             time_end=0.01,
             dt=1e-4,
-            eps_softening=0.01,
+            softening=0.01,
             G=1.0,
             kernel='spline',
             external_potential=pot_nfw,
@@ -1153,7 +1150,7 @@ if __name__ == "__main__":
         time_start=0.0,
         time_end=0.01,
         dt=1e-4,
-        eps_softening=0.01,
+        softening=0.01,
         G=1.0,
         kernel='spline',
         method='direct',

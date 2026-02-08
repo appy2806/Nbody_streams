@@ -1,5 +1,14 @@
-# == N-body snapshot I/O utilities ==   
+"""
+nbody_streams.io
 
+I/O utilities for N-body snapshots and restart data.
+
+Primary API:
+- class ParticleReader: read HDF5-based snapshot sets
+- _save_snapshot(path, snapshot_dict): hidden helper to write snapshots
+- _load_restart(path): hidden helper to read simple npz restarts
+"""
+from __future__ import annotations
 import os, h5py, glob, math
 from pathlib import Path
 from types import SimpleNamespace

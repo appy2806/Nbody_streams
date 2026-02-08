@@ -6,8 +6,15 @@ legacy/__pycache__/
 legacy/nbody_forces_gpu_old.py
 legacy/nbody_forces_gpu_stripped.py
 .vscode/
-test_orbit/
-test_plummer/
+*.pyc
+.env
+venv/
+.vscode/
 *.npz
 *.h5
 *.times
+test_orbit/
+test_plummer/
+dist/
+build/
+*.egg-info/

@@ -1,4 +1,5 @@
 """
+nbody_streams.cuda_kernels
 CUDA kernels for N-body force and potential computation.
 All kernels properly handle partial tiles for momentum/energy conservation.
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """
+nbody_streams.fields
 GPU-accelerated N-body gravitational fields computation using CuPy.
 
 This module provides high-performance direct N-body calculation on NVIDIA GPUs
@@ -11,6 +12,9 @@ Requirements
 - NVIDIA GPU with CUDA support (compute capability >= 6.0)
 - CuPy: https://cupy.dev/
 - NumPy
+
+Author: Arpit Arora
+Date: Sept 2025
 
 Examples
 --------
@@ -47,9 +51,6 @@ Notes
 - Input arrays are automatically converted to float32 if needed
 - The function handles memory transfers to/from GPU internally
 - For repeated calls, consider keeping data on GPU (see advanced usage)
-
-Author: Arpit Arora
-Date: Sept 2025
 """
 from __future__ import annotations
 
@@ -57,7 +58,7 @@ import numpy as np
 from numpy.typing import NDArray, ArrayLike
 from typing import Literal, Union
 import warnings
-from nbody_cuda_kernels import *  # Import kernel templates
+from .cuda_kernels import *  # Import kernel templates
 
 try:
     import cupy as cp
