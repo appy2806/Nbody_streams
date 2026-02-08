@@ -1,5 +1,5 @@
 """
-nbody_streams.io
+nbody_streams.nbody_io
 
 I/O utilities for N-body snapshots and restart data.
 

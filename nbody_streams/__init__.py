@@ -16,7 +16,7 @@ except PackageNotFoundError:
 # --- Public API ---
 
 # From .io
-from .io import ParticleReader
+from .nbody_io import ParticleReader
 
 # From .run
 from .run import (

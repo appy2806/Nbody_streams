@@ -28,8 +28,13 @@ import warnings
 import time as pytime
 import h5py # For HDF5 snapshot output (if needed)
 
-from .fields import compute_nbody_forces_gpu, compute_nbody_forces_cpu 
-from .io import _save_snapshot, _save_restart, _load_restart, _update_snapshot_times
+try:
+    from .fields import compute_nbody_forces_gpu, compute_nbody_forces_cpu 
+    from .nbody_io import _save_snapshot, _save_restart, _load_restart, _update_snapshot_times
+except ImportError as e:
+    print(e)
+    from fields import compute_nbody_forces_gpu, compute_nbody_forces_cpu
+    from nbody_io import _save_snapshot, _save_restart, _load_restart, _update_snapshot_times
 
 try:
     import cupy as cp

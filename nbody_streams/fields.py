@@ -58,7 +58,11 @@ import numpy as np
 from numpy.typing import NDArray, ArrayLike
 from typing import Literal, Union
 import warnings
-from .cuda_kernels import *  # Import kernel templates
+
+try :
+    from .cuda_kernels import *  # Import kernel templates
+except ImportError:
+    from cuda_kernels import *  # Fallback for direct script execution
 
 try:
     import cupy as cp
@@ -368,14 +372,16 @@ _TYPE_SPECS = {
         'RSQRT': 'rsqrtf', 
         'SQRT': 'sqrtf', 
         'FMA': 'fmaf', 
-        'FMAX': 'fmaxf'
+        'FMAX': 'fmaxf',
+        'USE_FLOAT4': True,  # >>>>>>> NEW: Flag for future float4 optimization
     },
     'float64': {
         'T': 'double', 
         'RSQRT': 'rsqrt', 
         'SQRT': 'sqrt', 
         'FMA': 'fma', 
-        'FMAX': 'fmax'
+        'FMAX': 'fmax',
+        'USE_FLOAT4': False,  # >>>>>>> NEW: No float4 optimization for double precision
     },
 }
 
@@ -385,15 +391,15 @@ _NBODY_KERNEL_CACHE = {}
 # Template and kernel name mapping
 _NBODY_KERNEL_CONFIG = {
     # Forces kernels
-    ('force', 'float32', False): (_NBODY_KERNEL_TEMPLATE, 'nbody_forces_kernel'),
+    ('force', 'float32', False): (_NBODY_KERNEL_TEMPLATE_FLOAT4, 'nbody_forces_kernel_float4'),
     ('force', 'float64', False): (_NBODY_KERNEL_TEMPLATE, 'nbody_forces_kernel'),
-    ('force', 'float32', True):  (_KAHAN_KERNEL_TEMPLATE, 'nbody_forces_kahan_kernel'),
+    ('force', 'float32', True):  (_KAHAN_KERNEL_TEMPLATE_FLOAT4, 'nbody_forces_kahan_kernel_float4'),
     ('force', 'float64', True):  (_KAHAN_KERNEL_TEMPLATE, 'nbody_forces_kahan_kernel'),
     
     # Potential kernels
-    ('potential', 'float32', False): (_POTENTIAL_KERNEL_TEMPLATE, 'nbody_potential_kernel'),
+    ('potential', 'float32', False): (_POTENTIAL_KERNEL_TEMPLATE_FLOAT4, 'nbody_potential_kernel_float4'),
     ('potential', 'float64', False): (_POTENTIAL_KERNEL_TEMPLATE, 'nbody_potential_kernel'),
-    ('potential', 'float32', True):  (_POTENTIAL_KAHAN_KERNEL_TEMPLATE, 'nbody_potential_kahan_kernel'),
+    ('potential', 'float32', True):  (_POTENTIAL_KAHAN_KERNEL_TEMPLATE_FLOAT4, 'nbody_potential_kahan_kernel_float4'),
     ('potential', 'float64', True):  (_POTENTIAL_KAHAN_KERNEL_TEMPLATE, 'nbody_potential_kahan_kernel'),
 }
 
@@ -554,9 +560,10 @@ def _prepare_gpu_arrays(validated, precision, skip_validation=False):
         # Fast path - assume everything is already GPU arrays of correct type
         pos = validated  # Just the pos array in this case
         N = pos.shape[0]
-        x_gpu = pos[:, 0]
-        y_gpu = pos[:, 1]
-        z_gpu = pos[:, 2]
+        # FIX: Make contiguous arrays instead of strided views
+        x_gpu = cp.ascontiguousarray(pos[:, 0])
+        y_gpu = cp.ascontiguousarray(pos[:, 1])
+        z_gpu = cp.ascontiguousarray(pos[:, 2])
         return x_gpu, y_gpu, z_gpu, None, None, N
     
     N = validated['N']
@@ -645,7 +652,7 @@ def compute_nbody_forces_gpu(
     kernel: KERNEL_TYPES = 'spline',
     return_cupy: bool = False,
     skip_validation: bool = False,
-) -> NDArray:
+) -> NDArray:   
     """
     Compute direct N-body gravitational forces using GPU acceleration.
     
@@ -778,7 +785,14 @@ def compute_nbody_forces_gpu(
         dtype = validated['dtype']
         dtype_np = validated['dtype_np']   
         x_gpu, y_gpu, z_gpu, mass_gpu, h_gpu, N = _prepare_gpu_arrays(validated, precision)
-       
+
+    # >>>>>>> NEW: Detect if we should use float4
+    # Update the use_float4 check:
+    use_float4 = (precision in ['float32', 'float32_kahan'])  # ← Include Kahan now!
+
+    # use_float4 = (precision in ['float32', 'float32_kahan'] and 
+    #               precision != 'float32_kahan')  # Keep Kahan separate for now
+
     # Allocate output arrays on GPU
     ax_gpu = cp.empty(N, dtype=dtype)
     ay_gpu = cp.empty(N, dtype=dtype)
@@ -788,21 +802,43 @@ def compute_nbody_forces_gpu(
     _nbody_force_kernel = _get_kernel('force', precision, use_kahan=(precision=='float32_kahan'))
 
     # Launch kernel
-    threads_per_block = 256
+    threads_per_block = 128  # Use the TILE_SIZE defined in cuda_kernels.py
     blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
+    eps2 = dtype(1e-15)  # Regularization parameter
     
-    eps2 = 1e-15  # Regularization parameter
+    # >>>>>>> NEW: Different launch for float4 vs regular
+    if use_float4:
+        # For float4 optimization, we would need to prepare data differently and call a different kernel.
+        # Interleave x,y,z,mass into float4 structure
+        # Create float4 array - CuPy needs view casting, not structured dtype
+        pos_mass_gpu = cp.empty((N, 4), dtype=cp.float32)
+        pos_mass_gpu[:, 0] = x_gpu
+        pos_mass_gpu[:, 1] = y_gpu
+        pos_mass_gpu[:, 2] = z_gpu
+        pos_mass_gpu[:, 3] = mass_gpu
+        
+        # Reinterpret as float4* for kernel (view as contiguous memory)
+        pos_mass_gpu = pos_mass_gpu.ravel()
+        
+        _nbody_force_kernel(
+            (blocks_per_grid,), (threads_per_block,),
+            (pos_mass_gpu, h_gpu, ax_gpu, ay_gpu, az_gpu,
+            dtype(G), eps2, cp.int32(kernel_id), cp.int32(N))
+        )
+
+    else:
+        _nbody_force_kernel(
+            (blocks_per_grid,), (threads_per_block,),
+            (x_gpu, y_gpu, z_gpu, mass_gpu, h_gpu, ax_gpu, ay_gpu, az_gpu,
+            dtype(G), eps2, cp.int32(kernel_id), cp.int32(N))
+        )
     
-    _nbody_force_kernel(
-        (blocks_per_grid,), (threads_per_block,),
-        (x_gpu, y_gpu, z_gpu, mass_gpu, h_gpu, ax_gpu, ay_gpu, az_gpu,
-         dtype(G), dtype(eps2), cp.int32(kernel_id), cp.int32(N))
-    )
-    
+    # Assemble result into (N, 3) array
     acc_gpu = cp.empty((N, 3), dtype=dtype)
     acc_gpu[:, 0] = ax_gpu
     acc_gpu[:, 1] = ay_gpu
     acc_gpu[:, 2] = az_gpu
+
     # Convert back to Array of Structures layout
     if return_cupy:    
         return acc_gpu
@@ -914,25 +950,50 @@ def compute_nbody_potential_gpu(
         dtype = validated['dtype']
         dtype_np = validated['dtype_np']   
         x_gpu, y_gpu, z_gpu, mass_gpu, h_gpu, N = _prepare_gpu_arrays(validated, precision)
-   
+
+    # >>>>>>> NEW: Detect if we should use float4
+    # Update the use_float4 check:
+    use_float4 = (precision in ['float32', 'float32_kahan'])  # ← Include Kahan now!
+
     # Allocate output arrays on GPU
     pot_gpu = cp.empty(N, dtype=dtype)
     
     # Launch kernel
-    threads_per_block = 256
+    threads_per_block = 128
     blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
     
-    eps2 = 1e-15  # No regularization for potential (i.e., no softening)
+    eps2 = dtype(1e-15)  # No regularization for potential (i.e., no softening)
 
      # 2. Get the right kernel (it compiles only once per precision type)
     _nbody_potential_kernel = _get_kernel('potential', precision, use_kahan=(precision=='float32_kahan'))
-   
-    _nbody_potential_kernel(
-        (blocks_per_grid,), (threads_per_block,),
-        (x_gpu, y_gpu, z_gpu, mass_gpu, h_gpu, pot_gpu,
-         dtype(G), dtype(eps2), cp.int32(kernel_id), cp.int32(N))
-    )
-    
+
+    # >>>>>>> NEW: Different launch for float4 vs regular
+    if use_float4:
+        # For float4 optimization, we would need to prepare data differently and call a different kernel.
+        # Interleave x,y,z,mass into float4 structure
+        # Create float4 array - CuPy needs view casting, not structured dtype
+        pos_mass_gpu = cp.empty((N, 4), dtype=cp.float32)
+        pos_mass_gpu[:, 0] = x_gpu
+        pos_mass_gpu[:, 1] = y_gpu
+        pos_mass_gpu[:, 2] = z_gpu
+        pos_mass_gpu[:, 3] = mass_gpu
+        
+        # Reinterpret as float4* for kernel (view as contiguous memory)
+        pos_mass_gpu = pos_mass_gpu.ravel()
+        
+        _nbody_potential_kernel(
+            (blocks_per_grid,), (threads_per_block,),
+            (pos_mass_gpu, h_gpu, pot_gpu,
+            dtype(G), eps2, cp.int32(kernel_id), cp.int32(N))
+        )
+
+    else:
+        _nbody_potential_kernel(
+            (blocks_per_grid,), (threads_per_block,),
+            (x_gpu, y_gpu, z_gpu, mass_gpu, h_gpu, pot_gpu,
+            dtype(G), eps2, cp.int32(kernel_id), cp.int32(N))
+        )
+
     if return_cupy:
         return pot_gpu.astype(dtype)  # Ensure correct dtype on GPU
     else:
@@ -1201,7 +1262,7 @@ if __name__ == "__main__":
         else:
             pos_gpu = cp.asarray(pos_f32)
             mass_gpu = cp.asarray(mass_f32)
-        
+
         # Pre-create softening array for skip_validation path
         h_gpu = cp.full(N, 0.01, dtype=dtype)
         
@@ -1397,7 +1458,7 @@ if __name__ == "__main__":
         print(f"\n{'-'*80}")
         print("CPU Force Computation")
         print(f"{'-'*80}")
-        
+
         # Warmup
         for _ in range(n_warmup):
             _ = compute_nbody_forces_cpu(
@@ -1563,7 +1624,7 @@ if __name__ == "__main__":
                 acc_cpu_compare = acc_cpu
             else:
                 acc_cpu_compare = acc_cpu.astype(np.float32)
-            
+                        
             diff = np.abs(acc_cpu_compare - acc_gpu)
             rel_err = diff / np.maximum(np.abs(acc_cpu_compare), 1e-30)
             
