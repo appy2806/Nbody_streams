@@ -78,8 +78,8 @@ Relative drift: ΔE/E₀ = 1.0 × 10⁻⁵  (0.001%)
 | Method | Force Accuracy | Energy Conservation | Speed |
 |--------|---------------|---------------------|-------|
 | **Direct N² (float32)** | ~1% asymmetry | **< 0.001% drift** | 2.3 ms/step |
-| Tree (float32, θ=0.5) | 1-5% force errors | ~0.01-0.1% drift | 0.5 ms/step |
-| Tree (float64, θ=0.5) | 1-5% force errors | ~0.001% drift | 5 ms/step |
+| Tree (float32, θ=0.5) | 1-5% force errors | ~0.01-0.1% drift | 5 ms/step |
+| Tree (float64, θ=0.5) | 1-5% force errors | ~0.001% drift | 10 ms/step |
 
 **Key Insight:** Direct N-body with "slightly asymmetric" float32 forces gives **better energy conservation** than tree methods at the same precision, because tree approximation errors are **systematic** (monopole bias), while float32 rounding errors are **random** and cancel statistically.
 
@@ -189,8 +189,8 @@ acc_scaled = nbody.compute_nbody_forces_gpu(
 )
 
 # Convert back to physical units
-# Force scales as 1/r², so acceleration scales as 1/scale
-acc_physical = acc_scaled / scale
+# Force scales as 1/r², so acceleration scales as 1/scale**2
+acc_physical = acc_scaled / (scale**2)
 
 # Integration stays in float64 for energy conservation
 vel_f64 += acc_physical.astype(np.float64) * dt
