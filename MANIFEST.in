@@ -1,0 +1,4 @@
+# include README and package data recursively
+include README.md
+recursive-include nbody_streams/data *
+
