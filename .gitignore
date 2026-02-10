@@ -1,6 +1,17 @@
 # Ignore local / legacy files
 collisionless_Nbody.py
+# Python cache
 __pycache__/
+*.py[cod]
+*.pyo
+
+# Jupyter
+.ipy_checkpoints/
+**/.ipy_checkpoints/
+
+# Misc caches
+.cache/
+
 tests_nbody/
 legacy/__pycache__/
 legacy/nbody_forces_gpu_old.py
