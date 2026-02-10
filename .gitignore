@@ -8,6 +8,8 @@ __pycache__/
 # Jupyter
 .ipy_checkpoints/
 **/.ipy_checkpoints/
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
 
 # Misc caches
 .cache/
