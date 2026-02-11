@@ -321,6 +321,7 @@ def run_nbody_gpu(
     external_potential: 'agama.Potential | None' = None,
     external_update_interval: int = 1,
     output_dir: str = "./output",
+    save_snapshots: bool = True,  # <--- NEW PARAMETER
     snapshots: int = 10,
     num_files_to_write: int = 1,
     restart_interval: int = 1000,
@@ -363,6 +364,12 @@ def run_nbody_gpu(
         Default: 1 (update every step). Try 5-10 for slowly-varying potentials.
     output_dir : str, optional
         Output directory. Default: './output'.
+    save_snapshots : bool, optional
+            If True, saves the phase space (positions and velocities) to disk 
+            at intervals defined by the `snapshots` parameter. 
+            If False, snapshot I/O is skipped to improve performance, but 
+            the final state is still returned and restart files are still 
+            generated. Default is True.
     snapshots : int, optional
         Number of snapshots to save (evenly spaced). Default: 10.
     num_files_to_write : int, optional
@@ -531,14 +538,18 @@ def run_nbody_gpu(
     
     # Save initial snapshot if requested (global index at snapshot_steps[snapshot_counter] == start_step)
     if snapshot_counter < len(snapshot_steps) and snapshot_steps[snapshot_counter] == start_step:
-        xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
-        if verbose:
-            print(f"writing snapshot snap: {snapshot_counter} at step {start_step}, time {time:.6e}...")
-        _save_snapshot(xv_cpu, snapshot_counter, time, output_path,
-                       mass_dark=masses[0],  # dark mass in this code path
-                       num_files_to_write=num_files_to_write,
-                       total_expected_snapshots=snapshots)
-        _update_snapshot_times(output_path, snapshot_counter, time)
+        # --- NEW IF CONDITION ---
+        if save_snapshots:  # Check if snapshot saving is enabled
+            xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
+            _save_snapshot(xv_cpu, snapshot_counter, time, output_path,
+                        mass_dark=masses[0],  # dark mass in this code path
+                        num_files_to_write=num_files_to_write,
+                        total_expected_snapshots=snapshots)
+            if verbose:
+                print(f"Saved snapshot snap: {snapshot_counter:03d} at step {start_step}, time {time:.6e}...")
+            _update_snapshot_times(output_path, snapshot_counter, time)
+        # --- END NEW IF CONDITION ---
+        # ALWAYS increment counter, even if we didn't write to disk
         snapshot_counter += 1
     
     # ============================================================================
@@ -572,15 +583,19 @@ def run_nbody_gpu(
         # === I/O Operations ===
         # === snapshots (handle possibly multiple snapshot indices that fall here) ===
         while snapshot_counter < len(snapshot_steps) and current_step >= snapshot_steps[snapshot_counter]:
-            xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
-            _save_snapshot(xv_cpu, snapshot_counter, time, output_path,
-                           num_files_to_write=num_files_to_write,
-                           mass_dark=masses[0],  # dark mass in this code path
-                           total_expected_snapshots=snapshots)
-            _update_snapshot_times(output_path, snapshot_counter, time)
-            if verbose:
-                print(f"Saved snapshot id={snapshot_counter:03d} at step {current_step}, time {time:.6e}...")
-            
+            # --- NEW IF CONDITION ---
+            if save_snapshots:  # Check if snapshot saving is enabled
+                xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
+                _save_snapshot(xv_cpu, snapshot_counter, time, output_path,
+                            num_files_to_write=num_files_to_write,
+                            mass_dark=masses[0],  # dark mass in this code path
+                            total_expected_snapshots=snapshots)
+                _update_snapshot_times(output_path, snapshot_counter, time)
+                if verbose:
+                    print(f"Saved snapshot id={snapshot_counter:03d} at step {current_step}, time {time:.6e}...")
+            # --- END NEW IF CONDITION ---
+
+            # ALWAYS increment counter, even if we didn't write to disk
             snapshot_counter += 1
 
         # Progress update
@@ -606,14 +621,18 @@ def run_nbody_gpu(
 
     # ensure final snapshot saved (if last snapshot maps to total_steps and wasn't saved)
     if snapshot_counter < len(snapshot_steps) and snapshot_steps[-1] == total_steps:
-        xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
-        if verbose:
-            print(f"<=Saving final snapshot snap.{snapshot_counter:03d} at step {total_steps}, time {time:.6e}=>")
-        _save_snapshot(xv_cpu, snapshot_counter, time, output_path,
-                       mass_dark=masses[0],  # dark mass in this code path
-                       num_files_to_write=num_files_to_write,
-                       total_expected_snapshots=snapshots)
-        _update_snapshot_times(output_path, snapshot_counter, time)
+        # --- NEW IF CONDITION ---
+        if save_snapshots:  # Check if snapshot saving is enabled
+            xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
+            if verbose:
+                print(f"<=Saving final snapshot snap.{snapshot_counter:03d} at step {total_steps}, time {time:.6e}=>")
+            _save_snapshot(xv_cpu, snapshot_counter, time, output_path,
+                        mass_dark=masses[0],  # dark mass in this code path
+                        num_files_to_write=num_files_to_write,
+                        total_expected_snapshots=snapshots)
+            _update_snapshot_times(output_path, snapshot_counter, time)
+        # --- END NEW IF CONDITION ---
+
         snapshot_counter += 1
     
     # when saving final restart (optional), include snapshot_counter
@@ -652,6 +671,7 @@ def run_nbody_cpu(
     nthreads: int | None = None,
     external_potential: agama.Potential | None = None,
     output_dir: str = "./",
+    save_snapshots: bool = True,  # <--- NEW PARAMETER
     snapshots: int = 1,
     num_files_to_write: int = 1,
     restart_interval: int = 1000,
@@ -694,6 +714,12 @@ def run_nbody_cpu(
         External time-dependent potential (default: None).
     output_dir : str, optional
         Directory for output files (default: "./").
+    save_snapshots : bool, optional
+            If True, saves the phase space (positions and velocities) to disk 
+            at intervals defined by the `snapshots` parameter. 
+            If False, snapshot I/O is skipped to improve performance, but 
+            the final state is still returned and restart files are still 
+            generated. Default is True.
     snapshots : int, optional
         Number of snapshots to save. If 1, only saves final state (default: 1).
     num_files_to_write : int, optional
@@ -849,13 +875,14 @@ def run_nbody_cpu(
     
     # Save initial snapshot if requested (global index at snapshot_steps[snapshot_counter] == start_step)
     if snapshot_counter < len(snapshot_steps) and snapshot_steps[snapshot_counter] == start_step:
-        if verbose:
-            print(f"writing snapshot snap: {snapshot_counter} at step {start_step}, time {time:.6e}...")
-        _save_snapshot(xv, snapshot_counter, time, output_path,
-                       mass_dark=masses[0],  # no dark mass in this code path
-                       num_files_to_write=num_files_to_write,
-                       total_expected_snapshots=snapshots)
-        _update_snapshot_times(output_path, snapshot_counter, time)
+        if save_snapshots:  # Check if snapshot saving is enabled
+            _save_snapshot(xv, snapshot_counter, time, output_path,
+                        mass_dark=masses[0],  # no dark mass in this code path
+                        num_files_to_write=num_files_to_write,
+                        total_expected_snapshots=snapshots)
+            _update_snapshot_times(output_path, snapshot_counter, time)
+            if verbose:
+                print(f"Saved snapshot snap: {snapshot_counter:03d} at step {start_step}, time {time:.6e}...")
         snapshot_counter += 1
     
     # ============================================================================
@@ -885,14 +912,14 @@ def run_nbody_cpu(
         # === I/O Operations ===
         # === snapshots (handle possibly multiple snapshot indices that fall here) ===
         while snapshot_counter < len(snapshot_steps) and current_step >= snapshot_steps[snapshot_counter]:
-            _save_snapshot(xv, snapshot_counter, time, output_path,
-                           mass_dark=masses[0],  # no dark mass in this code path
-                           num_files_to_write=num_files_to_write,
-                           total_expected_snapshots=snapshots)
-            _update_snapshot_times(output_path, snapshot_counter, time)
-            if verbose:
-                print(f"Saved snapshot id={snapshot_counter:03d} at step {current_step}, time {time:.6e}...")
-            
+            if save_snapshots:  # Check if snapshot saving is enabled
+                _save_snapshot(xv, snapshot_counter, time, output_path,
+                            mass_dark=masses[0],  # no dark mass in this code path
+                            num_files_to_write=num_files_to_write,
+                            total_expected_snapshots=snapshots)
+                _update_snapshot_times(output_path, snapshot_counter, time)
+                if verbose:
+                    print(f"Saved snapshot id={snapshot_counter:03d} at step {current_step}, time {time:.6e}...")            
             snapshot_counter += 1
 
         # Progress update
@@ -918,13 +945,14 @@ def run_nbody_cpu(
     
      # ensure final snapshot saved (if last snapshot maps to total_steps and wasn't saved)
     if snapshot_counter < len(snapshot_steps) and snapshot_steps[-1] == total_steps:
-        if verbose:
-            print(f"<=Saving final snapshot snap.{snapshot_counter:03d} at step {total_steps}, time {time:.6e}=>")
-        _save_snapshot(xv, snapshot_counter, time, output_path,
-                       mass_dark=masses[0],  # no dark mass in this code path
-                       num_files_to_write=num_files_to_write,
-                       total_expected_snapshots=snapshots)
-        _update_snapshot_times(output_path, snapshot_counter, time)
+        if save_snapshots:  # Check if snapshot saving is enabled
+            if verbose:
+                print(f"<=Saving final snapshot snap.{snapshot_counter:03d} at step {total_steps}, time {time:.6e}=>")
+            _save_snapshot(xv, snapshot_counter, time, output_path,
+                        mass_dark=masses[0],  # no dark mass in this code path
+                        num_files_to_write=num_files_to_write,
+                        total_expected_snapshots=snapshots)
+            _update_snapshot_times(output_path, snapshot_counter, time)
         snapshot_counter += 1
     
     # when saving final restart (optional), include snapshot_counter
