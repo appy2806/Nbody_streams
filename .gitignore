@@ -31,3 +31,10 @@ test_plummer/
 dist/
 build/
 *.egg-info/
+
+# Numba cache
+__pycache__/
+**/__pycache__/
+
+# Claude plans
+.claude/

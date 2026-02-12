@@ -27,6 +27,9 @@ from .run import (
     NBODY_UNITS,
 )
 
+# Analysis utilities
+from . import utils
+
 # From .fields
 from .fields import (
     compute_nbody_forces_gpu,
@@ -49,4 +52,5 @@ __all__ = [
     "compute_nbody_potential_gpu",
     "compute_nbody_potential_cpu",
     "get_gpu_info",
+    "utils",
 ]

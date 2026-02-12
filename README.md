@@ -9,6 +9,7 @@ Core points
 - CPU fallback uses NumPy/Numba where available.
 - Optional tree/FMM backend (pyfalcon) and optional external potentials via Agama.
 - Intended for collisionless systems with up to ~100k particles (benchmarks depend on hardware).
+- Light weight-super fast utilities
 
 Highlights / performance
 - GPU kernels: F32 and Kahan-corrected F32 provide a good speed/accuracy tradeoff.
@@ -16,6 +17,7 @@ Highlights / performance
 
 Features
 - `nbody_streams.fields` — direct-force kernels (GPU and CPU).
+- `nbody_streams.utils` — light weight-super fast utilities to analyze snapshots
 - `nbody_streams.io` — `ParticleReader` for HDF5-based snapshots and small helpers (`_save_snapshot`, `_load_restart`).
 - `nbody_streams.run` — simple leap-frog (KDK) integrator with optional external potentials.
 - `nbody_streams.cuda_kernels` — kernel templates used by cupy.
