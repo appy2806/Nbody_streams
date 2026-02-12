@@ -84,7 +84,11 @@ __all__ = [
     # fitting
     "fit_double_spheroid_profile",
     # morphology
+<<<<<<< HEAD
     "fit_iterative_ellipsoid",
+=======
+    "compute_morphological_diagnostics",
+>>>>>>> 88f2bd9706f876167e9740d41a2bda8cba4ac6c3
     # grids
     "uniform_spherical_grid",
     "spherical_spiral_grid",
@@ -92,7 +96,10 @@ __all__ = [
     "find_center_position",
     # boundness
     "compute_iterative_boundness",
+<<<<<<< HEAD
     "iterative_unbinding",
+=======
+>>>>>>> 88f2bd9706f876167e9740d41a2bda8cba4ac6c3
 ]
 
 # Default gravitational constant (kpc, km/s, Msun)
@@ -897,7 +904,11 @@ def _calculate_Rsphall_and_extract(
     return Rsph_all, mask, Rsph_all[mask]
 
 
+<<<<<<< HEAD
 def fit_iterative_ellipsoid(
+=======
+def compute_morphological_diagnostics(
+>>>>>>> 88f2bd9706f876167e9740d41a2bda8cba4ac6c3
     XYZ: np.ndarray,
     mass: np.ndarray | None = None,
     Vxyz: np.ndarray | None = None,
@@ -910,12 +921,16 @@ def fit_iterative_ellipsoid(
     verbose: bool = False,
     return_ellip_triax: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, float | None, float | None]:
+<<<<<<< HEAD
     """Fit an adaptive ellipsoid to a particle distribution and compute shape diagnostics.
 
     Iteratively selects particles inside an adaptive ellipsoid and diagonalises
     the (optionally reduced/weighted) structure tensor to determine the principal
     axis ratios and principal-axis directions. Iteration continues until the axis
     ratios q = b/a and s = c/a converge within `tol` or until `max_iter` is reached
+=======
+    """Iterative morphological diagnostics from the structure tensor.
+>>>>>>> 88f2bd9706f876167e9740d41a2bda8cba4ac6c3
 
     Determines principal axis lengths (*a >= b >= c*, normalised so
     *a = 1*), principal-axis directions, and optionally ellipticity and
@@ -1437,6 +1452,7 @@ def find_center_position(
 # ║  7. Iterative boundness                                                ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
+<<<<<<< HEAD
 def compute_iterative_boundness(*args, **kwargs):
     warnings.warn(
         "compute_iterative_boundness is deprecated; use iterative_unbinding.",
@@ -1447,6 +1463,9 @@ def compute_iterative_boundness(*args, **kwargs):
 
 
 def iterative_unbinding(
+=======
+def compute_iterative_boundness(
+>>>>>>> 88f2bd9706f876167e9740d41a2bda8cba4ac6c3
     positions_dark: np.ndarray,
     velocity_dark: np.ndarray,
     mass_dark: np.ndarray | float,
@@ -1473,11 +1492,15 @@ def iterative_unbinding(
 
     Computes the gravitational potential, evaluates total energy per
     particle (E = Φ + ½v²), and iteratively removes unbound (E > 0)
+<<<<<<< HEAD
     and repeats until the bound mass fraction changes by
     less than `tol_frac_change` or `recursive_iter_converg` is reached.
 
     Supports multi-component systems (e.g. dark matter and stars) and
     optional re-centering between iterations.
+=======
+    particles until convergence.
+>>>>>>> 88f2bd9706f876167e9740d41a2bda8cba4ac6c3
 
     Parameters
     ----------
