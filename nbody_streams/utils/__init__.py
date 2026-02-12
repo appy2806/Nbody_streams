@@ -11,11 +11,7 @@ from .main import (
     # Density fitting
     fit_double_spheroid_profile,
     # Morphological diagnostics
-<<<<<<< HEAD
     fit_iterative_ellipsoid,
-=======
-    compute_morphological_diagnostics,
->>>>>>> 88f2bd9706f876167e9740d41a2bda8cba4ac6c3
     # Grid generators
     uniform_spherical_grid,
     spherical_spiral_grid,
@@ -23,10 +19,7 @@ from .main import (
     find_center_position,
     # Boundness
     compute_iterative_boundness,
-<<<<<<< HEAD
     iterative_unbinding,
-=======
->>>>>>> 88f2bd9706f876167e9740d41a2bda8cba4ac6c3
 )
 
 __all__ = [
@@ -37,17 +30,10 @@ __all__ = [
     "empirical_velocity_rms_profile",
     "empirical_velocity_anisotropy_profile",
     "fit_double_spheroid_profile",
-<<<<<<< HEAD
     "fit_iterative_ellipsoid",
-=======
-    "compute_morphological_diagnostics",
->>>>>>> 88f2bd9706f876167e9740d41a2bda8cba4ac6c3
     "uniform_spherical_grid",
     "spherical_spiral_grid",
     "find_center_position",
     "compute_iterative_boundness",
-<<<<<<< HEAD
     "iterative_unbinding",
-=======
->>>>>>> 88f2bd9706f876167e9740d41a2bda8cba4ac6c3
 ]

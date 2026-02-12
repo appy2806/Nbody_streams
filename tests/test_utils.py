@@ -29,14 +29,10 @@ from nbody_streams.utils import (
     empirical_velocity_rms_profile,
     empirical_velocity_anisotropy_profile,
     fit_double_spheroid_profile,
-<<<<<<< HEAD
     fit_iterative_ellipsoid,
-=======
-    compute_morphological_diagnostics,
->>>>>>> 88f2bd9706f876167e9740d41a2bda8cba4ac6c3
     uniform_spherical_grid,
     find_center_position,
-    compute_iterative_boundness,
+    iterative_unbinding,
 )
 
 # ── Constants ────────────────────────────────────────────────────────────
@@ -178,11 +174,7 @@ def test_fit_double_spheroid_profile():
 
 def test_morphology_sphere():
     """A perfect Plummer sphere should have abc ≈ [1, 1, 1]."""
-<<<<<<< HEAD
     abc, T = fit_iterative_ellipsoid(
-=======
-    abc, T = compute_morphological_diagnostics(
->>>>>>> 88f2bd9706f876167e9740d41a2bda8cba4ac6c3
         pos, mass=mass, Rmax=5.0
     )
     assert np.allclose(abc, [1.0, 1.0, 1.0], atol=0.05), (
@@ -193,11 +185,7 @@ def test_morphology_sphere():
 
 def test_morphology_ellipticity_triaxiality():
     """Sphere: ellipticity ≈ 0, triaxiality ≈ 0."""
-<<<<<<< HEAD
     abc, T, ell, tri = fit_iterative_ellipsoid(
-=======
-    abc, T, ell, tri = compute_morphological_diagnostics(
->>>>>>> 88f2bd9706f876167e9740d41a2bda8cba4ac6c3
         pos, mass=mass, Rmax=5.0, return_ellip_triax=True
     )
     assert ell < 0.08, f"Ellipticity = {ell:.3f} (expected < 0.08 for sphere)"
@@ -222,9 +210,9 @@ def test_find_center_position():
     print(f"test_find_center_position: [OK]  (centre = {np.round(ctr, 4)})")
 
 
-def test_compute_iterative_boundness():
+def test_iterative_unbinding():
     """A virialised Plummer sphere should be >90% bound."""
-    result, ctr_pos, ctr_vel = compute_iterative_boundness(
+    result, ctr_pos, ctr_vel = iterative_unbinding(
         pos, vel, mass,
         potential_compute_method="direct",
         softening=0.05,
@@ -237,7 +225,7 @@ def test_compute_iterative_boundness():
     assert bound_frac > 0.90, (
         f"Bound fraction = {bound_frac:.3f} (expected > 0.90 for virialised system)"
     )
-    print(f"test_compute_iterative_boundness: [OK]  (bound frac = {bound_frac:.3f})")
+    print(f"test_iterative_unbinding: [OK]  (bound frac = {bound_frac:.3f})")
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -256,7 +244,8 @@ ALL_TESTS = [
     test_morphology_ellipticity_triaxiality,
     test_uniform_spherical_grid,
     test_find_center_position,
-    test_compute_iterative_boundness,
+    test_iterative_unbinding,
+
 ]
 
 
