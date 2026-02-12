@@ -29,7 +29,7 @@ from nbody_streams.utils import (
     empirical_velocity_rms_profile,
     empirical_velocity_anisotropy_profile,
     fit_double_spheroid_profile,
-    compute_morphological_diagnostics,
+    fit_iterative_ellipsoid,
     uniform_spherical_grid,
     find_center_position,
     compute_iterative_boundness,
@@ -174,7 +174,7 @@ def test_fit_double_spheroid_profile():
 
 def test_morphology_sphere():
     """A perfect Plummer sphere should have abc ≈ [1, 1, 1]."""
-    abc, T = compute_morphological_diagnostics(
+    abc, T = fit_iterative_ellipsoid(
         pos, mass=mass, Rmax=5.0
     )
     assert np.allclose(abc, [1.0, 1.0, 1.0], atol=0.05), (
@@ -185,7 +185,7 @@ def test_morphology_sphere():
 
 def test_morphology_ellipticity_triaxiality():
     """Sphere: ellipticity ≈ 0, triaxiality ≈ 0."""
-    abc, T, ell, tri = compute_morphological_diagnostics(
+    abc, T, ell, tri = fit_iterative_ellipsoid(
         pos, mass=mass, Rmax=5.0, return_ellip_triax=True
     )
     assert ell < 0.08, f"Ellipticity = {ell:.3f} (expected < 0.08 for sphere)"
