@@ -456,9 +456,20 @@ def _get_kernel(kernel_type='force', precision='float64', use_kahan=False):
     
     # Format template with type specs
     source = template.format(**type_specs)
+
+    #  Find architecture available across NVIDIA GPUs automatically
+    cc = cp.cuda.Device().compute_capability
+    arch_flag = f'-arch=sm_{cc}'
+
+    options = (
+        '-O3', # Maximum optimization
+        '--use_fast_math', # secret sauce for performance boost, but can reduce accuracy in some cases.
+        arch_flag,  # Target GPU determined automatically!
+        '--ptxas-options=-v' # Optional: Shows register usage in console
+    )
     
     # Compile kernel
-    kernel = cp.RawKernel(source, kernel_name, backend='nvcc')
+    kernel = cp.RawKernel(source, kernel_name, options=options, backend='nvcc')
     
     # Cache and return
     _NBODY_KERNEL_CACHE[cache_key] = kernel
