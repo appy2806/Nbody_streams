@@ -19,7 +19,7 @@ Features
 - `nbody_streams.fields` — direct-force kernels (GPU and CPU).
 - `nbody_streams.run` — simple leap-frog (KDK) integrator with optional external potentials.
 - `nbody_streams.io` — `ParticleReader` for HDF5-based snapshots and small helpers (`_save_snapshot`, `_load_restart`).
-- `nbody_streams.utils` — light weight-super fast utilities to analyze snapshots.
+- `nbody_streams.utils` — lightweight utilities to analyze snapshots: profile fitting (Dehnen, Plummer, double-power-law), iterative shape measurement, and energy-based unbinding.
 - `nbody_streams.fast_sims` — fast stream simulation methods (particle spray, restricted N-body).
 - `nbody_streams.coords` — coordinate transforms and stream-to-observable conversions.
 - `nbody_streams.viz` — visualization (mollweide projections, surface density, 3D volume density).
