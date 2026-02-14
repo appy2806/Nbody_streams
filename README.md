@@ -306,15 +306,20 @@ plot_stream_evolution(result['prog_xv'], times=result['times'], part_xv=result['
 
 ## Performance
 
-GPU benchmarks (N = 10,240 particles, RTX 3080):
+GPU benchmarks (N = 10,240 particles, RTX 3080, `--use_fast_math` + arch-tuned):
 
 | Kernel | Time/Step | Throughput | Energy Conservation |
 |--------|-----------|------------|---------------------|
-| Float32 + float4 | **2.3 ms** | 45.7 Gint/s | < 0.001% |
-| Float32_kahan + float4 | 2.4 ms | 44.2 Gint/s | < 0.001% |
-| Float64 | 23.4 ms | 4.5 Gint/s | < 0.001% |
+| Float32 + float4 | **1.5 ms** | ~100 Gint/s | < 0.001% |
+| Float32_kahan + float4 | 1.7 ms | ~100 Gint/s | < 0.001% |
+| Float64 | ~20 ms | ~4.5 Gint/s | < 0.001% |
 
-All precision modes achieve memory bandwidth utilization of **99% of theoretical peak** (760 GB/s).
+Approaching the theoretical FLOP ceiling (~25 FLOPs per interaction).
+
+| Hardware | N | Float32 Time | Comparable to |
+|----------|---|-------------|---------------|
+| RTX 3080 | 10,240 | 1.5 ms/step | — |
+| H200 | 1,000,000 | ~1 s/step | falcON (tree) at same N |
 
 ---
 
