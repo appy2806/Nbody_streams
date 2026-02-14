@@ -27,8 +27,11 @@ from .run import (
     NBODY_UNITS,
 )
 
-# Analysis utilities
+# Subpackages
 from . import utils
+from . import coords
+from . import fast_sims
+from . import viz
 
 # From .fields
 from .fields import (
@@ -53,4 +56,7 @@ __all__ = [
     "compute_nbody_potential_cpu",
     "get_gpu_info",
     "utils",
+    "coords",
+    "fast_sims",
+    "viz",
 ]
