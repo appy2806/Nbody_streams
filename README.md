@@ -337,7 +337,7 @@ Float32 kernels are mathematically correct but suffer from precision loss when p
 
 ### Scale-dependent error
 
-| Scale Factor | Typical |r| | Float32 Net Force | Status |
+| Scale Factor | Typical \|r\| | Float32 Net Force | Status |
 |---|---|---|---|
 | 0.1 | 10 | 6.4e-9 | Excellent |
 | 1 | 1.0 | 1.4e-6 | Good |
@@ -363,7 +363,7 @@ acc_physical = acc_scaled / (scale**2)
 
 | Method | Force Accuracy | Energy Conservation | Speed |
 |---|---|---|---|
-| Direct N^2 (float32) | ~1% asymmetry | < 0.001% drift | 2.3 ms/step |
+| Direct N^2 (float32) | ~1% asymmetry | < 0.001% drift | 1.5 ms/step |
 | Tree (float32, theta=0.5) | 1-5% force errors | ~0.01-0.1% drift | 5 ms/step |
 | Tree (float64, theta=0.5) | 1-5% force errors | ~0.001% drift | 10 ms/step |
 
