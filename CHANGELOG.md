@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-02-14
+
+### Added
+- **`nbody_streams.fast_sims` subpackage** — fast stream-generation methods as lightweight alternatives to full N-body integration (requires AGAMA).
+  - `create_particle_spray_stream` — particle-spray method with Chen+2025 (default) or Fardal+2015 initial conditions.
+  - `run_restricted_nbody` — restricted (collisionless) N-body with an evolving progenitor potential rebuilt from bound particles at each step.
+  - `create_ic_particle_spray_chen2025` / `create_ic_particle_spray_fardal2015` — standalone IC generators for custom workflows.
+- Support for **custom stripping times** (`time_stripping`) in particle spray, enabling episodic / pericenter-weighted particle release with automatic strict-monotonicity guard rails at floating-point precision.
+- Support for **subhalo perturbers** on a self-consistent orbit in the host potential (NFW profile), available in both particle spray and restricted N-body methods.
+- Optional **dynamical friction** on the progenitor orbit (Chandrasekhar formula with core-stalling suppression).
+- `fit_dehnen_profile` and `fit_plummer_profile` utilities with input validation.
+- `nbody_streams.coords` subpackage — coordinate transforms and stream-to-observable conversions.
+- `nbody_streams.viz` subpackage — mollweide projections, surface density, stream evolution plots.
+
 ## [1.1.0] - 2026-02-08
 
 ### Added
@@ -72,12 +86,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History
 
+- **1.2.0** (2026-02-14): Fast stream-generation methods (particle spray, restricted N-body)
 - **1.1.0** (2026-02-08): Float4 vectorization and major performance improvements
 - **1.0.0** (2025-XX-XX): Initial release
 
 ---
 
 ## Upgrade Notes
+
+### From 1.1.0 to 1.2.0
+
+**No breaking changes** — fully backwards compatible!
+
+**New dependency:** AGAMA is required for `fast_sims` (optional extra: `pip install nbody_streams[agama]`).
+
+**What you get:**
+- Particle spray streams in seconds instead of hours
+- Restricted N-body with automatic bound-mass tracking
+- Subhalo perturbers on self-consistent orbits
+- Custom episodic stripping with monotonicity guard rails
 
 ### From 1.0.0 to 1.1.0
 
@@ -101,7 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Future Roadmap
 
-### Planned for 1.2.0
+### Planned for 1.3.0
 - [ ] Adaptive time-stepping
 - [ ] Additional integrators (RK4, Hermite)
 - [ ] Parallel snapshot I/O

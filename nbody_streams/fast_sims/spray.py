@@ -449,11 +449,22 @@ def create_particle_spray_stream(
     time_sat = time_sat[::-1]
     orbit_sat = orbit_sat[::-1]
 
+    # --- Progenitor potential ---
+    pot_sat = _get_prog_GalaxyModel(
+        initmass, scaleradius, prog_pot_kind,
+        return_DistribFunc=False, **kwargs,
+    )
+    pot_sat_moving = agama.Potential(
+        potential=pot_sat,
+        center=np.column_stack([time_sat, orbit_sat]),
+    )
+
     # --- Stripping times ---
     if time_stripping is None:
         time_stripping = time_sat
+        orbit_strip = orbit_sat
     else:
-        time_stripping = np.asarray(time_stripping, dtype=float)
+        time_stripping = np.sort(np.asarray(time_stripping, dtype=float))
         if time_stripping.shape != (N,):
             raise ValueError(
                 f"time_stripping must have length N = num_particles // 2 + 1 "
@@ -467,15 +478,38 @@ def create_particle_spray_stream(
                 f"[{t_lo:.4f}, {t_hi:.4f}]."
             )
 
-    # --- Progenitor potential ---
-    pot_sat = _get_prog_GalaxyModel(
-        initmass, scaleradius, prog_pot_kind,
-        return_DistribFunc=False, **kwargs,
-    )
-    pot_sat_moving = agama.Potential(
-        potential=pot_sat,
-        center=np.column_stack([time_sat, orbit_sat]),
-    )
+        if np.unique(time_stripping).size != len(time_stripping):
+            # Create a tiny "ramp" 
+            # For N=5001, a step of 1e-11 results in a total shift of 5e-8.
+            # This is physically negligible but mathematically sufficient for splines.   
+            # Enforce strict monotonicity — episodic sampling can produce
+            # duplicate times which would create multi-valued functions.
+            dt_eps = 1e-10
+            ramp = np.arange(len(time_stripping)) * dt_eps
+            time_stripping += ramp
+
+            # Safety Check for the Upper Bound (t_hi)
+            # If the ramp pushed the last particle past t_hi, shift the whole array down.
+            overshoot = time_stripping[-1] - t_hi
+            if overshoot > 0:
+                time_stripping -= overshoot
+
+            # Safety Check for the Lower Bound (t_lo)
+            # In the extremely rare case that shifting down pushed the start below t_lo
+            if time_stripping[0] < t_lo:
+                # Just a final clip; if this creates a duplicate at the very start, 
+                # it's usually just two particles out of 5000, but we can nudge the first:
+                time_stripping = np.maximum(time_stripping, t_lo)
+                if time_stripping[1] <= time_stripping[0]:
+                    time_stripping[1:] += dt_eps
+
+        # Interpolate the orbit to the custom stripping times so that
+        # particle positions are consistent with their release times.
+        orbit_interp = interp1d(
+            time_sat, orbit_sat, axis=0, kind='cubic',
+            fill_value='extrapolate',
+        )
+        orbit_strip = orbit_interp(time_stripping)
 
     # --- Perturber (optional) ---
     if add_perturber['mass'] > 0:
@@ -488,12 +522,12 @@ def create_particle_spray_stream(
 
     # --- Generate initial conditions ---
     rj, vj, R = _get_jacobi_rad_vel_mtx(
-        pot_host, orbit_sat, initmass,
+        pot_host, orbit_strip, initmass,
         t=time_stripping, eigenvalue_method=eigenvalue_method,
     )
 
     method_args = {
-        'orbit_sat': orbit_sat, 'mass_sat': initmass,
+        'orbit_sat': orbit_strip, 'mass_sat': initmass,
         'rj': rj, 'vj': vj, 'R': R, 'gala_modified': gala_modified,
     }
 
