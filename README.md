@@ -18,11 +18,15 @@ Designed for research and prototyping with a minimal API and optional GPU accele
 pip install -r requirements.txt
 pip install -e .          # editable (development) install
 
-# Optional extras
-pip install nbody_streams[gpu]     # CuPy for CUDA kernels
-pip install nbody_streams[agama]   # AGAMA for fast_sims & external potentials
-pip install nbody_streams[falcon]  # pyfalcon tree/FMM backend
-pip install nbody_streams[healpy]  # HEALPix for mollweide projections
+# Optional extras (agama and pyfalcon require --no-build-isolation)
+pip install -e ".[agama]"  --no-build-isolation   # AGAMA for fast_sims & external potentials
+pip install -e ".[falcon]" --no-build-isolation   # pyfalcon tree/FMM backend
+pip install -e ".[healpy]"                        # HEALPix for mollweide projections
+pip install -e ".[all]"    --no-build-isolation   # all of the above
+
+# GPU support — install CuPy matching your CUDA version
+pip install cupy-cuda11x   # CUDA 11.x
+pip install cupy-cuda12x   # CUDA 12.x
 ```
 
 ---
@@ -36,8 +40,8 @@ pip install nbody_streams[healpy]  # HEALPix for mollweide projections
 | `nbody_streams.io` | `ParticleReader` for HDF5 snapshots, save/load helpers |
 | `nbody_streams.utils` | Profile fitting (Dehnen, Plummer, double-power-law), iterative shape measurement, energy-based unbinding |
 | `nbody_streams.fast_sims` | Fast stream generation: particle spray and restricted N-body (requires AGAMA) |
-| `nbody_streams.coords` | Coordinate transforms and stream-to-observable conversions |
-| `nbody_streams.viz` | Mollweide projections, surface density, stream evolution plots |
+| `nbody_streams.coords` | Coordinate transforms, vector field transforms, stream coordinate generation |
+| `nbody_streams.viz` | Mollweide projections, surface density, stream sky plots, stream evolution |
 | `nbody_streams.cuda_kernels` | CUDA kernel templates used by CuPy |
 
 ---
@@ -47,29 +51,47 @@ pip install nbody_streams[healpy]  # HEALPix for mollweide projections
 ### Direct N-body (`fields`, `run`)
 
 ```python
-from nbody_streams.fields import compute_nbody_forces_gpu, compute_nbody_potential_gpu
-from nbody_streams.run import run_leapfrog
+from nbody_streams import (
+    compute_nbody_forces_gpu,
+    compute_nbody_forces_cpu,
+    compute_nbody_potential_gpu,
+    run_nbody_gpu,
+    run_nbody_cpu,
+    make_plummer_sphere,
+)
 
 # Compute accelerations (GPU, float32 with Kahan correction)
 acc = compute_nbody_forces_gpu(
-    pos, masses, softening=0.01,
+    pos, mass, softening=0.01,
     precision='float32_kahan', kernel='spline',
 )
 
-# Full integration with external potential
-run_leapfrog(
-    pos, vel, masses, dt=0.001, n_steps=1000,
-    softening=0.01, precision='float32',
-    ext_potential=agama_potential,    # optional
-    snapshot_interval=100,
-    output_file='sim.h5',
+# Compute potential energy per particle
+phi = compute_nbody_potential_gpu(
+    pos, mass, softening=0.01,
+    precision='float32_kahan', kernel='spline',
+)
+
+# Full N-body integration (GPU)
+run_nbody_gpu(
+    phase_space,             # (N, 6) array [x, y, z, vx, vy, vz]
+    masses,
+    time_start=0.0,
+    time_end=1.0,
+    dt=0.001,
+    softening=0.01,
+    precision='float32_kahan',
+    kernel='spline',
+    external_potential=pot,   # optional agama.Potential
+    snapshots=10,
+    output_dir='./output',
 )
 ```
 
 ### Snapshots (`io`)
 
 ```python
-from nbody_streams.io import ParticleReader
+from nbody_streams import ParticleReader
 
 r = ParticleReader("path/to/sim.*.h5", verbose=True)
 snap = r.read_snapshot(10)  # returns dict with pos, vel, mass, time
@@ -87,7 +109,7 @@ agama.setUnits(mass=1, length=1, velocity=1)
 
 from nbody_streams.fast_sims import create_particle_spray_stream
 
-pot = agama.Potential("MWPotential.ini")
+pot = agama.Potential(str(path_to_potential_ini))
 
 result = create_particle_spray_stream(
     pot_host=pot,
@@ -180,7 +202,9 @@ result = run_restricted_nbody(
     xv_init=my_particles,   # shape (N, 6)
     time_total=0.5,
     time_end=13.78,
-    ...
+    step_size=50,
+    save_rate=3,
+    trajsize_each_step=5,
 )
 ```
 
@@ -191,14 +215,20 @@ from nbody_streams.utils import (
     empirical_density_profile,
     empirical_circular_velocity_profile,
     empirical_velocity_dispersion_profile,
+    empirical_velocity_rms_profile,
+    empirical_velocity_anisotropy_profile,
     fit_dehnen_profile,
     fit_plummer_profile,
+    fit_double_spheroid_profile,
     fit_iterative_ellipsoid,
-    compute_iterative_boundness,
+    find_center_position,
+    iterative_unbinding,
 )
 
 # Radial profiles
 r_bins, rho = empirical_density_profile(positions, masses, bins=50)
+r_bins, v_circ = empirical_circular_velocity_profile(positions, masses)
+r_bins, sigma = empirical_velocity_dispersion_profile(positions, velocities)
 
 # Profile fitting
 gamma, a, M, r_fit, rho_fit = fit_dehnen_profile(positions, masses)
@@ -207,34 +237,69 @@ a, M, r_fit, rho_fit = fit_plummer_profile(positions, masses)
 # Iterative shape measurement
 axes, axis_ratios, eigvecs = fit_iterative_ellipsoid(positions, masses)
 
-# Energy-based unbinding
-bound_mask = compute_iterative_boundness(positions, velocities, masses, potential)
+# Centre finding
+cen = find_center_position(positions, masses)
+
+# Energy-based iterative unbinding
+bound_mask = iterative_unbinding(
+    positions, velocities, masses,
+    center_position=cen,
+)
 ```
+
+> **Note:** `compute_iterative_boundness` is deprecated — use `iterative_unbinding` instead.
 
 ### Coordinates (`coords`)
 
 ```python
 from nbody_streams.coords import (
-    galactocentric_to_galactic,
-    compute_stream_coords,
-    compute_proper_motions,
+    convert_coords,
+    convert_vectors,
+    convert_to_vel_los,
+    generate_stream_coords,
+    get_observed_stream_coords,
 )
 
-l, b, d = galactocentric_to_galactic(x, y, z)
-phi1, phi2 = compute_stream_coords(l, b, pole_l, pole_b)
+# Coordinate transforms: 'cart' <-> 'sph' <-> 'cyl'
+sph = convert_coords(pos, 'cart', 'sph')                   # (N, 3) -> (r, theta, phi)
+cyl = convert_coords(pos, 'cart', 'cyl')                   # (N, 3) -> (R, phi, z)
+
+# Vector field transforms (position + velocity together)
+pos_sph, vel_sph = convert_vectors(pos, vel, 'cart', 'sph')
+
+# Line-of-sight velocity
+v_los = convert_to_vel_los(xv)                              # from galactocentric phase-space
+
+# Stream coordinates (phi1, phi2) from galactocentric phase-space
+phi1, phi2 = generate_stream_coords(xv_stream, xv_prog=xv_prog)
+
+# Full observables: stream coords + distance, PM, v_los
+phi1, phi2, dist, pm, v_los = get_observed_stream_coords(
+    xv_stream, xv_prog=xv_prog,
+)
 ```
 
 ### Visualization (`viz`)
 
 ```python
 from nbody_streams.viz import (
+    plot_density,
     plot_mollweide,
-    plot_density_map,
+    plot_stream_sky,
     plot_stream_evolution,
 )
 
-fig, ax = plot_mollweide(l, b, nside=64)
-fig, ax = plot_density_map(x, y, masses, bins=200)
+# Projected density map
+plot_density(part=snap)
+
+# Mollweide sky projection (requires healpy for smoothing)
+plot_mollweide(pos, weights=masses, initial_nside=60)
+
+# Stream in sky coordinates (alpha/delta and phi1/phi2)
+plot_stream_sky(xv_stream, xv_prog=xv_prog)
+
+# Stream evolution over time (from fast_sims output)
+plot_stream_evolution(result['prog_xv'], times=result['times'], part_xv=result['part_xv'])
 ```
 
 ---
