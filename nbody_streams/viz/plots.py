@@ -688,6 +688,8 @@ def plot_stream_evolution(
     LMC_traj: np.ndarray | None = None,
     three_d_plot: bool = False,
     interactive: bool = False,
+    dpi: int = 200,
+    figsize: tuple[float, float] = (12, 3),
 ) -> tuple[Figure, list]:
     """
     Three-panel evolution plot: galactocentric distance, bound fraction
@@ -747,7 +749,7 @@ def plot_stream_evolution(
             raise RuntimeError("Interactive mode requires IPython")
 
     # --- Figure ---
-    fig = plt.figure(figsize=(12, 3), dpi=300)
+    fig = plt.figure(figsize=figsize, dpi=dpi)
     ax = [None, None, None]
     ax[0] = fig.add_subplot(131)
     ax[2] = fig.add_subplot(133)
