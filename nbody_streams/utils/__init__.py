@@ -10,6 +10,8 @@ from .main import (
     empirical_velocity_anisotropy_profile,
     # Density fitting
     fit_double_spheroid_profile,
+    fit_dehnen_profile,
+    fit_plummer_profile,
     # Morphological diagnostics
     fit_iterative_ellipsoid,
     # Grid generators
@@ -30,6 +32,8 @@ __all__ = [
     "empirical_velocity_rms_profile",
     "empirical_velocity_anisotropy_profile",
     "fit_double_spheroid_profile",
+    "fit_dehnen_profile",
+    "fit_plummer_profile",
     "fit_iterative_ellipsoid",
     "uniform_spherical_grid",
     "spherical_spiral_grid",

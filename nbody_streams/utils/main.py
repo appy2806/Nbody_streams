@@ -36,7 +36,7 @@ from ._validation import (
 # Optional dependencies (following the pattern in fields.py)
 # ---------------------------------------------------------------------------
 try:
-    from scipy.optimize import minimize, root_scalar
+    from scipy.optimize import curve_fit, minimize, root_scalar
     from scipy.stats import binned_statistic
     from scipy import linalg as sp_linalg
 
@@ -83,6 +83,8 @@ __all__ = [
     "empirical_velocity_anisotropy_profile",
     # fitting
     "fit_double_spheroid_profile",
+    "fit_dehnen_profile",
+    "fit_plummer_profile",
     # morphology
     "fit_iterative_ellipsoid",
     # grids
@@ -798,6 +800,134 @@ def fit_double_spheroid_profile(
         )
     return (M_fit, a_fit, alpha_fit, beta_fit, gamma_fit)
 
+def fit_dehnen_profile(
+    positions: np.ndarray,
+    masses: np.ndarray,
+    axis_y: float = 1.0,
+    axis_z: float = 1.0,
+    bins: int = 50,
+) -> tuple[float, float, float, np.ndarray, np.ndarray]:
+    r"""Fit a triaxial Dehnen profile by mapping to ellipsoidal radius.
+
+    Computes :math:`\tilde r = \sqrt{x^2 + (y/q_y)^2 + (z/q_z)^2}`,
+    bins into log-spaced shells, and fits the Dehnen (1993)
+    density model in log-space via ``scipy.optimize.curve_fit``.
+
+    Parameters
+    ----------
+    positions : array_like, shape ``(N, 3)``
+        Particle positions.
+    masses : array_like, shape ``(N,)``
+        Particle masses.
+    axis_y, axis_z : float
+        Axis ratios *b/a* and *c/a* for the ellipsoidal radius.
+    bins : int
+        Number of radial bins.
+
+    Returns
+    -------
+    M_fit : float
+        Fitted total mass.
+    a_fit : float
+        Scale radius.
+    gamma_fit : float
+        Inner slope :math:`\gamma \in [0, 3)`.
+    r_centers : np.ndarray
+        Geometric-mean radial bin centres.
+    rho_vals : np.ndarray
+        Measured density in each bin.
+    """
+    positions, _ = validate_positions(positions)
+    masses = validate_masses(masses, positions.shape[0], non_negative=True)
+    validate_nbins(bins)
+
+    x, y, z = positions.T
+    r_tilde = np.sqrt(x**2 + (y / axis_y)**2 + (z / axis_z)**2)
+
+    rmin, rmax = np.percentile(r_tilde, [0.1, 99.9])
+    edges = np.logspace(np.log10(rmin), np.log10(rmax), bins + 1)
+    r_centers = np.sqrt(edges[:-1] * edges[1:])
+
+    counts, _ = np.histogram(r_tilde, edges, weights=masses)
+    volumes = 4 / 3 * np.pi * (edges[1:]**3 - edges[:-1]**3)
+    rho_vals = counts / volumes
+
+    log_rho = np.log10(np.maximum(rho_vals, 1e-12))
+
+    def log_model(r, logM, loga, gamma):
+        M = 10**logM
+        a = 10**loga
+        pref = (3 - gamma) / (4 * np.pi) * M / a**3
+        return np.log10(pref * (r / a)**(-gamma) * (1 + r / a)**(gamma - 4))
+
+    p0 = [np.log10(masses.sum()), np.log10(np.median(r_tilde)), 1.0]
+    bounds = ([-np.inf, -np.inf, 0], [np.inf, np.inf, 3])
+
+    popt, _ = curve_fit(log_model, r_centers, log_rho, p0=p0, bounds=bounds)
+    M_fit = 10**popt[0]
+    a_fit = 10**popt[1]
+    gamma_fit = popt[2]
+
+    return M_fit, a_fit, gamma_fit, r_centers, rho_vals
+
+
+def fit_plummer_profile(
+    positions: np.ndarray,
+    masses: np.ndarray,
+    bins: int = 30,
+) -> tuple[float, float, np.ndarray, np.ndarray]:
+    r"""Fit a spherical Plummer profile to particle data.
+
+    Bins particles into log-spaced radial shells and fits the Plummer
+    density :math:`\rho(r) = \frac{3M}{4\pi b^3}(1 + r^2/b^2)^{-5/2}`
+    in log-space via ``scipy.optimize.curve_fit``.
+
+    Parameters
+    ----------
+    positions : array_like, shape ``(N, 3)``
+        Particle positions.
+    masses : array_like, shape ``(N,)``
+        Particle masses.
+    bins : int
+        Number of radial bins.
+
+    Returns
+    -------
+    M_fit : float
+        Fitted total mass.
+    b_fit : float
+        Plummer scale radius.
+    r_centers : np.ndarray
+        Geometric-mean radial bin centres.
+    rho_vals : np.ndarray
+        Measured density in each bin.
+    """
+    positions, r = validate_positions(positions)
+    masses = validate_masses(masses, positions.shape[0], non_negative=True)
+    validate_nbins(bins)
+
+    rmin, rmax = np.percentile(r, [0.1, 99.9])
+    edges = np.logspace(np.log10(rmin), np.log10(rmax), bins + 1)
+    r_centers = np.sqrt(edges[:-1] * edges[1:])
+
+    counts, _ = np.histogram(r, edges, weights=masses)
+    volumes = 4 / 3 * np.pi * (edges[1:]**3 - edges[:-1]**3)
+    rho_vals = counts / volumes
+
+    log_rho = np.log10(np.maximum(rho_vals, 1e-12))
+
+    def log_model(r, logM, logb):
+        M = 10**logM
+        b = 10**logb
+        return np.log10(3 * M / (4 * np.pi * b**3) * (1 + (r / b)**2)**(-2.5))
+
+    p0 = [np.log10(masses.sum()), np.log10(np.median(r))]
+    popt, _ = curve_fit(log_model, r_centers, log_rho, p0=p0)
+
+    M_fit = 10**popt[0]
+    b_fit = 10**popt[1]
+
+    return M_fit, b_fit, r_centers, rho_vals
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  4. Morphological diagnostics                                          ║
