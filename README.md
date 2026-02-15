@@ -316,10 +316,23 @@ GPU benchmarks (N = 10,240 particles, RTX 3080, `--use_fast_math` + arch-tuned):
 
 Approaching the theoretical FLOP ceiling (~25 FLOPs per interaction).
 
-| Hardware | N | Float32 Time | Comparable to |
-|----------|---|-------------|---------------|
-| RTX 3080 | 10,240 | 1.5 ms/step | — |
-| H200 | 1,000,000 | ~1 s/step | falcON (tree) at same N |
+### Which solver should I use?
+
+The plot below compares time-per-particle for direct (CPU & GPU) and FMM/tree solvers across particle counts.
+
+<p align="center">
+  <img src="plots/acceleration_timings.png" width="700" alt="Acceleration timing comparison across solvers and hardware"/>
+</p>
+
+**Recommendations:**
+
+| Particle count | Recommended method | Why |
+|---|---|---|
+| N < 500 | **CPU direct** (Numba) | Lowest latency — no GPU kernel-launch overhead. |
+| 1K – 100K | **GPU direct** (consumer GPU) | ~10x faster than CPU direct; exact O(N²) forces with float32 Kahan precision. |
+| 100K – 500K | **GPU direct** (consumer GPU) ≈ FMM/tree | A consumer GPU (e.g. RTX 3070) matches falcON/FMM throughput up to ~500K particles. |
+| 500K – 2M | **GPU direct** (datacenter GPU) ≈ FMM/tree | An H200-class GPU keeps direct-force time competitive with tree codes up to ~2M particles. |
+| N > 2M | **Tree / FMM** (falcON) | O(N) FMM scaling wins; direct O(N²) becomes prohibitive on any current GPU. |
 
 ---
 
