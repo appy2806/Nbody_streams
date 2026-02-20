@@ -16,6 +16,21 @@ import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import shared_memory
 
+def _make_times_ns(raw):
+    """
+    Convert a raw np.loadtxt array into SimpleNamespace(snap=int_array, time=float_array).
+    Returns None if conversion fails or input is None.
+    """
+    if raw is None:
+        return None
+    arr = np.asarray(raw)
+    if arr.ndim == 1 and arr.size == 2:
+        arr = arr.reshape(1, 2)
+    if arr.ndim != 2 or arr.shape[1] < 2:
+        return None
+    return SimpleNamespace(snap=arr[:, 0].astype(int), time=arr[:, 1].astype(float))
+
+
 # Worker function must live at module scope so it can be pickled by ProcessPoolExecutor.
 def _worker_write_shared(args):
     """
@@ -133,7 +148,7 @@ class ParticleReader:
         self.Times = None
         if times_file_path is not None:
             try:
-                self.Times = np.loadtxt(str(times_file_path), comments="#")
+                self.Times = _make_times_ns(np.loadtxt(str(times_file_path), comments="#"))
                 if self._verbose:
                     print(f"✅  Successfully loaded time mapping from: {times_file_path}")
             except Exception:
@@ -145,7 +160,7 @@ class ParticleReader:
             default_path = Path(self.file_list[0]).parent / "snapshot.times"
             if default_path.exists():
                 try:
-                    self.Times = np.loadtxt(str(default_path), comments="#")
+                    self.Times = _make_times_ns(np.loadtxt(str(default_path), comments="#"))
                     if self._verbose:
                         print(f"✅  Loaded snapshot.times from: {default_path}")
                 except Exception:
@@ -169,7 +184,7 @@ class ParticleReader:
                             header="snap_index time", comments="# ")
                     if self._verbose:
                         print(f"ℹ️  Created default snapshot.times at: {times_path}")
-                    self.Times = arr
+                    self.Times = _make_times_ns(arr)
                 except Exception as e:
                     if self._verbose:
                         print(f"⚠️  Could not write default snapshot.times ({e}). Times disabled.")
@@ -178,7 +193,7 @@ class ParticleReader:
                 # if file exists but earlier load failed, try one more time
                 if times_path.exists():
                     try:
-                        self.Times = np.loadtxt(str(times_path), comments="#")
+                        self.Times = _make_times_ns(np.loadtxt(str(times_path), comments="#"))
                         if self._verbose:
                             print(f"✅  Loaded snapshot.times from: {times_path}")
                     except Exception:
@@ -301,14 +316,13 @@ class ParticleReader:
             - part.snap: int, snapshot index.
             - part.time: float or None, physical time in Gyr if available.
         """
-        if isinstance(identifier, float):
+        if isinstance(identifier, (float, np.floating)):
             if self.Times is None:
                 raise ValueError("❌ Time-based lookup requires a snapshot.times file, which was not loaded.")
-            time_col = self.Times[:, 1]
-            closest_time_idx = np.argmin(np.abs(time_col - identifier))
-            snap_index = int(self.Times[closest_time_idx, 0])
-        elif isinstance(identifier, int):
-            snap_index = identifier
+            closest_time_idx = np.argmin(np.abs(self.Times.time - identifier))
+            snap_index = int(self.Times.snap[closest_time_idx])
+        elif isinstance(identifier, (int, np.integer)):
+            snap_index = int(identifier)
         else:
             raise TypeError("❌ Identifier must be an integer (snapshot index) or a float (time).")
 
@@ -332,8 +346,8 @@ class ParticleReader:
 
         part.snap = snap_index
         if self.Times is not None:
-            time_row = self.Times[self.Times[:, 0] == snap_index]
-            part.time = float(time_row[0, 1]) if len(time_row) > 0 else None
+            mask = self.Times.snap == snap_index
+            part.time = float(self.Times.time[mask][0]) if mask.any() else None
         else:
             part.time = None
 
@@ -475,31 +489,24 @@ class ParticleReader:
                 except FileNotFoundError:
                     pass
 
-        # Attach time information (1D array aligned with snapshots) or Snaps
+        # Attach time information aligned with snapshots; Snaps is always an int array
+        orbits.Snaps = np.array(all_snap_indices, dtype=int)
         if self.Times is not None:
             try:
-                times_arr = np.asarray(self.Times)
-                if times_arr.ndim == 1:
-                    if times_arr.shape[0] == num_snapshots:
-                        orbits.Times = times_arr.astype(float)
-                    else:
-                        orbits.Times = None
-                        if self._verbose:
-                            print("   Warning: Times is 1D but length doesn't match number of snapshots; omitting orbits.Times.")
+                snap_idxs = self.Times.snap   # int array
+                time_vals = self.Times.time   # float array
+                if np.array_equal(snap_idxs, orbits.Snaps):
+                    orbits.Times = time_vals
                 else:
-                    snap_idxs = times_arr[:, 0].astype(int)
-                    time_vals = times_arr[:, 1].astype(float)
-                    if np.array_equal(snap_idxs, np.array(all_snap_indices, dtype=int)):
-                        orbits.Times = time_vals
-                    else:
-                        time_map = dict(zip(snap_idxs, time_vals))
-                        orbits.Times = np.array([time_map.get(snap, np.nan) for snap in all_snap_indices], dtype=float)
+                    time_map = dict(zip(snap_idxs, time_vals))
+                    orbits.Times = np.array(
+                        [time_map.get(s, np.nan) for s in all_snap_indices], dtype=float
+                    )
             except Exception:
                 orbits.Times = None
                 if self._verbose:
-                    print("   Warning: could not parse Times array into orbits.Times.")
+                    print("   Warning: could not parse Times into orbits.Times.")
         else:
-            orbits.Snaps = np.array(all_snap_indices, dtype=int)
             orbits.Times = None
             if self._verbose:
                 print("   Times not available — attaching orbits.Snaps (snapshot indices).")
