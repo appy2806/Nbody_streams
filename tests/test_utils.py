@@ -146,7 +146,7 @@ def test_empirical_velocity_anisotropy():
     )
     finite = np.isfinite(beta)
     mean_beta = np.nanmean(beta[finite])
-    # Isotropic → β = 0;  allow |β| < 0.15 due to sampling noise
+    # Isotropic -> β = 0;  allow |β| < 0.15 due to sampling noise
     assert abs(mean_beta) < 0.15, (
         f"Mean β = {mean_beta:.3f} (expected ≈ 0 for isotropic system)"
     )

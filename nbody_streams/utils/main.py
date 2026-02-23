@@ -372,13 +372,13 @@ def empirical_velocity_anisotropy_profile(
     vel : array_like, shape ``(N, 3)``
         Particle velocities.
     mass : scalar, array_like, or None, optional
-        Particle masses.  *None* → equal mass.
+        Particle masses.  *None* -> equal mass.
     nbins : int
         Number of radial bins.
     rmin : float
         Minimum radius.
     rmax : float or None
-        Maximum radius.  *None* → 90th percentile of ``|pos|``.
+        Maximum radius.  *None* -> 90th percentile of ``|pos|``.
 
     Returns
     -------
@@ -1061,7 +1061,7 @@ def fit_iterative_ellipsoid(
     XYZ : array_like, shape ``(N, 3)``
         Particle coordinates.
     mass : array_like, shape ``(N,)``, optional
-        Particle masses.  *None* → unit mass.
+        Particle masses.  *None* -> unit mass.
     Vxyz : array_like, shape ``(N, 3)``, optional
         Particle velocities.  Required when *orient_with_momentum* is
         *True*.
@@ -1098,7 +1098,7 @@ def fit_iterative_ellipsoid(
     n_particles = XYZ.shape[0]
 
     mass_arr = validate_masses(mass, n_particles, non_negative=True)
-    Vxyz_arr = validate_velocities(Vxyz, n_particles)  # None → zeros
+    Vxyz_arr = validate_velocities(Vxyz, n_particles)  # None -> zeros
 
     use_momentum = False
     if Vxyz is not None and orient_with_momentum:

@@ -253,7 +253,7 @@ float compute_spline(float r2, float h) {{
 // >>>>>>> CHANGE: Float4 + Kahan summation
 extern "C" __global__
 void nbody_forces_kahan_kernel_float4(
-    const float4* __restrict__ pos_mass,  // ← Float4 input
+    const float4* __restrict__ pos_mass,  // <- Float4 input
     const float* __restrict__ h,
     float* __restrict__ ax,
     float* __restrict__ ay,
@@ -263,7 +263,7 @@ void nbody_forces_kahan_kernel_float4(
     int kernel_id,
     int N
 ) {{
-    __shared__ float4 sh_pos_mass[TILE_SIZE];  // ← Float4 shared memory
+    __shared__ float4 sh_pos_mass[TILE_SIZE];  // <- Float4 shared memory
     __shared__ float sh_h[TILE_SIZE];
     
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -271,10 +271,10 @@ void nbody_forces_kahan_kernel_float4(
     
     bool active = (i < N);
 
-    float4 my_pm;  // ← Float4 register
+    float4 my_pm;  // <- Float4 register
     float my_h;
     if (active) {{
-        my_pm = pos_mass[i];  // ← Vectorized load
+        my_pm = pos_mass[i];  // <- Vectorized load
         my_h = h[i];
     }}
     
@@ -294,7 +294,7 @@ void nbody_forces_kahan_kernel_float4(
         int j = tile_start + tid;
 
         if (j < N) {{
-            sh_pos_mass[tid] = pos_mass[j];  // ← Vectorized load
+            sh_pos_mass[tid] = pos_mass[j];  // <- Vectorized load
             sh_h[tid] = h[j];
         }} else {{
             sh_pos_mass[tid] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
@@ -310,7 +310,7 @@ void nbody_forces_kahan_kernel_float4(
             for (int k = 0; k < tile_end; k++) {{
                 int j_global = tile_start + k;
                 
-                float4 other = sh_pos_mass[k];  // ← Float4 access
+                float4 other = sh_pos_mass[k];  // <- Float4 access
                 float dx = other.x - my_pm.x;
                 float dy = other.y - my_pm.y;
                 float dz = other.z - my_pm.z;
@@ -329,7 +329,7 @@ void nbody_forces_kahan_kernel_float4(
                 }}
                 
                 float not_self = (float)(i != j_global);
-                float factor = other.w * kern * not_self;  // ← other.w = mass
+                float factor = other.w * kern * not_self;  // <- other.w = mass
                 
                 // >>>>>>> Kahan summation (unchanged!)
                 // Kahan summation for X component
@@ -1267,7 +1267,7 @@ extern "C" __device__ __forceinline__
         {T} q = r * hinv;
         
         if (q < 1e-8) {{
-            // At origin: lim(q→0) = -2.8/h
+            // At origin: lim(q->0) = -2.8/h
             return -2.8 * hinv;
         }}
         

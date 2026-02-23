@@ -799,7 +799,7 @@ def compute_nbody_forces_gpu(
 
     # >>>>>>> NEW: Detect if we should use float4
     # Update the use_float4 check:
-    use_float4 = (precision in ['float32', 'float32_kahan'])  # ← Include Kahan now!
+    use_float4 = (precision in ['float32', 'float32_kahan'])  # <- Include Kahan now!
 
     # use_float4 = (precision in ['float32', 'float32_kahan'] and 
     #               precision != 'float32_kahan')  # Keep Kahan separate for now
@@ -964,7 +964,7 @@ def compute_nbody_potential_gpu(
 
     # >>>>>>> NEW: Detect if we should use float4
     # Update the use_float4 check:
-    use_float4 = (precision in ['float32', 'float32_kahan'])  # ← Include Kahan now!
+    use_float4 = (precision in ['float32', 'float32_kahan'])  # <- Include Kahan now!
 
     # Allocate output arrays on GPU
     pot_gpu = cp.empty(N, dtype=dtype)
@@ -1283,25 +1283,24 @@ if __name__ == "__main__":
         # Warmup
         for _ in range(n_warmup):
             acc_gpu = compute_nbody_forces_gpu(
-                pos_gpu, mass_gpu, h_gpu,  # ← Pass h_gpu, not scalar
+                pos_gpu, mass_gpu, h_gpu,  # <- Pass h_gpu, not scalar
                 kernel='spline', precision=precision,
                 return_cupy=True, skip_validation=True
             )
-            cp.cuda.Stream.null.synchronize()
+            cp.cuda.runtime.deviceSynchronize()
         
         # Benchmark
         times = []
         for _ in range(n_bench):
-            cp.cuda.Stream.null.synchronize()
+            cp.cuda.runtime.deviceSynchronize()
             t0 = time.perf_counter()
             
             acc_gpu = compute_nbody_forces_gpu(
-                pos_gpu, mass_gpu, h_gpu,  # ← Pass h_gpu, not scalar
+                pos_gpu, mass_gpu, h_gpu,  # <- Pass h_gpu, not scalar
                 kernel='spline', precision=precision,
                 return_cupy=True, skip_validation=True
             )
-            
-            cp.cuda.Stream.null.synchronize()
+            cp.cuda.runtime.deviceSynchronize()
             t1 = time.perf_counter()
             times.append(t1 - t0)
         
@@ -1323,25 +1322,25 @@ if __name__ == "__main__":
         # Warmup
         for _ in range(n_warmup):
             acc_gpu = compute_nbody_forces_gpu(
-                pos_gpu, mass_gpu, softening=0.01,  # ← Can use scalar here
+                pos_gpu, mass_gpu, softening=0.01,  # <- Can use scalar here
                 kernel='spline', precision=precision,
                 return_cupy=True, skip_validation=False
             )
-            cp.cuda.Stream.null.synchronize()
+            cp.cuda.runtime.deviceSynchronize() # cp.cuda.Stream.null.synchronize()
         
         # Benchmark
         times = []
         for _ in range(n_bench):
-            cp.cuda.Stream.null.synchronize()
+            cp.cuda.runtime.deviceSynchronize()
             t0 = time.perf_counter()
             
             acc_gpu = compute_nbody_forces_gpu(
-                pos_gpu, mass_gpu, softening=0.01,  # ← Can use scalar here
+                pos_gpu, mass_gpu, softening=0.01,  # <- Can use scalar here
                 kernel='spline', precision=precision,
                 return_cupy=True, skip_validation=False
             )
             
-            cp.cuda.Stream.null.synchronize()
+            cp.cuda.runtime.deviceSynchronize()
             t1 = time.perf_counter()
             times.append(t1 - t0)
         
