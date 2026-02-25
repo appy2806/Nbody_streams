@@ -1,13 +1,17 @@
 # nbody_streams
 
-Direct N-body simulator and utilities for collisionless systems (single particle type).
-Designed for research and prototyping with a minimal API and optional GPU acceleration.
+Direct N-body simulator and utilities for collisionless multi-species systems.
+Designed around a minimal, Pythonic API — while keeping every computationally
+expensive routine in compiled, parallelized code with no pure-Python loops in
+the hot path.
 
-- Direct N-body code with both CPU and optional GPU implementations.
-- GPU backend uses custom CUDA kernels (CuPy) and Kahan-style corrections for improved float32 accuracy.
-- CPU fallback uses NumPy/Numba where available.
-- Optional tree/FMM backend (pyfalcon) and optional external potentials via Agama.
-- Intended for collisionless systems with up to ~100k particles (benchmarks depend on hardware).
+- **Multi-species** simulations with any number of particle types (dark matter, stars, gas tracers, black holes, …).
+- Single entry point: `run_simulation` with `architecture='cpu'|'gpu'` and `method='direct'|'tree'` flags.
+- **GPU direct**: hand-written CUDA kernels compiled at runtime via CuPy + nvcc — `float4` 128-bit vectorized loads, optional Kahan compensated summation, `--use_fast_math`, and architecture-tuned PTX.
+- **CPU direct**: Numba JIT-compiled, auto-parallelized force kernels (`@njit(parallel=True)`) using all available CPU cores.
+- **CPU tree / FMM**: falcON fast multipole method via pyfalcon — true O(N) scaling for large particle counts.
+- Optional external potentials via Agama (evaluated in C++ per timestep, added to N-body accelerations).
+- Intended for collisionless systems with up to ~2M particles (benchmarks depend on hardware).
 - Fast stream-generation methods (particle spray, restricted N-body) via AGAMA.
 
 ---
@@ -25,8 +29,8 @@ pip install -e ".[healpy]"                        # HEALPix for mollweide projec
 pip install -e ".[all]"    --no-build-isolation   # all of the above
 
 # GPU support — install CuPy matching your CUDA version
-pip install cupy-cuda11x   # CUDA 11.x
 pip install cupy-cuda12x   # CUDA 12.x
+pip install cupy-cuda13x   # CUDA 13.x
 ```
 
 ---
@@ -35,20 +39,214 @@ pip install cupy-cuda12x   # CUDA 12.x
 
 | Subpackage | Description |
 |---|---|
-| `nbody_streams.fields` | Direct-force kernels (GPU and CPU) |
-| `nbody_streams.run` | Leapfrog (KDK) integrator with optional external potentials |
+| `nbody_streams.species` | `Species` dataclass, `PerformanceWarning`, and array-building helpers |
+| `nbody_streams.sim` | `run_simulation` — unified multi-species entry point |
+| `nbody_streams.fields` | Force and potential kernels: dispatches to GPU (CUDA) or CPU (Numba) backends |
+| `nbody_streams.cuda_kernels` | Hand-written CUDA kernel source strings (float32 `float4`, float64); compiled at runtime via nvcc |
+| `nbody_streams.run` | KDK leapfrog integrators (`run_nbody_gpu`, `run_nbody_cpu`); `make_plummer_sphere` IC generator |
 | `nbody_streams.io` | `ParticleReader` for HDF5 snapshots, save/load helpers |
 | `nbody_streams.utils` | Profile fitting (Dehnen, Plummer, double-power-law), iterative shape measurement, energy-based unbinding |
 | `nbody_streams.fast_sims` | Fast stream generation: particle spray and restricted N-body (requires AGAMA) |
 | `nbody_streams.coords` | Coordinate transforms, vector field transforms, stream coordinate generation |
 | `nbody_streams.viz` | Mollweide projections, surface density, stream sky plots, stream evolution |
-| `nbody_streams.cuda_kernels` | CUDA kernel templates used by CuPy |
+
+---
+
+## Under the hood
+
+The Python layer handles only orchestration: argument validation, backend dispatch,
+HDF5 I/O, and snapshot management.  Every force evaluation is delegated to
+compiled, parallelized code:
+
+| Path | Implementation | Key details |
+|---|---|---|
+| **GPU direct** | CUDA kernels compiled at runtime (CuPy + nvcc) | `float4` 128-bit vectorized loads; optional Kahan compensated summation; `--use_fast_math`; arch-tuned PTX via `compute_capability` auto-detection |
+| **CPU direct** | Numba `@njit(parallel=True)` | Prange-parallelized inner loop; JIT-compiled on first call, cached thereafter |
+| **CPU tree / FMM** | falcON via pyfalcon (C++) | True O(N) fast multipole method; independent of the direct-force code path |
+| **Integration** | KDK symplectic leapfrog | Positions and velocities kept in float64; only force calls use float32/float64 kernels |
+| **External potentials** | Agama C++ library | `agama.Potential.__call__` invoked once per timestep; result added directly to N-body accelerations |
 
 ---
 
 ## API
 
-### Direct N-body (`fields`, `run`)
+### Multi-species simulation (`run_simulation`, `Species`)
+
+The recommended entry point for all N-body runs.  It handles single- and
+multi-species setups, dispatches to the correct backend, and returns
+per-species final phase-space arrays.
+
+#### `Species` dataclass
+
+```python
+from nbody_streams import Species
+
+# Named constructors for common types
+dm    = Species.dark(N=10_000, mass=1e6, softening=0.1)   # dark matter
+stars = Species.star(N=2_000,  mass=5e4, softening=0.03)  # stellar particles
+
+# Arbitrary species (e.g. a single central black hole)
+bh = Species(name='bh', N=1, mass=1e9, softening=0.001)
+
+# Per-particle mass / softening are also accepted
+import numpy as np
+m_arr = np.linspace(1e5, 2e5, 500)
+gas   = Species(name='gas', N=500, mass=m_arr, softening=0.05)
+```
+
+`Species` parameters:
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `str` | Unique species identifier |
+| `N` | `int` | Number of particles |
+| `mass` | `float` or `ndarray (N,)` | Particle mass(es) |
+| `softening` | `float` or `ndarray (N,)` | Gravitational softening length(s) |
+
+---
+
+#### `run_simulation`
+
+```python
+from nbody_streams import run_simulation, Species, make_plummer_sphere
+import numpy as np
+
+result = run_simulation(
+    phase_space,          # (N_total, 6) — all species concatenated
+    species,              # list[Species] in the same order as phase_space
+    time_start=0.0,
+    time_end=1.0,
+    dt=0.001,
+    architecture='gpu',   # 'cpu' or 'gpu'
+    method='direct',      # 'direct' (O(N^2)) or 'tree' (CPU only, requires pyfalcon)
+    precision='float32_kahan',
+    kernel='dehnen_k1',
+    external_potential=pot,        # optional agama.Potential
+    output_dir='./output',
+    save_snapshots=True,
+    snapshots=100,
+    verbose=True,
+)
+# result is dict[str, ndarray]  keyed by species name
+# result['dark'].shape  -> (N_dark,  6)
+# result['star'].shape  -> (N_star,  6)
+```
+
+**Example — single species: Globular Cluster**
+
+```python
+from nbody_streams import run_simulation, Species, make_plummer_sphere
+
+# ~10 000 equal-mass stars in a Plummer model
+# M_total = 5e5 Msun, scale radius a = 5 pc = 0.005 kpc
+N = 10_000
+xv, _ = make_plummer_sphere(N, M_total=5e5, a=0.005)
+
+gc = Species.star(N=N, mass=5e5 / N, softening=0.0005)  # 0.5 pc softening
+
+result = run_simulation(
+    xv, [gc],
+    time_start=0.0,
+    time_end=0.1,          # 0.1 kpc/(km/s) ~ 100 Myr
+    dt=1e-4,
+    architecture='gpu',    # or 'cpu' for quick tests
+    method='direct',
+    output_dir='./output/gc',
+    snapshots=50,
+)
+# result['star'] -> (10000, 6) final phase-space
+```
+
+**Example — multi-species: Dwarf Galaxy (dark matter + stars + gas tracers)**
+
+```python
+from nbody_streams import run_simulation, Species, make_plummer_sphere
+import numpy as np
+
+# --- Dark matter halo: 5 000 particles, extended (a = 1 kpc) ---
+N_dm = 5_000
+M_dm = 1e9          # Msun
+xv_dm, _ = make_plummer_sphere(N_dm, M_total=M_dm, a=1.0)
+dm = Species.dark(N=N_dm, mass=M_dm / N_dm, softening=0.1)  # 100 pc softening
+
+# --- Stellar disc: 1 000 particles, more concentrated (a = 0.3 kpc) ---
+N_star = 1_000
+M_star = 5e7        # Msun
+xv_star, _ = make_plummer_sphere(N_star, M_total=M_star, a=0.3)
+star = Species.star(N=N_star, mass=M_star / N_star, softening=0.03)
+
+# --- Gas tracers: 500 collisionless test particles (a = 0.5 kpc) ---
+N_gas = 500
+M_gas = 2e7         # Msun
+xv_gas, _ = make_plummer_sphere(N_gas, M_total=M_gas, a=0.5)
+gas = Species(name='gas', N=N_gas, mass=M_gas / N_gas, softening=0.05)
+
+# --- Combine all particles ---
+xv_all = np.vstack([xv_dm, xv_star, xv_gas])
+
+result = run_simulation(
+    xv_all,
+    [dm, star, gas],
+    time_start=0.0,
+    time_end=1.0,          # 1 kpc/(km/s) ~ 1 Gyr
+    dt=1e-3,
+    architecture='gpu',
+    method='direct',
+    output_dir='./output/dwarf',
+    snapshots=100,
+)
+
+# Per-species final coordinates
+dm_final   = result['dark']   # (5000, 6)
+star_final = result['star']   # (1000, 6)
+gas_final  = result['gas']    # (500,  6)
+```
+
+Reading snapshots from a multi-species run:
+
+```python
+from nbody_streams import ParticleReader
+
+r    = ParticleReader('./output/dwarf/snapshot.h5')
+snap = r.read_snapshot(50)
+
+# New primary API: per-species dict
+snap.species['dark']['posvel']   # (5000, 6)
+snap.species['star']['posvel']   # (1000, 6)
+snap.species['gas']['posvel']    # (500,  6)
+
+# Backward-compat aliases still work
+snap.dark['posvel']
+snap.star['posvel']
+```
+
+---
+
+### Initial conditions (`make_plummer_sphere`)
+
+```python
+from nbody_streams import make_plummer_sphere
+
+xv, mass = make_plummer_sphere(
+    N         = 10_000,       # number of particles
+    M_total   = 1e5,          # total mass [Msun]
+    a         = 0.01,         # Plummer scale radius [kpc]
+    G         = 4.300917e-6,  # gravitational constant (kpc, km/s, Msun units)
+    seed      = 42,
+)
+# xv   : (N, 6) float64  — [x, y, z, vx, vy, vz]
+# mass : (N,)  float64  — equal-mass particles summing to M_total
+```
+
+Positions and velocities are sampled from the exact Plummer distribution using
+rejection sampling (Aarseth 1974).  The centre of mass and bulk velocity are
+corrected to zero before returning.
+
+---
+
+### Low-level API — Direct N-body (`fields`, `run`)
+
+The low-level functions remain available for fine-grained control.
 
 ```python
 from nbody_streams import (
@@ -72,7 +270,7 @@ phi = compute_nbody_potential_gpu(
     precision='float32_kahan', kernel='spline',
 )
 
-# Full N-body integration (GPU)
+# Full N-body integration (GPU) — single species, backward-compatible
 run_nbody_gpu(
     phase_space,             # (N, 6) array [x, y, z, vx, vy, vz]
     masses,
@@ -289,10 +487,15 @@ from nbody_streams.viz import (
     plot_stream_evolution,
 )
 
-# Projected density map
-plot_density(part=snap)
+# Projected density map — from a Gizmo-style particle object
+plot_density(part=snap, spec='dark', grid_len=50.0)
 
-# Mollweide sky projection (requires healpy for smoothing)
+# Projected density map — from raw arrays (e.g. ParticleReader snapshot)
+snap = reader.read_snapshot(50)
+plot_density(pos=snap.dark['posvel'][:, :3], mass=snap.dark['mass'],
+             grid_len=5.0, vmin=4.0, vmax=9.0)
+
+# Mollweide sky projection (requires healpy)
 plot_mollweide(pos, weights=masses, initial_nside=60)
 
 # Stream in sky coordinates (alpha/delta and phi1/phi2)

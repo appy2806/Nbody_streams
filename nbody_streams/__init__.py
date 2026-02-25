@@ -15,6 +15,10 @@ except PackageNotFoundError:
 
 # --- Public API ---
 
+# Multi-species types and unified simulation entry point
+from .species import Species, PerformanceWarning
+from .sim import run_simulation
+
 # From .io
 from .nbody_io import ParticleReader
 
@@ -45,16 +49,26 @@ from .fields import (
 # Define what "from nbody_streams import *" does
 __all__ = [
     "__version__",
+    # Multi-species
+    "Species",
+    "PerformanceWarning",
+    "run_simulation",
+    # I/O
     "ParticleReader",
+    # Low-level integration (backward compat)
     "run_nbody_gpu",
     "run_nbody_cpu",
+    # Utilities
+    "make_plummer_sphere",
     "G_DEFAULT",
     "NBODY_UNITS",
+    # Force / potential computation
     "compute_nbody_forces_gpu",
     "compute_nbody_forces_cpu",
     "compute_nbody_potential_gpu",
     "compute_nbody_potential_cpu",
     "get_gpu_info",
+    # Subpackages
     "utils",
     "coords",
     "fast_sims",
