@@ -16,6 +16,8 @@ import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import shared_memory
 
+from .species import Species
+
 def _make_times_ns(raw):
     """
     Convert a raw np.loadtxt array into SimpleNamespace(snap=int_array, time=float_array).
@@ -30,6 +32,22 @@ def _make_times_ns(raw):
         return None
     return SimpleNamespace(snap=arr[:, 0].astype(int), time=arr[:, 1].astype(float))
 
+
+def _is_uniform(arr: np.ndarray, rtol: float = 1e-10) -> tuple[bool, float]:
+    """
+    Check whether all elements of *arr* are equal to within relative tolerance.
+
+    Returns
+    -------
+    (is_uniform, representative_value)
+    """
+    v0 = float(arr.flat[0])
+    return bool(np.allclose(arr, v0, rtol=rtol, atol=0.0)), v0
+
+
+# ---------------------------------------------------------------------------
+# Worker functions — must be at module scope to be picklable.
+# ---------------------------------------------------------------------------
 
 # Worker function must live at module scope so it can be pickled by ProcessPoolExecutor.
 def _worker_write_shared(args):
@@ -95,6 +113,46 @@ def _worker_write_shared(args):
         shm_s.close()
 
     return snap_index
+
+
+def _worker_write_shared_multi(args):
+    """
+    Worker for N-species parallel extraction.
+
+    Args (tuple):
+        snap_index (int)
+        dest_idx (int)
+        file_path (str)
+        species_shm_info (list of (shm_name_or_None, shape, start_idx, end_idx))
+            One entry per species (in order).  ``shm_name`` is None when the
+            caller does not want this species extracted.
+        dtype_name (str)
+
+    Returns:
+        snap_index (int)
+    """
+    snap_index, dest_idx, file_path, species_shm_info, dtype_name = args
+
+    import numpy as _np
+    from multiprocessing import shared_memory as _shared_memory
+    import h5py as _h5py
+
+    dtype = _np.dtype(dtype_name)
+    dset = f"snap.{snap_index:03d}"
+
+    with _h5py.File(file_path, "r") as f:
+        raw = f["snapshots"][dset][:]
+
+    for shm_name, shape, start_idx, end_idx in species_shm_info:
+        if shm_name is None or shape is None:
+            continue
+        shm = _shared_memory.SharedMemory(name=shm_name)
+        view = _np.ndarray(shape, dtype=dtype, buffer=shm.buf)
+        view[dest_idx, :, :] = raw[start_idx:end_idx]
+        shm.close()
+
+    return snap_index
+
 
 class ParticleReader:
     """
@@ -204,67 +262,165 @@ class ParticleReader:
     def _read_properties(self):
         """
         Read simulation properties from the first HDF5 file.
-        Robust to missing 'properties', 'dark', or 'star' groups.
+
+        Supports two HDF5 schemas:
+
+        **New multi-species schema** (written by this version):
+          ``/properties`` group carries ``n_species`` and ``species_names``
+          attributes, followed by per-species sub-groups that may store mass /
+          softening as a scalar dataset **or** as a ``m_array`` / ``eps_array``
+          dataset (smart storage written by :func:`_save_snapshot`).
+
+        **Legacy two-species schema** (files written by earlier versions):
+          ``/properties/dark`` and ``/properties/star`` sub-groups only; no
+          ``n_species`` attribute.
+
+        In both cases the following backward-compatible instance attributes are
+        set after returning from this method::
+
+            self.species_list  : list[Species]    (primary, ordered)
+            self.num_dark      : int
+            self.mass_dark     : float
+            self._eps_dark     : float
+            self.num_star      : int
+            self.mass_star     : float
+            self._eps_star     : float
+            self._timestep     : float
         """
         default_mass = 1.0
         default_eps = 0.0
-        default_N = 0
         default_timestep = 0.0
 
         with h5py.File(self.file_list[0], "r") as f:
             props = f.get("properties", None)
-            if props is None:
-                # No properties group at all -> set sensible defaults
-                self.num_dark = default_N
-                self.mass_dark = default_mass
-                self._eps_dark = default_eps
 
-                self.num_star = 0
-                self.mass_star = default_mass
-                self._eps_star = default_eps
-
-                self._timestep = default_timestep
+            # ------------------------------------------------------------------
+            # Read timestep (shared by both schemas)
+            # ------------------------------------------------------------------
+            if props is not None and "time_step" in props:
+                self._timestep = float(props["time_step"][()])
+            elif props is not None and "/properties/time_step" in f:
+                try:
+                    self._timestep = float(f["/properties/time_step"][()])
+                except Exception:
+                    self._timestep = default_timestep
             else:
-                # dark
-                dark = props.get("dark", None)
-                if dark is None:
-                    self.num_dark = default_N
-                    self.mass_dark = default_mass
-                    self._eps_dark = default_eps
-                else:
-                    self.num_dark = int(dark["N"][()]) if "N" in dark else default_N
-                    self.mass_dark = float(dark["m"][()]) if "m" in dark else default_mass
-                    self._eps_dark = float(dark["eps"][()]) if "eps" in dark else default_eps
+                self._timestep = default_timestep
 
-                # star (may be missing)
-                star = props.get("star", None)
-                if star is None:
-                    self.num_star = 0
-                    self.mass_star = default_mass
-                    self._eps_star = self._eps_dark
-                else:
-                    self.num_star = int(star["N"][()]) if "N" in star else 0
-                    self.mass_star = float(star["m"][()]) if "m" in star else default_mass
-                    self._eps_star = float(star["eps"][()]) if "eps" in star else self._eps_dark
+            # ------------------------------------------------------------------
+            # Detect schema
+            # ------------------------------------------------------------------
+            if props is None:
+                # No properties at all — legacy fallback with neutral defaults
+                self.species_list = [
+                    Species(name="dark", N=0, mass=default_mass,
+                            softening=default_eps),
+                ]
+                self._timestep = default_timestep
 
-                # time_step (may be at properties root)
-                if "time_step" in props:
-                    self._timestep = float(props["time_step"][()])
-                else:
-                    # fallback: check absolute path (some writers used /properties/time_step)
-                    if "/properties/time_step" in f:
-                        try:
-                            self._timestep = float(f["/properties/time_step"][()])
-                        except Exception:
-                            self._timestep = default_timestep
+            elif "n_species" in props.attrs:
+                # ---- NEW multi-species schema --------------------------------
+                raw_names = props.attrs["species_names"]
+                names = [
+                    n.decode("utf-8") if isinstance(n, (bytes, np.bytes_)) else str(n)
+                    for n in raw_names
+                ]
+                species_list: list[Species] = []
+                for name in names:
+                    grp = props.get(name, None)
+                    if grp is None:
+                        continue
+                    N_sp = int(grp["N"][()]) if "N" in grp else 0
+                    # Smart mass: scalar 'm' or per-particle 'm_array'
+                    if "m_array" in grp:
+                        mass_val: float | np.ndarray = grp["m_array"][:]
+                    elif "m" in grp:
+                        mass_val = float(grp["m"][()])
                     else:
-                        self._timestep = default_timestep
+                        mass_val = default_mass
+                    # Smart softening: scalar 'eps' or per-particle 'eps_array'
+                    if "eps_array" in grp:
+                        eps_val: float | np.ndarray = grp["eps_array"][:]
+                    elif "eps" in grp:
+                        eps_val = float(grp["eps"][()])
+                    else:
+                        eps_val = default_eps
+                    species_list.append(
+                        Species(name=name, N=N_sp, mass=mass_val,
+                                softening=eps_val)
+                    )
+                self.species_list = species_list
+
+            else:
+                # ---- Legacy two-species schema --------------------------------
+                species_list = []
+
+                dark = props.get("dark", None)
+                if dark is not None:
+                    n_d = int(dark["N"][()]) if "N" in dark else 0
+                    m_d = float(dark["m"][()]) if "m" in dark else default_mass
+                    e_d = float(dark["eps"][()]) if "eps" in dark else default_eps
+                    if n_d > 0:
+                        species_list.append(
+                            Species(name="dark", N=n_d, mass=m_d, softening=e_d)
+                        )
+
+                star = props.get("star", None)
+                if star is not None:
+                    n_s = int(star["N"][()]) if "N" in star else 0
+                    m_s = float(star["m"][()]) if "m" in star else default_mass
+                    e_s = float(star["eps"][()]) if "eps" in star else default_eps
+                    if n_s > 0:
+                        species_list.append(
+                            Species(name="star", N=n_s, mass=m_s, softening=e_s)
+                        )
+
+                if not species_list:
+                    # properties group exists but has no dark/star entries
+                    species_list.append(
+                        Species(name="dark", N=0, mass=default_mass,
+                                softening=default_eps)
+                    )
+                self.species_list = species_list
+
+        # ----------------------------------------------------------------------
+        # Set legacy backward-compat attributes from species_list
+        # ----------------------------------------------------------------------
+        dark_sp = next((s for s in self.species_list if s.name == "dark"), None)
+        star_sp = next((s for s in self.species_list if s.name == "star"), None)
+
+        self.num_dark = dark_sp.N if dark_sp else 0
+        self.mass_dark = (
+            float(dark_sp.mass)
+            if dark_sp and np.isscalar(dark_sp.mass)
+            else (float(dark_sp.mass.flat[0]) if dark_sp else default_mass)
+        )
+        self._eps_dark = (
+            float(dark_sp.softening)
+            if dark_sp and np.isscalar(dark_sp.softening)
+            else (float(dark_sp.softening.flat[0]) if dark_sp else default_eps)
+        )
+        self.num_star = star_sp.N if star_sp else 0
+        self.mass_star = (
+            float(star_sp.mass)
+            if star_sp and np.isscalar(star_sp.mass)
+            else (float(star_sp.mass.flat[0]) if star_sp else default_mass)
+        )
+        self._eps_star = (
+            float(star_sp.softening)
+            if star_sp and np.isscalar(star_sp.softening)
+            else (float(star_sp.softening.flat[0]) if star_sp else self._eps_dark)
+        )
 
         if self._verbose:
-            print("✅   Simulation properties:")
-            print(f"      - N_dark: {self.num_dark}, N_star: {self.num_star}")
-            print(f"      - M_dark: {self.mass_dark:.2e}, M_star: {self.mass_star:.2e}")
-            print(f"      - time_step: {self._timestep}")
+            print("Simulation properties:")
+            for s in self.species_list:
+                m_str = (f"{s.mass:.2e}" if np.isscalar(s.mass)
+                         else f"array[{s.N}]")
+                h_str = (f"{s.softening:.3f}" if np.isscalar(s.softening)
+                         else f"array[{s.N}]")
+                print(f"  [{s.name}] N={s.N:,}, mass={m_str}, eps={h_str}")
+            print(f"  time_step: {self._timestep}")
 
     def _map_snapshots_to_files(self):
         """
@@ -335,14 +491,26 @@ class ParticleReader:
         with h5py.File(file_to_open, "r") as f:
             raw_data = f["snapshots"][dataset_name][:]
 
-        part = SimpleNamespace(dark={}, star={})
+        # Build per-species slices using species_list (handles N species)
+        part_species: dict[str, dict] = {}
+        idx = 0
+        for s in self.species_list:
+            posvel = raw_data[idx : idx + s.N]
+            mass_arr = (
+                np.full(s.N, float(s.mass))
+                if np.isscalar(s.mass)
+                else np.asarray(s.mass)
+            )
+            part_species[s.name] = {"posvel": posvel, "mass": mass_arr}
+            idx += s.N
 
-        dm_end_index = self.num_dark
-        part.dark["posvel"] = raw_data[0:dm_end_index]
-        part.star["posvel"] = raw_data[dm_end_index : dm_end_index + self.num_star]
-
-        part.dark["mass"] = np.full(self.num_dark, self.mass_dark)
-        part.star["mass"] = np.full(self.num_star, self.mass_star)
+        # Assemble SimpleNamespace with backward-compatible dark/star attributes
+        part = SimpleNamespace()
+        part.species = part_species
+        part.dark = part_species.get("dark", {"posvel": np.empty((0, 6)),
+                                              "mass": np.empty(0)})
+        part.star = part_species.get("star", {"posvel": np.empty((0, 6)),
+                                              "mass": np.empty(0)})
 
         part.snap = snap_index
         if self.Times is not None:
@@ -352,48 +520,63 @@ class ParticleReader:
             part.time = None
 
         if self._verbose:
-            print(f"✅   Read snapshot {snap_index} from {file_to_open} (time={part.time})")
+            print(f"Read snapshot {snap_index} from {file_to_open} "
+                  f"(time={part.time})")
 
         return part
 
     def extract_orbits(self, particle_type: str = "star", min_parallel_workers: int = 4):
         """
-        Extract orbits for selected particle types across all available snapshots.
+        Extract orbits for selected particle types across all available snapshots,
         using parallel worker processes that write directly into shared memory.
 
-        WARNING: This loads *all* snapshot phase-space data for the chosen particle
-        types into memory. It can be very memory intensive for many snapshots and
-        large N.
+        WARNING: This loads *all* snapshot phase-space data for the chosen
+        particle types into memory.  It can be very memory-intensive for many
+        snapshots and large N.
 
         Parameters
         ----------
-        particle_type : {'dark', 'star', 'all', True} or False
-            Which particle types to load. Use 'dark', 'star', or 'all' (or True).
-            If False, the function returns None.
-        min_parallel_workers : Number of parallel workers. Default = 4. 
-            Set to min(min_parallel_workers, CPUsavail, num_snapshots)
-            
+        particle_type : str, True, or False
+            Which particle types to load:
+
+            * ``'all'`` or ``True`` — all species in the file.
+            * ``False`` — return ``None`` immediately.
+            * ``'dark'``, ``'star'`` — backward-compatible single-species load.
+            * Any other species name present in the file (e.g. ``'bh'``).
+
+        min_parallel_workers : int, optional
+            Maximum number of parallel worker processes.  Actual workers =
+            ``min(min_parallel_workers, cpu_count, num_snapshots)``.
+
         Returns
         -------
         types.SimpleNamespace
-            - orbits.dark / orbits.star : ndarray with shape (num_snapshots, N_particles, 6)
-              (snapshot-major ordering)
-            - orbits.Times : 1D ndarray of length num_snapshots with physical times (Gyr),
-              or None if no times were loaded.
-            - orbits.Snaps : 1D ndarray of snapshot indices (present only if Times not available).
+            * ``orbits.species`` : dict mapping species name ->
+              ndarray of shape ``(num_snapshots, N_k, 6)``.
+            * ``orbits.dark`` / ``orbits.star`` : backward-compatible aliases
+              to the corresponding entry in ``orbits.species`` (if present).
+            * ``orbits.Times`` : 1-D ndarray of length ``num_snapshots`` with
+              physical times, or ``None``.
+            * ``orbits.Snaps`` : 1-D int ndarray of snapshot indices.
         """
-
         if not particle_type:
             return None
 
-        types_to_process = []
-        if particle_type in ["dark", "all", True]:
-            types_to_process.append("dark")
-        if particle_type in ["star", "all", True]:
-            types_to_process.append("star")
-
-        if not types_to_process:
-            raise ValueError(f"Invalid particle_type: {particle_type}. Use 'dark', 'star', or 'all'.")
+        # Resolve which species names to extract
+        all_names = [s.name for s in self.species_list]
+        if particle_type in ("all", True):
+            types_to_process = list(all_names)
+        elif isinstance(particle_type, str):
+            if particle_type not in all_names:
+                raise ValueError(
+                    f"particle_type '{particle_type}' not found in species list "
+                    f"{all_names}."
+                )
+            types_to_process = [particle_type]
+        else:
+            raise TypeError(
+                f"particle_type must be str, True, or False; got {type(particle_type)!r}"
+            )
 
         all_snap_indices = sorted(self._snap_to_file_map.keys())
         num_snapshots = len(all_snap_indices)
@@ -402,57 +585,67 @@ class ParticleReader:
 
         if num_snapshots == 0:
             if self._verbose:
-                print("⚠️ No snapshots found; returning empty orbits.")
-            if "dark" in types_to_process:
-                orbits.dark = np.zeros((0, self.num_dark, 6), dtype=np.float64)
-            if "star" in types_to_process:
-                orbits.star = np.zeros((0, self.num_star, 6), dtype=np.float64)
+                print("No snapshots found; returning empty orbits.")
+            orbits.species = {}
+            for s in self.species_list:
+                if s.name in types_to_process:
+                    orbits.species[s.name] = np.zeros((0, s.N, 6), dtype=np.float64)
+            orbits.dark = orbits.species.get("dark", np.zeros((0, 0, 6)))
+            orbits.star = orbits.species.get("star", np.zeros((0, 0, 6)))
             orbits.Times = None
             orbits.Snaps = np.array([], dtype=int)
             return orbits
 
-        # Shared memory shapes: (num_snapshots, N_particles, 6)
-        shape_dark = (num_snapshots, self.num_dark, 6)
-        shape_star = (num_snapshots, self.num_star, 6) if "star" in types_to_process else None
-
         dtype = np.float64
         dtype_name = np.dtype(dtype).name
 
-        shm_dark = None
-        shm_star = None
-        shared_dark = None
-        shared_star = None
+        # Build start/end indices for each species in the flat snapshot array
+        species_ranges: dict[str, tuple[int, int]] = {}
+        idx = 0
+        for s in self.species_list:
+            species_ranges[s.name] = (idx, idx + s.N)
+            idx += s.N
 
-        def _nbytes_for_shape(s, dt):
-            return int(np.prod(s)) * int(np.dtype(dt).itemsize)
+        # Per-species shared memory
+        shm_map: dict[str, shared_memory.SharedMemory] = {}
+        view_map: dict[str, np.ndarray] = {}
+        species_shapes: dict[str, tuple] = {}
+
+        def _nbytes(shape, dt):
+            return int(np.prod(shape)) * int(np.dtype(dt).itemsize)
 
         try:
-            # Create shared memory buffers (only when the corresponding type is requested)
-            if "dark" in types_to_process:
-                bytes_dark = _nbytes_for_shape(shape_dark, dtype)
-                shm_dark = shared_memory.SharedMemory(create=True, size=bytes_dark)
-                shared_dark = np.ndarray(shape_dark, dtype=dtype, buffer=shm_dark.buf)
-                shared_dark[:] = 0.0
+            for s in self.species_list:
+                if s.name not in types_to_process:
+                    continue
+                shape = (num_snapshots, s.N, 6)
+                species_shapes[s.name] = shape
+                shm = shared_memory.SharedMemory(create=True, size=_nbytes(shape, dtype))
+                shm_map[s.name] = shm
+                view = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
+                view[:] = 0.0
+                view_map[s.name] = view
 
-            if "star" in types_to_process:
-                bytes_star = _nbytes_for_shape(shape_star, dtype)
-                shm_star = shared_memory.SharedMemory(create=True, size=bytes_star)
-                shared_star = np.ndarray(shape_star, dtype=dtype, buffer=shm_star.buf)
-                shared_star[:] = 0.0
-
-            # Build argument list for each snapshot (pass shape_dark always so worker knows num_dark)
+            # Build args for each snapshot
             args_list = []
             for dest_idx, snap in enumerate(all_snap_indices):
                 file_path = self._snap_to_file_map[snap]
+                # One entry per species: (shm_name_or_None, shape_or_None, start, end)
+                species_shm_info = []
+                for s in self.species_list:
+                    if s.name in shm_map:
+                        shm_name = shm_map[s.name].name
+                        shape = species_shapes[s.name]
+                        start, end = species_ranges[s.name]
+                        species_shm_info.append((shm_name, shape, start, end))
+                    else:
+                        species_shm_info.append((None, None, None, None))
                 args = (
                     int(snap),
                     int(dest_idx),
                     str(file_path),
-                    shm_dark.name if shm_dark is not None else None,
-                    shape_dark,           # ALWAYS pass shape_dark
+                    species_shm_info,
                     dtype_name,
-                    shm_star.name if shm_star is not None else None,
-                    shape_star,           # pass shape_star or None
                 )
                 args_list.append(args)
 
@@ -460,59 +653,59 @@ class ParticleReader:
             max_workers = min(min_parallel_workers, cpu_avail, num_snapshots)
 
             if self._verbose:
-                print(f"   Spawning up to {max_workers} workers to read {num_snapshots} snapshots...")
+                print(f"Spawning up to {max_workers} workers for "
+                      f"{num_snapshots} snapshots...")
 
             with ProcessPoolExecutor(max_workers=max_workers) as ex:
-                futures = {ex.submit(_worker_write_shared, a): a[0] for a in args_list}
+                futures = {
+                    ex.submit(_worker_write_shared_multi, a): a[0]
+                    for a in args_list
+                }
                 for fut in as_completed(futures):
-                    # ensure exceptions are raised here for visibility
                     _ = fut.result()
 
-            # Copy shared memory views into normal numpy arrays for return
-            if "dark" in types_to_process:
-                orbits.dark = np.array(shared_dark, copy=True)
-            if "star" in types_to_process:
-                orbits.star = np.array(shared_star, copy=True)
+            # Copy out of shared memory into regular arrays
+            orbits.species = {}
+            for name, view in view_map.items():
+                orbits.species[name] = np.array(view, copy=True)
 
         finally:
-            # Cleanup shared memory
-            if shm_dark is not None:
+            for shm in shm_map.values():
                 try:
-                    shm_dark.close()
-                    shm_dark.unlink()
-                except FileNotFoundError:
-                    pass
-            if shm_star is not None:
-                try:
-                    shm_star.close()
-                    shm_star.unlink()
+                    shm.close()
+                    shm.unlink()
                 except FileNotFoundError:
                     pass
 
-        # Attach time information aligned with snapshots; Snaps is always an int array
+        # Backward-compatible aliases
+        orbits.dark = orbits.species.get("dark", np.empty((0, 0, 6), dtype=np.float64))
+        orbits.star = orbits.species.get("star", np.empty((0, 0, 6), dtype=np.float64))
+
+        # Time information
         orbits.Snaps = np.array(all_snap_indices, dtype=int)
         if self.Times is not None:
             try:
-                snap_idxs = self.Times.snap   # int array
-                time_vals = self.Times.time   # float array
+                snap_idxs = self.Times.snap
+                time_vals = self.Times.time
                 if np.array_equal(snap_idxs, orbits.Snaps):
                     orbits.Times = time_vals
                 else:
                     time_map = dict(zip(snap_idxs, time_vals))
                     orbits.Times = np.array(
-                        [time_map.get(s, np.nan) for s in all_snap_indices], dtype=float
+                        [time_map.get(s, np.nan) for s in all_snap_indices],
+                        dtype=float,
                     )
             except Exception:
                 orbits.Times = None
                 if self._verbose:
-                    print("   Warning: could not parse Times into orbits.Times.")
+                    print("Warning: could not align Times with snapshot indices.")
         else:
             orbits.Times = None
             if self._verbose:
-                print("   Times not available — attaching orbits.Snaps (snapshot indices).")
+                print("Times not available — orbits.Snaps attached.")
 
         if self._verbose:
-            print("✅  ...extraction complete.")
+            print("Orbit extraction complete.")
 
         return orbits
     
@@ -522,6 +715,9 @@ def _save_snapshot(
     time: float,
     output_dir: Path,
     *,
+    # --- New multi-species path (preferred) ---
+    species: list[Species] | None = None,
+    # --- Legacy kwargs (still honoured when species=None) ---
     num_dark: int | None = None,
     num_star: int | None = None,
     mass_dark: float | None = None,
@@ -534,88 +730,144 @@ def _save_snapshot(
     total_expected_snapshots: int | None = None,
 ) -> None:
     """
-    Write snapshot(s) compatible with ParticleReader.
+    Write a snapshot compatible with :class:`ParticleReader`.
 
-    Modes:
-      - single_file=True -> all snapshots go into <output_dir>/snapshots.h5 (default if single_file=None and num_files_to_write is None)
-      - num_files_to_write=N -> create N files named snapshot_part{0..N-1}.h5 and distribute snapshots.
-         If total_expected_snapshots is provided distribution is contiguous chunks; else round-robin.
+    Two modes
+    ---------
+    **Multi-species** (``species`` kwarg provided):
+      Writes a ``/properties`` group with ``n_species`` / ``species_names``
+      attributes and per-species sub-groups.  Per-species mass and softening
+      are stored as a **scalar dataset** when all values are equal (saves
+      space), or as a compressed ``m_array`` / ``eps_array`` dataset when
+      values vary.
 
-    Datasets created under group 'snapshots' as 'snap.###'.
-    If dataset exists already it will NOT be overwritten.
-    Properties are written to each file the first time the file is created.
+    **Legacy two-species** (``species=None``, default):
+      Writes ``/properties/dark`` and ``/properties/star`` sub-groups exactly
+      as in previous versions.  All existing callers continue to work.
+
+    File-distribution modes (both paths)
+    -------------------------------------
+    * ``single_file=True`` (or default) → ``<output_dir>/snapshot.h5``
+    * ``num_files_to_write=N`` → ``snapshot.000.h5 … snapshot.(N-1).h5``
+
+    Datasets are created under group ``'snapshots'`` as ``snap.###``.
+    Existing datasets are **never** overwritten.
+    Properties are written only on first creation of the file.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    N = phase_space.shape[0]
-    if num_dark is None and num_star is None:
-        num_dark = N
-        num_star = 0
-    elif num_star is None:
-        num_star = N - int(num_dark)
-
-    num_dark = int(num_dark)
-    num_star = int(num_star)
-
-    if mass_dark is None:
-        mass_dark = 1.0
-    if mass_star is None:
-        mass_star = 1.0
-    if eps_dark is None:
-        eps_dark = 0.0
-    if eps_star is None:
-        eps_star = 0.0
     if time_step is None:
         time_step = 0.0
 
-    # Determine file target
+    # ---- Determine target filename ----------------------------------------
     if single_file is None:
         single_file = (num_files_to_write is None)
 
     if single_file:
         fname = output_dir / "snapshot.h5"
     else:
-        # multi-file mode
-        num_files = int(num_files_to_write) if (num_files_to_write is not None and num_files_to_write > 0) else 1
+        num_files = int(num_files_to_write) if (
+            num_files_to_write is not None and num_files_to_write > 0
+        ) else 1
         if num_files == 1:
             fname = output_dir / "snapshot.h5"
         else:
             if total_expected_snapshots is not None and total_expected_snapshots > 0:
                 per_file = math.ceil(total_expected_snapshots / num_files)
-                file_idx = int(snap_index) // per_file
-                file_idx = min(file_idx, num_files - 1)
+                file_idx = min(int(snap_index) // per_file, num_files - 1)
             else:
-                # fallback to round-robin if total expected not given
                 file_idx = int(snap_index) % num_files
             fname = output_dir / f"snapshot.{file_idx:03d}.h5"
 
-    # Open file in append mode and create group/dataset if missing
+    # ---- Write HDF5 ----------------------------------------------------------
     with h5py.File(fname, "a") as f:
         snaps = f.require_group("snapshots")
         dset_name = f"snap.{snap_index:03d}"
         if dset_name in snaps:
-            # do not overwrite existing dataset
-            return
+            return  # never overwrite
         snaps.create_dataset(dset_name, data=phase_space, compression="gzip")
-
-        # write properties only if not present
-        props = f.require_group("properties")
-        if "dark" not in props:
-            dark = props.create_group("dark")
-            dark.create_dataset("N", data=num_dark)
-            dark.create_dataset("m", data=mass_dark)
-            dark.create_dataset("eps", data=eps_dark)
-        if "star" not in props:
-            star = props.create_group("star")
-            star.create_dataset("N", data=num_star)
-            star.create_dataset("m", data=mass_star)
-            star.create_dataset("eps", data=eps_star)
-        if "time_step" not in props:
-            props.create_dataset("time_step", data=time_step)
-
-        # optional attribute with physical time for convenience
         snaps.attrs[f"snap_time.{snap_index:03d}"] = float(time)
+
+        props = f.require_group("properties")
+
+        if species is not None:
+            # ------------------------------------------------------------------
+            # NEW multi-species path
+            # ------------------------------------------------------------------
+            if "n_species" not in props.attrs:
+                props.attrs["n_species"] = len(species)
+                props.attrs["species_names"] = np.array(
+                    [s.name.encode("utf-8") for s in species]
+                )
+
+            for s in species:
+                if s.name in props:
+                    continue  # already written in a previous snapshot of this file
+                grp = props.create_group(s.name)
+                grp.create_dataset("N", data=int(s.N))
+
+                # Smart mass storage
+                m_arr = (
+                    np.full(s.N, float(s.mass), dtype=np.float64)
+                    if np.isscalar(s.mass)
+                    else np.asarray(s.mass, dtype=np.float64)
+                )
+                m_uniform, m_val = _is_uniform(m_arr)
+                if m_uniform:
+                    grp.create_dataset("m", data=float(m_val))
+                else:
+                    grp.create_dataset("m_array", data=m_arr, compression="gzip")
+
+                # Smart softening storage
+                h_arr = (
+                    np.full(s.N, float(s.softening), dtype=np.float64)
+                    if np.isscalar(s.softening)
+                    else np.asarray(s.softening, dtype=np.float64)
+                )
+                h_uniform, h_val = _is_uniform(h_arr)
+                if h_uniform:
+                    grp.create_dataset("eps", data=float(h_val))
+                else:
+                    grp.create_dataset("eps_array", data=h_arr, compression="gzip")
+
+            if "time_step" not in props:
+                props.create_dataset("time_step", data=float(time_step))
+
+        else:
+            # ------------------------------------------------------------------
+            # LEGACY two-species path (backward compatible)
+            # ------------------------------------------------------------------
+            N = phase_space.shape[0]
+            if num_dark is None and num_star is None:
+                num_dark = N
+                num_star = 0
+            elif num_star is None:
+                num_star = N - int(num_dark)
+            num_dark = int(num_dark)
+            num_star = int(num_star)
+
+            if mass_dark is None:
+                mass_dark = 1.0
+            if mass_star is None:
+                mass_star = 1.0
+            if eps_dark is None:
+                eps_dark = 0.0
+            if eps_star is None:
+                eps_star = 0.0
+
+            if "dark" not in props:
+                dark = props.create_group("dark")
+                dark.create_dataset("N", data=num_dark)
+                dark.create_dataset("m", data=float(mass_dark))
+                dark.create_dataset("eps", data=float(eps_dark))
+            if "star" not in props:
+                star = props.create_group("star")
+                star.create_dataset("N", data=num_star)
+                star.create_dataset("m", data=float(mass_star))
+                star.create_dataset("eps", data=float(eps_star))
+            if "time_step" not in props:
+                props.create_dataset("time_step", data=float(time_step))
 
 def _save_restart(
     phase_space: np.ndarray,
@@ -623,54 +875,106 @@ def _save_restart(
     step: int,
     output_dir: Path,
     snapshot_counter: int,
+    *,
+    mass_arr: np.ndarray | None = None,
+    softening_arr: np.ndarray | None = None,
+    species_names: list[str] | None = None,
+    species_N: list[int] | None = None,
 ) -> None:
     """
-    Save restart file for crash recovery.
-    
-    Parameters
-    ----------
-    phase_space : np.ndarray, shape (N, 6)
-        Phase space coordinates.
-    time : float
-        Current time.
-    step : int
-        Current step number.
-    output_dir : Path
-        Output directory.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    restart_file = output_dir / "restart.npz"
-    np.savez_compressed(
-        restart_file, 
-        phase_space=phase_space, 
-        time=time, 
-        step=step, 
-        snapshot_counter=int(snapshot_counter)
-        )
+    Save a restart file for crash recovery.
 
-def _load_restart(output_dir: Path) -> tuple[np.ndarray, float, int, int] | None:
-    """
-    Load restart file if it exists.
-    
     Parameters
     ----------
+    phase_space : ndarray, shape (N, 6)
+    time : float
+    step : int
     output_dir : Path
-        Output directory.
-    
+    snapshot_counter : int
+    mass_arr : ndarray, shape (N,), optional
+        Per-particle masses (multi-species path).
+    softening_arr : ndarray, shape (N,), optional
+        Per-particle softening lengths (multi-species path).
+    species_names : list[str], optional
+        Ordered species names (multi-species path).
+    species_N : list[int], optional
+        Per-species particle counts (multi-species path).
+
+    Notes
+    -----
+    Old restart files that lack the species keys are loaded gracefully by
+    :func:`_load_restart` (missing fields are returned as ``None``).
+    """
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    restart_file = Path(output_dir) / "restart.npz"
+
+    save_kwargs: dict = dict(
+        phase_space=phase_space,
+        time=np.float64(time),
+        step=np.int64(step),
+        snapshot_counter=np.int64(snapshot_counter),
+    )
+    if mass_arr is not None:
+        save_kwargs["mass_arr"] = np.asarray(mass_arr, dtype=np.float64)
+    if softening_arr is not None:
+        save_kwargs["softening_arr"] = np.asarray(softening_arr, dtype=np.float64)
+    if species_names is not None:
+        save_kwargs["species_names"] = np.array(
+            [n.encode("utf-8") for n in species_names]
+        )
+    if species_N is not None:
+        save_kwargs["species_N"] = np.array(species_N, dtype=np.int64)
+
+    np.savez_compressed(restart_file, **save_kwargs)
+
+
+def _load_restart(
+    output_dir: Path,
+) -> tuple[
+    np.ndarray, float, int, int,
+    np.ndarray | None, np.ndarray | None,
+    list[str] | None, list[int] | None,
+] | None:
+    """
+    Load a restart file if one exists.
+
     Returns
     -------
-    tuple | None
-        (phase_space, time, step) if found, else None.
+    tuple of length 8, or ``None`` if no restart file found::
+
+        (phase_space, time, step, snapshot_counter,
+         mass_arr, softening_arr, species_names, species_N)
+
+    The last four elements are ``None`` when the file was written by an
+    older version of the package (backward-compatible).
     """
-    restart_file = output_dir / "restart.npz"
-    if restart_file.exists():
-        data = np.load(restart_file)
-        phase_space = data["phase_space"]
-        time = float(data["time"])
-        step = int(data["step"])        
-        snapshot_counter = int(data["snapshot_counter"]) if "snapshot_counter" in data.files else 0
-        return phase_space, time, step, snapshot_counter
-    return None
+    restart_file = Path(output_dir) / "restart.npz"
+    if not restart_file.exists():
+        return None
+
+    data = np.load(restart_file, allow_pickle=False)
+    phase_space = data["phase_space"]
+    time = float(data["time"])
+    step = int(data["step"])
+    snapshot_counter = int(data["snapshot_counter"]) if "snapshot_counter" in data.files else 0
+
+    mass_arr = data["mass_arr"] if "mass_arr" in data.files else None
+    softening_arr = data["softening_arr"] if "softening_arr" in data.files else None
+
+    species_names: list[str] | None = None
+    if "species_names" in data.files:
+        raw = data["species_names"]
+        species_names = [
+            n.decode("utf-8") if isinstance(n, (bytes, np.bytes_)) else str(n)
+            for n in raw
+        ]
+
+    species_N: list[int] | None = None
+    if "species_N" in data.files:
+        species_N = [int(n) for n in data["species_N"]]
+
+    return (phase_space, time, step, snapshot_counter,
+            mass_arr, softening_arr, species_names, species_N)
 
 def _update_snapshot_times(output_dir: Path, snap_index: int, time: float) -> None:
     """
