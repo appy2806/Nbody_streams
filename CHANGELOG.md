@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-02-24
+
+### Added
+
+- **Multi-species simulation support** — arbitrary number of particle types (dark matter, stars, gas tracers, black holes, …) in a single run.
+  - `Species` dataclass (`name`, `N`, `mass`, `softening`) with `Species.dark()` and `Species.star()` convenience constructors; scalar or per-particle mass/softening.
+  - `run_simulation(phase_space, species, ..., architecture='cpu'|'gpu', method='direct'|'tree')` — unified high-level entry point; returns `dict[str, ndarray]` keyed by species name.
+  - `PerformanceWarning` emitted automatically when particle counts exceed recommended thresholds (CPU direct >20k, GPU direct >500k, any >2M).
+  - `nbody_streams.species` module exposing `Species`, `PerformanceWarning`, and internal helpers.
+  - `nbody_streams.sim` module containing `run_simulation`.
+
+- **Smart HDF5 snapshot storage** — uniform mass/softening stored as a scalar dataset; variable (per-particle) stored as a compressed `m_array`/`eps_array` dataset.
+
+- **New HDF5 schema** for multi-species snapshots — `properties.attrs['n_species']` and `properties.attrs['species_names']`; each species in its own HDF5 group.
+
+- **Enriched restart files** — species names, per-species N, combined mass and softening arrays stored alongside phase-space data; old restart files load cleanly (missing keys return `None`).
+
+- **Physics test suite** (`tests/test_physics.py`, 24 tests):
+  - Energy and momentum conservation for old API (`run_nbody_cpu`, devel-equivalent) and new API (`run_simulation`).
+  - Multi-species energy and momentum conservation (2-species and 3-species).
+  - Regression suite: devel-style trajectory vs feat-multi_spec trajectory agree to `rtol=1e-5`.
+  - IO round-trip: final returned array matches last written snapshot.
+  - GPU conservation tests (auto-skipped without CuPy).
+
+- **`examples/run_simulation.ipynb`** — end-to-end notebook demonstrating single-species (Globular Cluster) and multi-species (Dwarf Galaxy: DM + Stars + Gas) workflows with visualisation.
+
+### Changed
+
+- **`ParticleReader` (backward-compatible rewrite)**:
+  - Detects HDF5 format automatically: presence of `n_species` attribute → new multi-species schema; absence → legacy dark/star schema.
+  - Populates `reader.species_list: list[Species]` for any format.
+  - `read_snapshot()` returns `part.species: dict[str, dict]` as the primary API.
+  - Legacy attributes (`part.dark`, `part.star`, `reader.num_dark`, `reader.mass_dark`, …) remain fully functional — no code changes required for existing workflows.
+  - `extract_orbits` returns `orbits.species` dict plus `orbits.dark`/`orbits.star` aliases.
+
+- **`make_plummer_sphere` overhaul**:
+  - Default units changed to physical (kpc/km/s/Msun): `M_total=10_000` Msun, `a=0.01` kpc.
+  - Added `G` parameter (defaults to `G_DEFAULT`) so the virial velocity scale is computed in physical units.
+  - Rejection sampling now uses the correct theoretical envelope `h_max = 0.09375`; velocity direction sampling switched to the cosine form for isotropy.
+  - Centre-of-mass and centre-of-momentum correction applied before returning.
+  - `masses` returned as `float64` (was `float32`).
+  - Improved docstring (references Aarseth, Henon & Wielen 1974).
+
+- **`run_nbody_gpu` / `run_nbody_cpu`** — added optional `species: list[Species] | None = None` parameter (default `None` preserves full backward compatibility); snapshot and restart kwargs now built once from species context.
+
+- **README** — multi-species overview, `Species` parameter table, `run_simulation` signature, single-species (Globular Cluster) and multi-species (Dwarf Galaxy) worked examples; package overview table updated.
+
+### Fixed
+
+- `_load_restart` now returns an 8-tuple; callers unpack via `[:4]` so both old (4-element) and new (8-element) restart files load without error.
+
 ## [1.2.0] - 2026-02-14
 
 ### Added
@@ -86,6 +137,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History
 
+- **1.3.0** (2026-02-24): Multi-species simulation support, `run_simulation` API, ParticleReader rewrite, `make_plummer_sphere` overhaul
 - **1.2.0** (2026-02-14): Fast stream-generation methods (particle spray, restricted N-body)
 - **1.1.0** (2026-02-08): Float4 vectorization and major performance improvements
 - **1.0.0** (2025-XX-XX): Initial release
@@ -93,6 +145,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## Upgrade Notes
+
+### From 1.2.0 to 1.3.0
+
+**No breaking changes** — fully backwards compatible!
+
+**What you get:**
+- Call `run_simulation(xv, [Species.dark(N, mass, softening)], ...)` instead of `run_nbody_gpu/cpu` for the new cleaner API.
+- Old `run_nbody_gpu` / `run_nbody_cpu` calls work unchanged — nothing needs updating.
+- Old HDF5 snapshot files and restart files are still read correctly.
+- Multi-species systems (dark matter + stars + gas + …) are now first-class citizens.
+- `make_plummer_sphere` now returns physically-scaled ICs by default (kpc/km/s/Msun); pass `M_total`, `a`, and `G` explicitly if you were relying on the old dimensionless defaults.
 
 ### From 1.1.0 to 1.2.0
 
@@ -128,8 +191,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Future Roadmap
 
-### Planned for 1.3.0
+### Planned for 1.4.0
+- [ ] GPU+Tree solver (`feat-cuda_kernel` + GPU tree code)
 - [ ] Adaptive time-stepping
 - [ ] Additional integrators (RK4, Hermite)
-- [ ] Parallel snapshot I/O
 - [ ] GPU-accelerated analysis tools
