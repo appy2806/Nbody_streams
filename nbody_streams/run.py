@@ -1014,13 +1014,20 @@ def run_nbody_cpu(
 
 def make_plummer_sphere(
     N: int,
-    M_total: float = 1.0,
-    a: float = 1.0,
-    seed: int = 42,
+    M_total: float = 10_000, # Msun
+    a: float = 0.01, # kpc
+    seed: int = 42069,
+    G: float = G_DEFAULT, # default code units. 
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Generate Plummer sphere in virial equilibrium.
-    
+    Generate a Plummer sphere in virial equilibrium.
+
+    Positions are sampled from the Plummer density profile:
+        rho(r) = (3 M / 4 pi a^3) * (1 + r^2/a^2)^(-5/2)
+
+    Velocities are sampled from the Plummer distribution function via
+    rejection sampling following Aarseth, Henon & Wielen (1974).
+
     Parameters
     ----------
     N : int
@@ -1031,54 +1038,80 @@ def make_plummer_sphere(
         Plummer scale radius.
     seed : int
         Random seed.
-    
+    G : float
+        Gravitational constant. Defaults to G_DEFAULT.
+
     Returns
     -------
     phase_space : np.ndarray, shape (N, 6)
-        Positions and velocities.
+        Positions (x, y, z) and velocities (vx, vy, vz).
     masses : np.ndarray, shape (N,)
         Particle masses (equal mass).
     """
     rng = np.random.default_rng(seed)
-    
-    # Sample radii from Plummer profile
-    u = rng.random(N)
-    r = a / np.sqrt(u**(-2/3) - 1)
-    
-    # Isotropic angles
-    theta = np.arccos(2 * rng.random(N) - 1)
-    phi = 2 * np.pi * rng.random(N)
-    
-    # Positions
-    x = r * np.sin(theta) * np.cos(phi)
-    y = r * np.sin(theta) * np.sin(phi)
-    z = r * np.cos(theta)
-    
-    # Velocities from distribution function (simplified)
-    G = 1.0  # N-body units
-    v_esc = np.sqrt(2 * G * M_total / np.sqrt(r**2 + a**2))
-    
-    v_mag = np.zeros(N)
+
+    # ------------------------------------------------------------------
+    # 1. Sample radii via inverse CDF of the Plummer mass profile
+    #    M(<r) = M_total * r^3 / (r^2 + a^2)^(3/2)
+    #    Inverted: r = a / sqrt(u^(-2/3) - 1),  u ~ Uniform(0, 1)
+    # ------------------------------------------------------------------
+    u = rng.uniform(0.0, 1.0, N)
+    r = a / np.sqrt(u ** (-2.0 / 3.0) - 1.0)
+
+    # Isotropic position angles
+    cos_theta = rng.uniform(-1.0, 1.0, N)
+    sin_theta = np.sqrt(1.0 - cos_theta ** 2)
+    phi = rng.uniform(0.0, 2.0 * np.pi, N)
+
+    x = r * sin_theta * np.cos(phi)
+    y = r * sin_theta * np.sin(phi)
+    z = r * cos_theta
+
+    # ------------------------------------------------------------------
+    # 2. Sample speeds via rejection sampling (Aarseth, Henon & Wielen 1974)
+    #
+    #    The Plummer DF in terms of q = v / v_esc is:
+    #        f(q) dq  ∝  q^2 (1 - q^2)^(7/2)   for q in [0, 1)
+    #
+    #    Maximum of h(q) = q^2 (1 - q^2)^3.5:
+    #        dh/dq = 0  =>  q_peak = sqrt(2/9)  => h_max ≈ 0.092
+    #
+    #    We draw (q, g) with q ~ Uniform(0,1), g ~ Uniform(0, h_max)
+    #    and accept when g <= h(q).
+    # ------------------------------------------------------------------
+    v_esc = np.sqrt(2.0 * G * M_total / np.sqrt(r ** 2 + a ** 2))
+
+    h_max = 0.09375  # exact: (2/9)*(7/9)^3.5 — safe upper envelope
+
+    v_mag = np.empty(N)
     for i in range(N):
-        q = 0.0
         while True:
-            q = rng.random()
-            g = rng.random()
-            if g < q**2 * (1 - q**2)**3.5:
+            q = rng.uniform(0.0, 1.0)
+            g = rng.uniform(0.0, h_max)
+            if g <= q ** 2 * (1.0 - q ** 2) ** 3.5:
                 break
         v_mag[i] = q * v_esc[i]
-    
+
     # Isotropic velocity directions
-    theta_v = np.arccos(2 * rng.random(N) - 1)
-    phi_v = 2 * np.pi * rng.random(N)
-    
-    vx = v_mag * np.sin(theta_v) * np.cos(phi_v)
-    vy = v_mag * np.sin(theta_v) * np.sin(phi_v)
-    vz = v_mag * np.cos(theta_v)
-    
+    cos_theta_v = rng.uniform(-1.0, 1.0, N)
+    sin_theta_v = np.sqrt(1.0 - cos_theta_v ** 2)
+    phi_v = rng.uniform(0.0, 2.0 * np.pi, N)
+
+    vx = v_mag * sin_theta_v * np.cos(phi_v)
+    vy = v_mag * sin_theta_v * np.sin(phi_v)
+    vz = v_mag * cos_theta_v
+
+    # ------------------------------------------------------------------
+    # 3. Centre-of-mass correction
+    #    Shift positions and velocities so the system has zero net
+    #    momentum and is centred on the origin.
+    # ------------------------------------------------------------------
+    x -= x.mean();  y -= y.mean();  z -= z.mean()
+    vx -= vx.mean(); vy -= vy.mean(); vz -= vz.mean()
+
     phase_space = np.column_stack([x, y, z, vx, vy, vz])
-    masses = np.full(N, M_total / N, dtype=np.float32)
-    
+    masses = np.full(N, M_total / N, dtype=np.float64)
+
     return phase_space, masses
 
 
