@@ -28,6 +28,7 @@ venv/
 *.times
 test_orbit/
 test_plummer/
+output/
 dist/
 build/
 *.egg-info/
