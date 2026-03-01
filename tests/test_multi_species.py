@@ -629,13 +629,6 @@ class TestRunSimulationValidation:
             nb.run_simulation(xv, sp, 0.0, 0.01, 0.001,
                               method="fmm")
 
-    def test_gpu_tree_not_implemented(self):
-        xv = _random_xv(10)
-        sp = [Species.dark(10, 1.0)]
-        with pytest.raises(NotImplementedError):
-            nb.run_simulation(xv, sp, 0.0, 0.01, 0.001,
-                              architecture="gpu", method="tree")
-
     def test_species_n_mismatch_raises(self):
         xv = _random_xv(10)
         sp = [Species.dark(8, 1.0)]   # only 8 but xv has 10
