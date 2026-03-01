@@ -58,6 +58,12 @@ except ImportError:
     HAS_FALCON = False
     warnings.warn("pyfalcon not available. Tree code is disabled. Please use a limited number of particles.", ImportWarning)
 
+try:
+    from tqdm.auto import trange as _trange, tqdm as _tqdm_cls
+    _TQDM_OK = True
+except ImportError:
+    _TQDM_OK = False
+
 # ============================================================================
 # CONSTANTS AND TYPE DEFINITIONS
 # ============================================================================
@@ -594,30 +600,39 @@ def run_nbody_gpu(
     # Main integration loop: iterate over the remaining steps (1..remaining_steps)
     # ============================================================================
     t_start = pytime.perf_counter()
-    for step_i in range(1, remaining_steps + 1):
+
+    if _TQDM_OK and verbose:
+        _loop   = _trange(1, remaining_steps + 1, desc="N-body simulation", unit="step")
+        _vprint = _tqdm_cls.write
+    else:
+        _loop   = range(1, remaining_steps + 1)
+        def _vprint(msg: str) -> None:  # type: ignore[misc]
+            print(msg, flush=True)
+
+    for step_i in _loop:
         current_step = start_step + step_i
-        
+
         # === KDK Leapfrog (all on GPU) ===
-        
+
         # Kick (half-step)
         vel_gpu += acc_gpu * (dt_gpu / 2)
-        
+
         # Drift (full-step)
         pos_gpu += vel_gpu * dt_gpu
-        
+
         # Update time
         time += dt
-        
+
         # Compute new accelerations
         acc_gpu, cached_external_acc = _compute_accelerations_gpu(
             pos_gpu, mass_gpu, softening, G, precision, kernel,
             external_potential, time, external_update_interval,
             current_step, cached_external_acc
         )
-        
+
         # Kick (half-step)
         vel_gpu += acc_gpu * (dt_gpu / 2)
-        
+
         # === I/O Operations ===
         while snapshot_counter < len(snapshot_steps) and current_step >= snapshot_steps[snapshot_counter]:
             if save_snapshots:
@@ -626,22 +641,22 @@ def run_nbody_gpu(
                                **_snap_kwargs)
                 _update_snapshot_times(output_path, snapshot_counter, time)
                 if verbose:
-                    print(f"Saved snapshot id={snapshot_counter:03d} at step "
-                          f"{current_step}, time {time:.6e}...")
+                    _vprint(f"Saved snapshot id={snapshot_counter:03d} at step "
+                            f"{current_step}, time {time:.6e}...")
             snapshot_counter += 1
 
-        # Progress update
-        if verbose and step_i % max(1, remaining_steps // 20) == 0:
+        # Progress update — suppress manual line when tqdm bar is active
+        if verbose and (not _TQDM_OK) and step_i % max(1, remaining_steps // 20) == 0:
             elapsed = pytime.perf_counter() - t_start
             rate = step_i / elapsed if elapsed > 0 else 0
             eta = (remaining_steps - step_i) / rate if rate > 0 else 0
             avg_step_time = elapsed / step_i if step_i > 0 else 0
-            print(f"  Step {current_step:>6}/{total_steps} | "
-                  f"t={time:.4e} | "
-                  f"Snapshots: {snapshot_counter}/{len(snapshot_steps)} | "
-                  f"{rate:.1f} steps/s | "
-                  f"avg {avg_step_time*1000:.1f}ms/step | "
-                  f"ETA {eta:.0f}s")
+            _vprint(f"  Step {current_step:>6}/{total_steps} | "
+                    f"t={time:.4e} | "
+                    f"Snapshots: {snapshot_counter}/{len(snapshot_steps)} | "
+                    f"{rate:.1f} steps/s | "
+                    f"avg {avg_step_time*1000:.1f}ms/step | "
+                    f"ETA {eta:.0f}s")
 
         # Save restart file
         if current_step > 0 and (current_step % restart_interval) == 0:
@@ -956,48 +971,57 @@ def run_nbody_cpu(
     # Main integration loop: iterate over the remaining steps (1..remaining_steps)
     # ============================================================================
     t_start = pytime.perf_counter()
-    for step_i in range(1, remaining_steps + 1):
+
+    if _TQDM_OK and verbose:
+        _loop   = _trange(1, remaining_steps + 1, desc="N-body simulation", unit="step")
+        _vprint = _tqdm_cls.write
+    else:
+        _loop   = range(1, remaining_steps + 1)
+        def _vprint(msg: str) -> None:  # type: ignore[misc]
+            print(msg, flush=True)
+
+    for step_i in _loop:
         current_step = start_step + step_i
 
         # Kick-Drift-Kick leapfrog
-        
+
         # Kick (half-step)
-        xv[:, 3:6] += acc_cpu * (dt / 2)  
-        
+        xv[:, 3:6] += acc_cpu * (dt / 2)
+
         # Drift (full-step)
-        xv[:, 0:3] += xv[:, 3:6] * dt  
-        
+        xv[:, 0:3] += xv[:, 3:6] * dt
+
         # Update time before force computation
-        time += dt  
+        time += dt
 
         # Recompute accelerations at new positions and time
         acc_cpu = compute_acc(xv[:, :3], time)
-        
+
         # Kick (half-step)
-        xv[:, 3:6] += acc_cpu * (dt / 2)  
-        
+        xv[:, 3:6] += acc_cpu * (dt / 2)
+
         # === I/O Operations ===
         while snapshot_counter < len(snapshot_steps) and current_step >= snapshot_steps[snapshot_counter]:
             if save_snapshots:
                 _save_snapshot(xv, snapshot_counter, time, output_path, **_snap_kwargs)
                 _update_snapshot_times(output_path, snapshot_counter, time)
                 if verbose:
-                    print(f"Saved snapshot id={snapshot_counter:03d} at step "
-                          f"{current_step}, time {time:.6e}...")
+                    _vprint(f"Saved snapshot id={snapshot_counter:03d} at step "
+                            f"{current_step}, time {time:.6e}...")
             snapshot_counter += 1
 
-        # Progress update
-        if verbose and step_i % max(1, remaining_steps // 50) == 0:
+        # Progress update — suppress manual line when tqdm bar is active
+        if verbose and (not _TQDM_OK) and step_i % max(1, remaining_steps // 50) == 0:
             elapsed = pytime.perf_counter() - t_start
             rate = step_i / elapsed if elapsed > 0 else 0
             eta = (remaining_steps - step_i) / rate if rate > 0 else 0
             avg_step_time = elapsed / step_i if step_i > 0 else 0
-            print(f"  Step {current_step:>6}/{total_steps} | "
-                  f"t={time:.4e} | "
-                  f"Snapshots: {snapshot_counter}/{len(snapshot_steps)} | "
-                  f"{rate:.1f} steps/s | "
-                  f"avg {avg_step_time*1000:.1f}ms/step | "
-                  f"ETA {eta:.0f}s")
+            _vprint(f"  Step {current_step:>6}/{total_steps} | "
+                    f"t={time:.4e} | "
+                    f"Snapshots: {snapshot_counter}/{len(snapshot_steps)} | "
+                    f"{rate:.1f} steps/s | "
+                    f"avg {avg_step_time*1000:.1f}ms/step | "
+                    f"ETA {eta:.0f}s")
 
         # Save restart file
         if current_step > 0 and (current_step % restart_interval) == 0:

@@ -232,7 +232,15 @@ class ParticleReader:
             times_path = parent_dir / "snapshot.times"
             if not times_path.exists() and len(self.Snapshots) > 0:
                 snaps = np.array(self.Snapshots, dtype=int)
-                if getattr(self, "_timestep", 0.0) and float(self._timestep) > 0.0:
+                # Prefer the physical times stored per-snapshot in the HDF5 attrs
+                # (written by _save_snapshot as snap_time.NNN).  Fall back to
+                # snap_index * dt only when those attrs are absent (old files).
+                snap_time_map = getattr(self, "_snap_to_time_map", {})
+                if len(snap_time_map) == len(snaps) and all(
+                    s in snap_time_map for s in snaps
+                ):
+                    times = np.array([snap_time_map[s] for s in snaps], dtype=float)
+                elif getattr(self, "_timestep", 0.0) and float(self._timestep) > 0.0:
                     times = (snaps - snaps.min()).astype(float) * float(self._timestep)
                 else:
                     times = np.arange(len(snaps), dtype=float)
@@ -427,17 +435,22 @@ class ParticleReader:
         Scan HDF5 files and map snapshot index -> file path for fast lookups.
 
         Sets:
-          - self._snap_to_file_map : dict mapping snap_index -> file_path
+          - self._snap_to_file_map  : dict mapping snap_index -> file_path
+          - self._snap_to_time_map  : dict mapping snap_index -> physical time
+                                      (read from ``snap_time.NNN`` attrs written
+                                      by :func:`_save_snapshot`)
           - self.Snapshots : np.ndarray sorted snapshot indices (dtype=int)
         """
         self._snap_to_file_map = {}
+        self._snap_to_time_map = {}
         if self._verbose:
             print("   Scanning files to map snapshot locations...")
         for file_path in self.file_list:
             with h5py.File(file_path, "r") as f:
                 if "snapshots" not in f:
                     continue
-                for snap_name in f["snapshots"].keys():
+                snaps_grp = f["snapshots"]
+                for snap_name in snaps_grp.keys():
                     # expected snap_name like 'snap.012' or 'snap.12'
                     try:
                         snap_index = int(snap_name.split(".")[-1])
@@ -445,6 +458,12 @@ class ParticleReader:
                         # skip non-standard snapshot names
                         continue
                     self._snap_to_file_map[snap_index] = file_path
+                    # Read physical time stored by _save_snapshot
+                    attr_key = f"snap_time.{snap_index:03d}"
+                    if attr_key in snaps_grp.attrs:
+                        self._snap_to_time_map[snap_index] = float(
+                            snaps_grp.attrs[attr_key]
+                        )
 
         # Create a sorted numpy array of snapshot indices for easy access
         if len(self._snap_to_file_map) > 0:
@@ -517,7 +536,8 @@ class ParticleReader:
             mask = self.Times.snap == snap_index
             part.time = float(self.Times.time[mask][0]) if mask.any() else None
         else:
-            part.time = None
+            # Fall back to the per-snapshot time stored in HDF5 attrs
+            part.time = self._snap_to_time_map.get(snap_index, None)
 
         if self._verbose:
             print(f"Read snapshot {snap_index} from {file_to_open} "

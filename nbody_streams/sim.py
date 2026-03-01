@@ -23,6 +23,12 @@ from .species import (
 )
 from .run import run_nbody_gpu, run_nbody_cpu, G_DEFAULT
 
+try:
+    from .tree_gpu.run_gpu_tree import run_nbody_gpu_tree
+    _TREE_GPU_OK = True
+except ImportError:
+    _TREE_GPU_OK = False
+
 
 def run_simulation(
     phase_space: np.ndarray,
@@ -47,6 +53,7 @@ def run_simulation(
     continue_run: bool = False,
     overwrite: bool = False,
     verbose: bool = True,
+    debug_energy: bool = False,
 ) -> dict[str, NDArray]:
     """
     Run a direct N-body simulation with one or more particle species.
@@ -77,8 +84,9 @@ def run_simulation(
         Gravity solver algorithm.
 
         * ``'direct'`` — O(N²) pairwise summation (GPU or CPU).
-        * ``'tree'`` — hierarchical tree algorithm (CPU only via pyfalcon;
-          GPU tree is *not yet implemented*).
+        * ``'tree'`` — hierarchical tree algorithm.  CPU: pyfalcon falcON O(N);
+          GPU: Barnes-Hut tree code (requires ``libtreeGPU.so`` built from
+          ``nbody_streams/tree_gpu/``).
 
         Default: ``'direct'``.
     precision : {'float32', 'float64', 'float32_kahan'}, optional
@@ -113,6 +121,11 @@ def run_simulation(
         Resume from an existing restart file.  Default: ``False``.
     verbose : bool, optional
         Print progress information.  Default: ``True``.
+    debug_energy : bool, optional
+        Print virial ratio Q and fractional energy drift dE/E alongside each
+        progress line.  Only available for ``architecture='gpu'`` and
+        ``method='tree'`` (where the potential is returned for free by the
+        tree force call).  Ignored for all other backends.  Default: ``False``.
 
     Returns
     -------
@@ -132,10 +145,10 @@ def run_simulation(
     FileExistsError
         If snapshot files already exist in *output_dir* and *overwrite* is
         ``False`` and *continue_run* is ``False``.
-    NotImplementedError
-        If ``architecture='gpu'`` and ``method='tree'``.
     ImportError
-        If CuPy is unavailable and ``architecture='gpu'``.
+        If ``architecture='gpu'``, ``method='tree'``, and ``libtreeGPU.so``
+        has not been built.  If CuPy is unavailable and
+        ``architecture='gpu'``.
 
     Examples
     --------
@@ -169,7 +182,7 @@ def run_simulation(
 
     * CPU direct  > 20 000 particles → very slow (O N²).
     * GPU direct  > 500 000 particles → slow at this scale.
-    * Any method  > 2 000 000 particles → requires GPU+Tree (coming soon).
+    * Any method  > 2 000 000 particles → use GPU+Tree (``architecture='gpu', method='tree'``).
     """
     # ------------------------------------------------------------------
     # Validate
@@ -180,11 +193,11 @@ def run_simulation(
         )
     if method not in ("direct", "tree"):
         raise ValueError(f"method must be 'direct' or 'tree', got '{method}'")
-    if architecture == "gpu" and method == "tree":
-        raise NotImplementedError(
-            "GPU tree-code (architecture='gpu', method='tree') is not yet "
-            "implemented.  Use architecture='cpu', method='tree' or "
-            "architecture='gpu', method='direct' instead."
+    if architecture == "gpu" and method == "tree" and not _TREE_GPU_OK:
+        raise ImportError(
+            "GPU tree-code requires libtreeGPU.so to be built first:\n\n"
+            "    cd nbody_streams/tree_gpu && make -j$(nproc)\n\n"
+            "Then re-import nbody_streams."
         )
 
     phase_space = np.asarray(phase_space, dtype=np.float64)
@@ -210,7 +223,30 @@ def run_simulation(
     # ------------------------------------------------------------------
     # Dispatch
     # ------------------------------------------------------------------
-    if architecture == "gpu":
+    if architecture == "gpu" and method == "tree":
+        final_xv = run_nbody_gpu_tree(
+            phase_space=phase_space,
+            masses=mass_arr,
+            time_start=time_start,
+            time_end=time_end,
+            dt=dt,
+            softening=softening_arr,
+            G=G,
+            theta=theta,
+            external_potential=external_potential,
+            external_update_interval=external_update_interval,
+            output_dir=output_dir,
+            save_snapshots=save_snapshots,
+            snapshots=snapshots,
+            num_files_to_write=num_files_to_write,
+            restart_interval=restart_interval,
+            continue_run=continue_run,
+            overwrite=overwrite,
+            verbose=verbose,
+            debug_energy=debug_energy,
+            species=species,
+        )
+    elif architecture == "gpu":  # direct
         final_xv = run_nbody_gpu(
             phase_space=phase_space,
             masses=mass_arr,
