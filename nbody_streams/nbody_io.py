@@ -9,7 +9,7 @@ Primary API:
 - _load_restart(path): hidden helper to read simple npz restarts
 """
 from __future__ import annotations
-import os, h5py, glob, math
+import os, h5py, glob, math, warnings
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
