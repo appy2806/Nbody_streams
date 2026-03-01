@@ -328,6 +328,7 @@ def run_nbody_gpu(
     num_files_to_write: int = 1,
     restart_interval: int = 1000,
     continue_run: bool = False,
+    overwrite: bool = False,
     verbose: bool = True,
     species: list[Species] | None = None,
 ) -> np.ndarray:
@@ -467,8 +468,23 @@ def run_nbody_gpu(
     
     if external_potential is not None and not AGAMA_AVAILABLE:
         raise ImportError("Agama required for external_potential. Install Agama.")
-        
+
     output_path = Path(output_dir)
+
+    if save_snapshots and not continue_run:
+        existing = sorted(output_path.glob("snapshot*.h5"))
+        if existing:
+            if overwrite:
+                for f in existing:
+                    f.unlink()
+                if verbose:
+                    print(f"Removed {len(existing)} existing snapshot file(s) in '{output_dir}'.")
+            else:
+                raise FileExistsError(
+                    f"Output directory '{output_dir}' already contains snapshot files: "
+                    f"{[f.name for f in existing]}. "
+                    "Pass overwrite=True to delete them, or continue_run=True to resume."
+                )
 
     start_step = 0
     time = time_start
@@ -690,6 +706,7 @@ def run_nbody_cpu(
     num_files_to_write: int = 1,
     restart_interval: int = 1000,
     continue_run: bool = False,
+    overwrite: bool = False,
     verbose: bool = True,
     species: list[Species] | None = None,
 ) -> np.ndarray:
@@ -818,6 +835,21 @@ def run_nbody_cpu(
 
     N = phase_space.shape[0]
     output_path = Path(output_dir)
+
+    if save_snapshots and not continue_run:
+        existing = sorted(output_path.glob("snapshot*.h5"))
+        if existing:
+            if overwrite:
+                for f in existing:
+                    f.unlink()
+                if verbose:
+                    print(f"Removed {len(existing)} existing snapshot file(s) in '{output_dir}'.")
+            else:
+                raise FileExistsError(
+                    f"Output directory '{output_dir}' already contains snapshot files: "
+                    f"{[f.name for f in existing]}. "
+                    "Pass overwrite=True to delete them, or continue_run=True to resume."
+                )
 
     start_step = 0
     time = time_start
