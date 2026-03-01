@@ -525,14 +525,20 @@ class ParticleReader:
 
         return part
 
-    def extract_orbits(self, particle_type: str = "star", min_parallel_workers: int = 4):
+    def extract_orbits(
+        self,
+        particle_type: str = "star",
+        min_parallel_workers: int = 4,
+        snap_indices=None,
+    ):
         """
-        Extract orbits for selected particle types across all available snapshots,
+        Extract orbits for selected particle types across snapshots,
         using parallel worker processes that write directly into shared memory.
 
-        WARNING: This loads *all* snapshot phase-space data for the chosen
-        particle types into memory.  It can be very memory-intensive for many
-        snapshots and large N.
+        All requested snapshot data is loaded into RAM at once.  Use
+        *snap_indices* to limit memory usage when you have many snapshots or
+        large particle counts; for very large N (> ~500k) combined with many
+        snapshots, prefer iterating over ``read_snapshot`` instead.
 
         Parameters
         ----------
@@ -547,6 +553,11 @@ class ParticleReader:
         min_parallel_workers : int, optional
             Maximum number of parallel worker processes.  Actual workers =
             ``min(min_parallel_workers, cpu_count, num_snapshots)``.
+
+        snap_indices : array-like of int or None, optional
+            Snapshot indices to extract (e.g. ``range(0, 1000, 10)`` for every
+            10th snapshot).  Must be valid keys in the snapshot map.
+            ``None`` (default) extracts all available snapshots.
 
         Returns
         -------
@@ -578,8 +589,35 @@ class ParticleReader:
                 f"particle_type must be str, True, or False; got {type(particle_type)!r}"
             )
 
-        all_snap_indices = sorted(self._snap_to_file_map.keys())
+        available = sorted(self._snap_to_file_map.keys())
+        if snap_indices is None:
+            all_snap_indices = available
+        else:
+            requested = sorted(int(i) for i in snap_indices)
+            missing = [i for i in requested if i not in self._snap_to_file_map]
+            if missing:
+                raise ValueError(
+                    f"snap_indices contains indices not found in snapshot map: {missing}"
+                )
+            all_snap_indices = requested
+
         num_snapshots = len(all_snap_indices)
+
+        # Memory estimate and warning
+        total_bytes = 0
+        for s in self.species_list:
+            if s.name in types_to_process:
+                total_bytes += num_snapshots * s.N * 6 * 8  # float64
+        total_gb = total_bytes / 1e9
+        if total_gb > 4.0:
+            warnings.warn(
+                f"extract_orbits will allocate ~{total_gb:.1f} GB of RAM "
+                f"({num_snapshots} snapshots, species: {types_to_process}). "
+                "Use snap_indices to load a subset, or iterate over read_snapshot() "
+                "instead.",
+                ResourceWarning,
+                stacklevel=2,
+            )
 
         orbits = SimpleNamespace()
 
