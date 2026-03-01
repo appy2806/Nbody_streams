@@ -48,6 +48,12 @@ except ImportError:
     _AGAMA_OK = False
 
 try:
+    from tqdm.auto import trange as _trange, tqdm as _tqdm_cls
+    _TQDM_OK = True
+except ImportError:
+    _TQDM_OK = False
+
+try:
     from ..nbody_io import _save_snapshot, _save_restart, _load_restart
 except ImportError:
     try:
@@ -420,8 +426,18 @@ def run_nbody_gpu_tree(
     aborted  = False
     step     = start_step   # ensure defined for KeyboardInterrupt handler
 
+    # Progress printing helper — routes through tqdm.write when tqdm is active
+    # so the bar line is not clobbered.
+    if _TQDM_OK and verbose:
+        _loop      = _trange(start_step, n_steps, desc="N-body simulation", unit="step")
+        _vprint    = _tqdm_cls.write
+    else:
+        _loop      = range(start_step, n_steps)
+        def _vprint(msg: str) -> None:  # type: ignore[misc]
+            print(msg, flush=True)
+
     try:
-        for step in range(start_step, n_steps):
+        for step in _loop:
             current_step = step + 1
             t_now = time_start + current_step * dt
 
@@ -444,28 +460,33 @@ def run_nbody_gpu_tree(
                 vel = vel + (0.5 * dt) * acc
 
             # ── Progress update (every ~5% of steps) ──────────────────────────
+            # When tqdm is active it already shows step count / rate / ETA,
+            # so only emit the manual line when debug_energy adds extra info
+            # or when running without tqdm.
             if verbose and current_step % progress_every == 0:
-                elapsed    = pytime.perf_counter() - t_wall0
-                done_steps = current_step - start_step
-                left_steps = n_steps - current_step
-                rate       = done_steps / elapsed if elapsed > 0 else 0.0
-                avg_ms     = elapsed / max(done_steps, 1) * 1e3
-                eta_s      = left_steps / rate if rate > 0 else 0.0
+                _emit_manual = (not _TQDM_OK) or debug_energy
+                if _emit_manual:
+                    elapsed    = pytime.perf_counter() - t_wall0
+                    done_steps = current_step - start_step
+                    left_steps = n_steps - current_step
+                    rate       = done_steps / elapsed if elapsed > 0 else 0.0
+                    avg_ms     = elapsed / max(done_steps, 1) * 1e3
+                    eta_s      = left_steps / rate if rate > 0 else 0.0
 
-                line = (f"  Step {current_step:>6}/{n_steps} | "
-                        f"t={t_now:.4e} | "
-                        f"Snapshots: {snap_idx}/{snapshots} | "
-                        f"{rate:.1f} steps/s | "
-                        f"avg {avg_ms:.1f}ms/step | "
-                        f"ETA {eta_s:.0f}s")
+                    line = (f"  Step {current_step:>6}/{n_steps} | "
+                            f"t={t_now:.4e} | "
+                            f"Snapshots: {snap_idx}/{snapshots} | "
+                            f"{rate:.1f} steps/s | "
+                            f"avg {avg_ms:.1f}ms/step | "
+                            f"ETA {eta_s:.0f}s")
 
-                if debug_energy and E_ref != 0.0:
-                    KE, PE = _energy(vel, phi)
-                    dE = (KE + PE - E_ref) / abs(E_ref)
-                    Q  = KE / abs(PE) if PE != 0.0 else float("nan")
-                    line += f" | Q={Q:.3f}  dE/E={dE:+.2e}"
+                    if debug_energy and E_ref != 0.0:
+                        KE, PE = _energy(vel, phi)
+                        dE = (KE + PE - E_ref) / abs(E_ref)
+                        Q  = KE / abs(PE) if PE != 0.0 else float("nan")
+                        line += f" | Q={Q:.3f}  dE/E={dE:+.2e}"
 
-                print(line, flush=True)
+                    _vprint(line)
 
             # ── Snapshot ──────────────────────────────────────────────────────
             if snap_every > 0 and current_step % snap_every == 0:
@@ -473,8 +494,8 @@ def run_nbody_gpu_tree(
                     aborted = True;  break
                 _save_snap_now(t_now)
                 if verbose:
-                    print(f"Saved snapshot id={snap_idx:03d} at step "
-                          f"{current_step}, time {t_now:.4e}")
+                    _vprint(f"Saved snapshot id={snap_idx:03d} at step "
+                            f"{current_step}, time {t_now:.4e}")
                 snap_idx += 1
 
             # ── Restart checkpoint ────────────────────────────────────────────
