@@ -45,6 +45,7 @@ def run_simulation(
     num_files_to_write: int = 1,
     restart_interval: int = 1000,
     continue_run: bool = False,
+    overwrite: bool = False,
     verbose: bool = True,
 ) -> dict[str, NDArray]:
     """
@@ -119,10 +120,18 @@ def run_simulation(
         Final phase-space coordinates, keyed by species name.
         Each value has shape ``(N_k, 6)``.
 
+    overwrite : bool, optional
+        If ``True`` and snapshot files already exist in *output_dir*, delete
+        them before starting.  If ``False`` (default) and files exist, raise
+        ``FileExistsError``.  Ignored when *continue_run* is ``True``.
+
     Raises
     ------
     ValueError
         If *species* list is inconsistent with *phase_space* shape.
+    FileExistsError
+        If snapshot files already exist in *output_dir* and *overwrite* is
+        ``False`` and *continue_run* is ``False``.
     NotImplementedError
         If ``architecture='gpu'`` and ``method='tree'``.
     ImportError
@@ -220,6 +229,7 @@ def run_simulation(
             num_files_to_write=num_files_to_write,
             restart_interval=restart_interval,
             continue_run=continue_run,
+            overwrite=overwrite,
             verbose=verbose,
             species=species,
         )
@@ -243,6 +253,7 @@ def run_simulation(
             num_files_to_write=num_files_to_write,
             restart_interval=restart_interval,
             continue_run=continue_run,
+            overwrite=overwrite,
             verbose=verbose,
             species=species,
         )
