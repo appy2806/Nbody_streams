@@ -38,3 +38,8 @@ __pycache__/
 
 # Claude plans
 .claude/
+
+# Compiled C/CUDA build artifacts
+*.o
+*.so
+*.a

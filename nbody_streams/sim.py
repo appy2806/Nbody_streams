@@ -53,6 +53,7 @@ def run_simulation(
     continue_run: bool = False,
     overwrite: bool = False,
     verbose: bool = True,
+    debug_energy: bool = False,
 ) -> dict[str, NDArray]:
     """
     Run a direct N-body simulation with one or more particle species.
@@ -120,6 +121,11 @@ def run_simulation(
         Resume from an existing restart file.  Default: ``False``.
     verbose : bool, optional
         Print progress information.  Default: ``True``.
+    debug_energy : bool, optional
+        Print virial ratio Q and fractional energy drift dE/E alongside each
+        progress line.  Only available for ``architecture='gpu'`` and
+        ``method='tree'`` (where the potential is returned for free by the
+        tree force call).  Ignored for all other backends.  Default: ``False``.
 
     Returns
     -------
@@ -139,10 +145,10 @@ def run_simulation(
     FileExistsError
         If snapshot files already exist in *output_dir* and *overwrite* is
         ``False`` and *continue_run* is ``False``.
-    NotImplementedError
-        If ``architecture='gpu'`` and ``method='tree'``.
     ImportError
-        If CuPy is unavailable and ``architecture='gpu'``.
+        If ``architecture='gpu'``, ``method='tree'``, and ``libtreeGPU.so``
+        has not been built.  If CuPy is unavailable and
+        ``architecture='gpu'``.
 
     Examples
     --------
@@ -176,7 +182,7 @@ def run_simulation(
 
     * CPU direct  > 20 000 particles → very slow (O N²).
     * GPU direct  > 500 000 particles → slow at this scale.
-    * Any method  > 2 000 000 particles → requires GPU+Tree (coming soon).
+    * Any method  > 2 000 000 particles → use GPU+Tree (``architecture='gpu', method='tree'``).
     """
     # ------------------------------------------------------------------
     # Validate
@@ -237,6 +243,7 @@ def run_simulation(
             continue_run=continue_run,
             overwrite=overwrite,
             verbose=verbose,
+            debug_energy=debug_energy,
             species=species,
         )
     elif architecture == "gpu":  # direct

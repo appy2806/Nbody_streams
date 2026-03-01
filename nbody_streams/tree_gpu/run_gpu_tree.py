@@ -11,6 +11,11 @@ run_nbody_gpu_tree
     velocities are kept in float32 on the GPU (consistent with the float32
     tree-code internals).
 
+    Optional ``debug_energy=True`` activates energy / virial diagnostics
+    printed alongside the standard progress line.  Energy is essentially
+    free for the tree code (potential comes back from every force call), so
+    the overhead is only the float64 reduction — ~0.5 ms for N=1M.
+
 _StepWatchdog
     Background-thread watchdog that fires a KeyboardInterrupt in the main
     thread if a single integration step exceeds a timeout.  Used internally
@@ -51,9 +56,9 @@ except ImportError:
         _save_snapshot = _save_restart = _load_restart = None  # type: ignore[assignment]
 
 try:
-    from ..species import Species, _build_particle_arrays, _split_by_species
+    from ..species import Species, _build_particle_arrays
 except ImportError:
-    from nbody_streams.species import Species, _build_particle_arrays, _split_by_species  # type: ignore[no-redef]
+    from nbody_streams.species import Species, _build_particle_arrays  # type: ignore[no-redef]
 
 from ._force import tree_gravity_gpu, TreeGPU, G_DEFAULT
 
@@ -154,6 +159,7 @@ def run_nbody_gpu_tree(
     continue_run: bool = False,
     overwrite: bool = False,
     verbose: bool = True,
+    debug_energy: bool = False,
     # Multi-species (preferred path when using run_simulation)
     species: list[Species] | None = None,
 ) -> np.ndarray:
@@ -161,8 +167,7 @@ def run_nbody_gpu_tree(
     Run a GPU-tree N-body simulation with KDK leapfrog integration.
 
     Force evaluations use the GPU Barnes-Hut tree code (O(N log N)).
-    Positions and velocities are kept in float32 on the GPU.  Energy
-    diagnostics are computed in float64.
+    Positions and velocities are kept in float32 on the GPU.
 
     Parameters
     ----------
@@ -175,11 +180,11 @@ def run_nbody_gpu_tree(
     dt : float
         Fixed timestep.
     softening : float or ndarray, shape (N,)
-        Plummer softening length(s).  Scalar → uniform; array → per-particle.
+        Plummer softening length(s).  Scalar -> uniform; array -> per-particle.
     G : float, optional
-        Gravitational constant.  Default: kpc / (km/s)² / Msun.
+        Gravitational constant.  Default: kpc / (km/s)^2 / Msun.
     theta : float, optional
-        Barnes-Hut opening angle.  0.75 (fast) – 0.5 (accurate).  Default 0.6.
+        Barnes-Hut opening angle.  0.75 (fast) - 0.5 (accurate).  Default 0.6.
     nleaf : int, optional
         Max particles per leaf cell.  Must be in {16, 24, 32, 48, 64}.
     ncrit : int, optional
@@ -209,7 +214,13 @@ def run_nbody_gpu_tree(
     overwrite : bool, optional
         Delete existing snapshot files before starting.  Default False.
     verbose : bool, optional
-        Print energy / ETA diagnostics.  Default True.
+        Print header, progress (rate/ETA), and snapshot messages.  Default True.
+    debug_energy : bool, optional
+        Print virial ratio Q=K/|W| and relative energy drift dE/E alongside
+        the progress line.  Requires ~0.5 ms extra per progress print (float64
+        reduction over all particles).  Default False.
+        Note: unlike direct-sum integrators, potential phi is returned for free
+        by the tree code, so this flag carries negligible overhead.
     species : list[Species], optional
         Multi-species descriptor list.  When provided, ``masses`` and
         ``softening`` are built from it internally (they are ignored).
@@ -236,12 +247,15 @@ def run_nbody_gpu_tree(
         masses, softening = _build_particle_arrays(species)
 
     masses    = np.asarray(masses,    dtype=np.float64)
-    softening = np.asarray(softening, dtype=np.float64) if hasattr(softening, '__len__') else float(softening)
+    softening = (np.asarray(softening, dtype=np.float64)
+                 if hasattr(softening, '__len__') else float(softening))
 
-    N         = phase_space.shape[0]
-    n_steps   = max(1, round((time_end - time_start) / dt))
+    N          = phase_space.shape[0]
+    n_steps    = max(1, round((time_end - time_start) / dt))
     snap_every = max(1, n_steps // snapshots) if save_snapshots and snapshots > 0 else 0
-    e_every   = max(1, n_steps // 50)   # energy output ~50 times during run
+
+    # Progress printed every ~5% of steps (matches run_nbody_gpu cadence)
+    progress_every = max(1, n_steps // 20)
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -270,13 +284,13 @@ def run_nbody_gpu_tree(
         )
 
     # ── GPU arrays — float32 (tree code requires float32) ─────────────────────
-    mass_f32 = cp.asarray(masses,    dtype=cp.float32)
-    mass_f64 = cp.asarray(masses,    dtype=cp.float64)
+    mass_f32 = cp.asarray(masses, dtype=cp.float32)
+    mass_f64 = cp.asarray(masses, dtype=cp.float64)
 
     if np.isscalar(softening):
-        eps_gpu  = cp.full(N, float(softening), dtype=cp.float32)
+        eps_gpu = cp.full(N, float(softening), dtype=cp.float32)
     else:
-        eps_gpu  = cp.asarray(softening, dtype=cp.float32)
+        eps_gpu = cp.asarray(softening, dtype=cp.float32)
 
     pos = cp.asarray(phase_space[:, :3], dtype=cp.float32)
     vel = cp.asarray(phase_space[:, 3:], dtype=cp.float32)
@@ -294,7 +308,31 @@ def run_nbody_gpu_tree(
             start_step = int(step_rest) + 1
             snap_idx   = int(snapctr_rest)
             if verbose:
-                print(f"[RESTART] Resumed from step {step_rest}  snap_idx={snap_idx}")
+                print(f"Resuming from step {start_step}, snap_idx={snap_idx}")
+
+    remaining_steps = n_steps - start_step
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    if verbose:
+        print("=" * 80)
+        print("GPU Tree N-body Integration (Barnes-Hut)")
+        print("=" * 80)
+        print(f"Particles: {N:,}")
+        if species is not None:
+            for s in species:
+                print(f"  [{s.name}] N={s.N:,}  eps={s.softening if np.isscalar(s.softening) else 'variable'}")
+        print(f"Time: {time_start:.3e} -> {time_end:.3e}  (dt={dt:.3e})")
+        print(f"Steps: {n_steps:,}  ({remaining_steps:,} remaining)")
+        print(f"Tree: theta={theta}  nleaf={nleaf}  ncrit={ncrit}")
+        print(f"Softening: {softening if np.isscalar(softening) else 'per-particle'}")
+        print(f"External potential: {'Yes' if external_potential is not None else 'No'}")
+        if external_potential is not None:
+            print(f"  Update interval: every {external_update_interval} steps")
+        print(f"Snapshots: {snapshots}  (every ~{snap_every:,} steps)")
+        print(f"Restart files: every {restart_interval} steps")
+        print(f"Watchdog timeout: {step_timeout_s:.0f} s/step")
+        print(f"debug_energy: {debug_energy}")
+        print("=" * 80)
 
     # ── Pre-allocate tree handle ───────────────────────────────────────────────
     tree     = TreeGPU(N, eps=0.0, theta=theta, verbose=False)
@@ -302,26 +340,25 @@ def run_nbody_gpu_tree(
 
     # ── Helpers ───────────────────────────────────────────────────────────────
     def _energy(vel_: cp.ndarray, phi_: cp.ndarray) -> tuple[float, float]:
+        """KE + PE in float64. ~0.5 ms for N=1M (two reductions)."""
         v2 = cp.sum(vel_.astype(cp.float64) ** 2, axis=1)
         KE = 0.5 * float(cp.sum(mass_f64 * v2))
         PE = 0.5 * float(cp.sum(mass_f64 * phi_.astype(cp.float64)))
         return KE, PE
 
-    def _ext_acc(pos_: cp.ndarray, t_: float) -> cp.ndarray:
-        """Evaluate external potential and return acceleration (float32, GPU)."""
+    def _ext_acc(pos_: cp.ndarray, t_: float):
         if external_potential is None:
             return None
         xyz_cpu = cp.asnumpy(pos_.astype(cp.float64))
-        acc_ext_cpu = external_potential.force(xyz_cpu).astype(np.float32)
-        return cp.asarray(acc_ext_cpu, dtype=cp.float32)
+        return cp.asarray(external_potential.force(xyz_cpu).astype(np.float32))
 
-    def _save_snap_now(step: int, t_: float):
+    def _save_snap_now(t_: float):
         if not save_snapshots or _save_snapshot is None:
             return
         pv_np = cp.asnumpy(cp.concatenate([pos, vel], axis=1)).astype(np.float64)
         _save_snapshot(
             pv_np, snap_idx, t_, output_dir,
-            species=species if species is not None else None,
+            species=species,
             time_step=dt,
             num_files_to_write=num_files_to_write if num_files_to_write > 1 else None,
             total_expected_snapshots=snapshots,
@@ -340,7 +377,6 @@ def run_nbody_gpu_tree(
                       species_names=snames, species_N=sN)
 
     def _nan_gate(step: int, label: str) -> bool:
-        """Return True (abort) if NaN detected in current acc."""
         if not cp.any(cp.isnan(acc[:, 0])):
             return False
         print(f"\n[ERROR] NaN in forces at step {step} ({label}). Aborting.")
@@ -348,8 +384,7 @@ def run_nbody_gpu_tree(
 
     # ── Initial forces ─────────────────────────────────────────────────────────
     if verbose:
-        print(f"run_nbody_gpu_tree: N={N:,}  steps={n_steps}  dt={dt}  theta={theta}")
-        print(f"  Output: {output_dir}")
+        print("\nComputing initial forces...")
 
     t_now = time_start + start_step * dt
 
@@ -360,82 +395,90 @@ def run_nbody_gpu_tree(
             tree=tree,
         )
 
-    # Add external forces at t=0
     _acc_ext = _ext_acc(pos, t_now)
     if _acc_ext is not None:
         acc = acc + _acc_ext
 
+    # Energy reference (only computed if debug_energy, but always store E_ref)
+    E_ref = 0.0
+    if debug_energy:
+        KE0, PE0 = _energy(vel, phi)
+        E_ref = KE0 + PE0
+
     # Initial snapshot
     if start_step == 0 and save_snapshots:
-        _save_snap_now(0, t_now)
+        _save_snap_now(t_now)
+        if verbose:
+            print(f"Saved snapshot id={snap_idx:03d} at step 0, time {t_now:.4e}")
         snap_idx += 1
 
-    # ── Energy storage ─────────────────────────────────────────────────────────
-    n_e     = (n_steps - start_step) // e_every + 2
-    t_arr   = np.zeros(n_e)
-    KE_arr  = np.zeros(n_e)
-    PE_arr  = np.zeros(n_e)
-    E_arr   = np.zeros(n_e)
-    KE0, PE0 = _energy(vel, phi)
-    t_arr[0] = t_now
-    KE_arr[0] = KE0;  PE_arr[0] = PE0;  E_arr[0] = KE0 + PE0
-    E_ref    = E_arr[0]
-    e_idx    = 1
+    if verbose:
+        print("\nStarting integration...")
 
     # ── KDK loop ───────────────────────────────────────────────────────────────
-    t_wall0 = pytime.perf_counter()
-    aborted = False
+    t_wall0  = pytime.perf_counter()
+    aborted  = False
+    step     = start_step   # ensure defined for KeyboardInterrupt handler
 
     try:
         for step in range(start_step, n_steps):
-            t_now = time_start + (step + 1) * dt
+            current_step = step + 1
+            t_now = time_start + current_step * dt
 
             with watchdog:
-                vel  = vel  + (0.5 * dt) * acc
-                pos  = pos  + dt         * vel
+                vel = vel + (0.5 * dt) * acc
+                pos = pos + dt         * vel
                 acc, phi = tree_gravity_gpu(
                     pos, mass_f32, eps_gpu, G=G,
                     theta=theta, nleaf=nleaf, ncrit=ncrit, level_split=level_split,
                     tree=tree,
                 )
 
-            # External potential (evaluated every external_update_interval steps)
-            if external_potential is not None and (step + 1) % external_update_interval == 0:
+            # External potential
+            if external_potential is not None and current_step % external_update_interval == 0:
                 _acc_ext = _ext_acc(pos, t_now)
             if _acc_ext is not None:
                 acc = acc + _acc_ext
 
             with watchdog:
-                vel  = vel  + (0.5 * dt) * acc
+                vel = vel + (0.5 * dt) * acc
 
-            # ── Energy diagnostics ────────────────────────────────────────────
-            if (step + 1) % e_every == 0 and e_idx < n_e:
-                KE, PE = _energy(vel, phi)
-                dE = (KE + PE - E_ref) / abs(E_ref) if E_ref != 0 else 0.0
-                t_arr[e_idx]  = t_now
-                KE_arr[e_idx] = KE;  PE_arr[e_idx] = PE;  E_arr[e_idx] = KE + PE
+            # ── Progress update (every ~5% of steps) ──────────────────────────
+            if verbose and current_step % progress_every == 0:
+                elapsed    = pytime.perf_counter() - t_wall0
+                done_steps = current_step - start_step
+                left_steps = n_steps - current_step
+                rate       = done_steps / elapsed if elapsed > 0 else 0.0
+                avg_ms     = elapsed / max(done_steps, 1) * 1e3
+                eta_s      = left_steps / rate if rate > 0 else 0.0
 
-                if verbose:
-                    elapsed    = pytime.perf_counter() - t_wall0
-                    done_steps = step + 1 - start_step
-                    left_steps = n_steps - step - 1
-                    eta_s      = elapsed / max(done_steps, 1) * left_steps
-                    eta_str    = str(datetime.timedelta(seconds=int(eta_s)))
-                    eta_wall   = datetime.datetime.now() + datetime.timedelta(seconds=eta_s)
-                    print(f"  step {step+1:6d}/{n_steps}  t={t_now:.4f}  "
-                          f"Q={KE/abs(PE):.3f}  dE/E={dE:+.2e}  ETA {eta_str} ({eta_wall:%H:%M})",
-                          flush=True)
-                e_idx += 1
+                line = (f"  Step {current_step:>6}/{n_steps} | "
+                        f"t={t_now:.4e} | "
+                        f"Snapshots: {snap_idx}/{snapshots} | "
+                        f"{rate:.1f} steps/s | "
+                        f"avg {avg_ms:.1f}ms/step | "
+                        f"ETA {eta_s:.0f}s")
+
+                if debug_energy and E_ref != 0.0:
+                    KE, PE = _energy(vel, phi)
+                    dE = (KE + PE - E_ref) / abs(E_ref)
+                    Q  = KE / abs(PE) if PE != 0.0 else float("nan")
+                    line += f" | Q={Q:.3f}  dE/E={dE:+.2e}"
+
+                print(line, flush=True)
 
             # ── Snapshot ──────────────────────────────────────────────────────
-            if snap_every > 0 and (step + 1) % snap_every == 0:
+            if snap_every > 0 and current_step % snap_every == 0:
                 if _nan_gate(step, "snap"):
                     aborted = True;  break
-                _save_snap_now(step, t_now)
+                _save_snap_now(t_now)
+                if verbose:
+                    print(f"Saved snapshot id={snap_idx:03d} at step "
+                          f"{current_step}, time {t_now:.4e}")
                 snap_idx += 1
 
             # ── Restart checkpoint ────────────────────────────────────────────
-            if (step + 1) % restart_interval == 0:
+            if current_step % restart_interval == 0:
                 if _nan_gate(step, "restart"):
                     aborted = True;  break
                 _save_restart_now(step, t_now)
@@ -454,12 +497,13 @@ def run_nbody_gpu_tree(
     tree.close()
 
     elapsed_total = pytime.perf_counter() - t_wall0
-    status = "ABORTED" if aborted else "Done"
-    if verbose:
-        steps_done = (step + 1 - start_step) if not aborted else max(step - start_step, 1)
-        ms_per_step = elapsed_total / max(steps_done, 1) * 1e3
-        print(f"\n{status}. Wall time: {elapsed_total:.1f} s  ({ms_per_step:.1f} ms/step)")
+    steps_done    = (step + 1 - start_step) if not aborted else max(step - start_step, 1)
+    avg_ms        = elapsed_total / max(steps_done, 1) * 1e3
+    status        = "ABORTED" if aborted else "Done"
 
-    # Return float64 phase-space (consistent with run_nbody_gpu)
+    if verbose:
+        print(f"\n{status}. Wall time: {elapsed_total:.1f} s  "
+              f"({avg_ms:.1f} ms/step  |  {steps_done / elapsed_total:.1f} steps/s)")
+
     pv = cp.concatenate([pos, vel], axis=1)
     return cp.asnumpy(pv).astype(np.float64)

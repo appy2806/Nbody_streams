@@ -24,6 +24,7 @@ against nbody_streams (both use max).  A custom small-N CuPy direct-sum is also
 used for exact formula verification.
 """
 
+import sys
 import time
 import numpy as np
 import cupy as cp
