@@ -180,21 +180,23 @@ def _emit_performance_warnings(
     method: str,
 ) -> None:
     """
-    Emit :class:`PerformanceWarning` or :class:`FutureWarning` when *N_total*
-    exceeds recommended thresholds for the chosen architecture / method.
+    Emit :class:`PerformanceWarning` when *N_total* exceeds recommended
+    thresholds for the chosen architecture / method combination.
     """
-    if N_total > 2_000_000:
+    if N_total > 2_000_000 and method != "tree":
         warnings.warn(
-            f"{N_total:,} particles: this scale requires GPU+Tree methods. "
-            "GPU+Tree support is not yet implemented in this version.",
-            FutureWarning,
+            f"{N_total:,} particles: direct summation at this scale will be "
+            "extremely slow. "
+            "Consider method='tree' for this architecture.",
+            PerformanceWarning,
             stacklevel=4,
         )
     elif architecture == "cpu" and method == "direct" and N_total > 20_000:
         warnings.warn(
             f"{N_total:,} particles with CPU direct summation is O(N^2) and "
             "will be very slow. "
-            "Consider architecture='cpu' + method='tree', or architecture='gpu'.",
+            "Consider method='tree' to reduce complexity, or architecture='gpu' "
+            "for faster direct summation.",
             PerformanceWarning,
             stacklevel=4,
         )
@@ -202,7 +204,7 @@ def _emit_performance_warnings(
         warnings.warn(
             f"{N_total:,} particles with GPU direct summation may be slow at "
             "this scale. "
-            "GPU+Tree support is coming in a future version.",
+            "Consider method='tree' to improve performance.",
             PerformanceWarning,
             stacklevel=4,
         )
