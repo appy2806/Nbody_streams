@@ -55,7 +55,7 @@ cd ../..
 | `nbody_streams.utils` | Profile fitting (Dehnen, Plummer, double-power-law), iterative shape measurement, energy-based unbinding |
 | `nbody_streams.fast_sims` | Fast stream generation: particle spray and restricted N-body (requires AGAMA) |
 | `nbody_streams.coords` | Coordinate transforms, vector field transforms, stream coordinate generation |
-| `nbody_streams.viz` | Mollweide projections, surface density, stream sky plots, stream evolution |
+| `nbody_streams.viz` | SPH/histogram surface density (`plot_density`), Mollweide projections, stream sky and evolution plots; `render_surface_density`, `get_smoothing_lengths` |
 
 ---
 
@@ -545,15 +545,40 @@ from nbody_streams.viz import (
     plot_mollweide,
     plot_stream_sky,
     plot_stream_evolution,
+    render_surface_density,   # low-level SPH renderer
+    get_smoothing_lengths,    # per-particle SPH smoothing lengths
 )
 
-# Projected density map — from a Gizmo-style particle object
-plot_density(part=snap, spec='dark', grid_len=50.0)
+# --- Projected density map ---
 
-# Projected density map — from raw arrays (e.g. ParticleReader snapshot)
+# From raw arrays — SPH (default, GPU-accelerated when CuPy is available)
+plot_density(pos=pos, mass=mass, gridsize=100.0)
+
+# From a ParticleReader snapshot — extract dark matter automatically
 snap = reader.read_snapshot(50)
-plot_density(pos=snap.dark['posvel'][:, :3], mass=snap.dark['mass'],
-             grid_len=5.0, vmin=4.0, vmax=9.0)
+plot_density(snap=snap, spec='dark', gridsize=100.0, vmin=4.0, vmax=9.0)
+
+# Choose rendering method
+plot_density(pos=pos, mass=mass, method='sph')          # SPH kernel (default)
+plot_density(pos=pos, mass=mass, method='gauss_smooth', smooth_sigma=1.5)
+plot_density(pos=pos, mass=mass, method='histogram')
+
+# Return the raw (pre-log10) density array for further analysis
+im, dens = plot_density(pos=pos, mass=mass, return_dens=True)
+
+# Slice along Z and render X-Y surface density
+plot_density(pos=pos, mass=mass, xval='x', yval='y',
+             slice_width=2.0, density_kind='surface')
+
+# --- Low-level SPH API ---
+
+# Full SPH surface-density grid (GPU -> CPU fallback)
+grid, bounds = render_surface_density(x, y, mass, resolution=512, gridsize=120.0)
+
+# Smoothing lengths only (useful for custom renderers)
+h = get_smoothing_lengths(np.column_stack([x, y]), k_neighbors=32)
+
+# --- Other viz ---
 
 # Mollweide sky projection (requires healpy)
 plot_mollweide(pos, weights=masses, initial_nside=60)
@@ -561,9 +586,17 @@ plot_mollweide(pos, weights=masses, initial_nside=60)
 # Stream in sky coordinates (alpha/delta and phi1/phi2)
 plot_stream_sky(xv_stream, xv_prog=xv_prog)
 
-# Stream evolution over time (from fast_sims output)
+# Stream evolution over time (from run_simulation output)
 plot_stream_evolution(result['prog_xv'], times=result['times'], part_xv=result['part_xv'])
 ```
+
+#### `plot_density` method options
+
+| `method`       | Description                                          | Best for                              |
+|----------------|------------------------------------------------------|---------------------------------------|
+| `'sph'`        | SPH cubic-spline kernel splatting (GPU-accelerated)  | Physics-accurate density maps (default) |
+| `'gauss_smooth'` | 2-D histogram + Gaussian filter                   | Quick smooth previews                 |
+| `'histogram'`  | Raw 2-D histogram / pixel area                       | Counting statistics, debugging        |
 
 ---
 
