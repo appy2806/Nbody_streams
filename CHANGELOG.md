@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-03-07
+
+### Added
+
+- **SPH surface-density renderer** -- new `nbody_streams/viz/sph_kernels.py` module.
+  - `render_surface_density(x, y, mass, ...)` -- unified entry point with automatic GPU
+    (Numba CUDA + CuPy KDTree) -> CPU (Numba `prange` + SciPy KDTree) fallback.
+    Exposed at `nbody_streams.viz.render_surface_density`.
+  - `get_smoothing_lengths(pos, k_neighbors, ...)` -- per-particle smoothing lengths
+    via k-NN; GPU-accelerated with CuPy KDTree and transparent CPU fallback.
+    Exposed at `nbody_streams.viz.get_smoothing_lengths`.
+  - `render_cpu` / `render_gpu` -- low-level Numba-parallel / CUDA splatting kernels
+    (direct use optional; `render_surface_density` is the recommended entry point).
+  - 2-D cubic-spline SPH kernel (40 / (7*pi*h^2) normalisation) on both CPU and GPU.
+  - `verbose=False` on all public SPH functions; GPU fallback events raise
+    `RuntimeWarning` regardless of verbosity.
+- **`examples/density_methods_comparison.ipynb`** -- notebook comparing `'histogram'`,
+  `'gauss_smooth'`, and `'sph'` rendering on the included example dark-matter stream
+  data (`nbody_streams/data/example_nbody_dm_stream.npz`).
+
+### Changed
+
+- **`plot_density` refactored** -- cosmological and Gizmo-style dependencies removed;
+  API is now purely nbody_streams-native.
+  - Removed parameters: `part`, `host_props`, `spec_ind`, `cosmo_box`.
+  - `pos=(N,3)` and `mass=(N,)` are now explicit keyword arguments.
+  - New `snap` parameter accepts a `ParticleReader` snapshot directly; positions and
+    masses are extracted from `snap[spec]`.
+  - `no_bins` renamed to `resolution` (pixels per axis).
+  - New `gridsize` parameter (total size in data coordinates; grid spans
+    `[-gridsize/2, gridsize/2]`) replaces the old `grid_len`.  Default ``200.0`` kpc.
+  - `gauss_convol: bool` replaced by `method: str` with three choices:
+    - `'sph'` *(new default)* -- physics-motivated SPH kernel splatting.
+    - `'gauss_smooth'` -- 2-D histogram + Gaussian filter (`smooth_sigma` pixels).
+    - `'histogram'` -- raw 2-D mass histogram divided by pixel area.
+  - `arch`, `k_neighbors`, `chunk_size` moved to `**kwargs` (advanced options, still
+    documented; `smooth_sigma` remains an explicit parameter).
+  - `return_dens=True` now returns the method-specific density before log10 is applied.
+  - Scale bar: `scale_size` is directly in kpc data units; cosmo correction removed.
+- **`sph_kernels.py` API aligned** with `plot_density`:
+  - `res` renamed to `resolution`; `grid_len` replaced by `gridsize` (total size in
+    data coordinates; grid spans `[-gridsize/2, gridsize/2]`).  Default ``200.0``.
+  - `k` (public) renamed to `k_neighbors` in `get_smoothing_lengths` and
+    `render_surface_density`.
+  - All public functions have `verbose: bool = False`.
+  - GPU fallback and OOM events now raise `RuntimeWarning` (were silent prints).
+  - All non-ASCII characters removed from source.
+- `nbody_streams.viz` now exports `render_surface_density` and `get_smoothing_lengths`
+  alongside the existing plot functions.
+- Version bumped to **2.1.0**.
+
+### Removed
+
+- `plot_density`: `part`, `host_props`, `spec_ind`, `cosmo_box`, `gauss_convol`,
+  `no_bins`, `grid_len` parameters (replaced by `gridsize`, `resolution`, `method`).
+
 ## [2.0.0] - 2026-02-28
 
 ### Added

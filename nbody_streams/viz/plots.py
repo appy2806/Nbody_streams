@@ -1,10 +1,10 @@
 """Plotting functions for stream and N-body visualization.
 
 Public API (flat via ``nbody_streams.viz.*``):
-- ``plot_density``       — projected surface / volume density image
-- ``plot_mollweide``     — Healpix Mollweide sky projection (requires healpy)
-- ``plot_stream_sky``    — 2x3 observed-coordinate diagnostic panels (requires agama)
-- ``plot_stream_evolution`` — 3-panel N-body evolution plot
+- ``plot_density``          -- projected surface / volume density image (SPH / histogram)
+- ``plot_mollweide``        -- Healpix Mollweide sky projection (requires healpy)
+- ``plot_stream_sky``       -- 2x3 observed-coordinate diagnostic panels (requires agama)
+- ``plot_stream_evolution`` -- 3-panel N-body evolution plot
 """
 
 from __future__ import annotations
@@ -105,86 +105,118 @@ def _extract_particles_at_step(part_xv: np.ndarray, time_step: int):
 
 
 # =====================================================================
-# plot_density — projected surface / volume density image
+# plot_density -- projected surface / volume density image
 # =====================================================================
 def plot_density(
-    part=None,
+    pos: np.ndarray | None = None,
+    mass: np.ndarray | None = None,
+    snap=None,
     spec: str = "dark",
-    host_props: dict | None = None,
-    spec_ind: list | np.ndarray | None = None,
-    cosmo_box: bool = False,
-    grid_len: float = 100.0,
-    no_bins: int = 2048,
-    xval: str = "X",
-    yval: str = "Z",
+    gridsize: float = 200.0,
+    resolution: int = 512,
+    xval: str = "x",
+    yval: str = "z",
+    density_kind: str = "surface",
+    method: str = "sph",
+    slice_width: float = 0.0,
+    slice_axis: str | None = None,
+    return_dens: bool = False,
     ax: matplotlib.axes.Axes | None = None,
     colorbar_ax: matplotlib.axes.Axes | bool | None = None,
     scale_size: float = 0,
     cmap: matplotlib.colors.Colormap | str | None = None,
     vmin: float | None = None,
     vmax: float | None = None,
-    gauss_convol: bool = True,
-    slice_width: float = 0.0,
-    slice_axis: str | None = None,
-    density_kind: str = "surface",
-    return_dens: bool = False,
+    smooth_sigma: float = 1.0,
     **kwargs: Any,
 ) -> None | tuple[matplotlib.image.AxesImage, np.ndarray]:
     """
     Generate a projected density image (imshow) from particle data.
 
-    Can be driven in two ways:
-
-    1. Pass a Gizmo-style ``part`` object with ``host_props``.
-    2. Pass ``pos=(N,3)`` and optionally ``mass=(N,)`` via **kwargs.
+    Accepts particle arrays directly, or a ``ParticleReader`` snapshot from
+    which positions and masses are extracted by species.
 
     Parameters
     ----------
-    part : object, optional
-        Gizmo ParticleClass.  If *None*, ``pos`` must be in *kwargs*.
+    pos : ndarray, shape (N, 3), optional
+        Particle positions in kpc.  Required when *snap* is *None*.
+    mass : ndarray, shape (N,), optional
+        Particle masses in M_sun.  Defaults to uniform unit mass when *None*.
+    snap : ParticleReader snapshot, optional
+        Object returned by ``ParticleReader.read_snapshot()``.  When provided,
+        ``pos`` and ``mass`` are extracted from ``snap[spec]``.
     spec : str
-        Particle species key (``'dark'``, ``'gas'``, ``'star'``).
-    host_props : dict, optional
-        ``{'rot': (3,3), 'pos': (3,)}``.  Auto-detected from *part* if omitted.
-    grid_len : float
-        Half-box size in physical units (total extent = 2 * grid_len).
-    no_bins : int
-        Number of histogram bins per axis.
+        Particle species key -- ``'dark'``, ``'star'``, ``'gas'``, etc.
+        Used for default colormap / colorbar label selection and for reading
+        from *snap*.
+    gridsize : float
+        Total size of the rendered region in kpc.  The grid spans
+        ``[-gridsize/2, gridsize/2]`` along both projected axes.
+        Default ``200.0``.
+    resolution : int
+        Grid resolution (pixels per axis).  Default ``512``.
     xval, yval : str
-        Projection axes (``'X'``, ``'Y'``, ``'Z'``).
-    ax : Axes, optional
-        Existing axes.  A new figure is created when *None*.
-    colorbar_ax : Axes | True | None
-        Axes for colorbar, or *True* for an auto-inset bar.
-    scale_size : float
-        If > 0, draw a scale bar of this length (kpc).
-    cmap : colormap or str, optional
-        Defaults to cmasher palettes if available, else ``'cubehelix'``.
-    vmin, vmax : float, optional
-        Colour-bar limits (log10 density).  Set both equal for mpl auto.
-    gauss_convol : bool
-        Apply Gaussian smoothing (sigma = no_bins / 4000).
-    slice_width : float
-        If > 0, keep particles within +/- slice_width of the centre along
-        the remaining axis.
-    slice_axis : str, optional
-        Axis for the slice.  Auto-detected as the unused axis if *None*.
-    density_kind : str
-        ``'surface'`` or ``'volume'`` (latter divides by 2 * slice_width).
-    return_dens : bool
-        If *True*, return ``(im_obj, density_array)`` instead of *None*.
-    **kwargs
-        ``pos=(N,3)``, ``mass=(N,)`` when *part* is None.
-    """
-    if host_props is None:
-        host_props = {}
-    if spec_ind is None:
-        spec_ind = []
+        Projection axes: ``'x'``, ``'y'``, or ``'z'``.
+    density_kind : {'surface', 'volume'}
+        ``'surface'`` returns M/kpc^2; ``'volume'`` divides further by
+        2 * *slice_width* to give M/kpc^3.
+    method : {'sph', 'histogram', 'gauss_smooth'}
+        Density estimation method.
 
-    spec, xval, yval = spec.lower(), xval.lower(), yval.lower()
+        * ``'sph'`` *(default)* -- physics-motivated SPH kernel splatting via
+          :func:`~nbody_streams.viz.sph_kernels.render_surface_density`.
+          Smoothing lengths are computed automatically (GPU -> CPU fallback).
+        * ``'histogram'`` -- raw 2-D mass histogram divided by pixel area.
+        * ``'gauss_smooth'`` -- histogram followed by a Gaussian filter
+          (sigma = *smooth_sigma* pixels).
+    slice_width : float
+        If > 0, retain only particles within +/- *slice_width* kpc of the
+        origin along *slice_axis*.
+    slice_axis : str, optional
+        Axis along which the slice is applied.  Inferred as the remaining
+        axis when *None*.
+    return_dens : bool
+        If *True*, return ``(im_obj, density_array)`` where
+        ``density_array`` is the raw (pre-log10) density map produced by
+        *method* -- SPH grid, Gaussian-smoothed map, or raw histogram,
+        depending on *method*.
+    ax : Axes, optional
+        Existing axes.  A new 3x3 in figure is created when *None*.
+    colorbar_ax : Axes or True or None
+        Axes for the colorbar, or *True* for an auto-inset horizontal bar.
+    scale_size : float
+        If > 0, draw a physical scale bar of this length in kpc.
+    cmap : colormap or str, optional
+        Defaults to cmasher palettes when available, else ``'cubehelix'``.
+    vmin, vmax : float, optional
+        Colour limits in log10 density units.  When equal, matplotlib
+        auto-scales.
+    smooth_sigma : float
+        Gaussian smoothing width in pixels.  Only used when
+        ``method='gauss_smooth'``.  Default ``1.0``.
+    **kwargs
+        Advanced SPH options extracted by name (remaining kwargs are
+        forwarded to the colorbar label ``ax.text`` call):
+
+        * ``arch`` (str, default ``'auto'``) -- SPH compute backend:
+          ``'auto'``, ``'gpu'``, or ``'cpu'``.
+        * ``k_neighbors`` (int, default ``32``) -- neighbours used when
+          computing SPH smoothing lengths.
+        * ``chunk_size`` (int, default ``10_000_000``) -- GPU tile size
+          for SPH splatting.
+    """
+    # --- Extract advanced SPH options from kwargs ---
+    arch        = kwargs.pop("arch",         "auto")
+    k_neighbors = kwargs.pop("k_neighbors",  32)
+    chunk_size  = kwargs.pop("chunk_size",   10_000_000)
+
+    # --- Validate method ---
+    valid_methods = ("sph", "histogram", "gauss_smooth")
+    if method not in valid_methods:
+        raise ValueError(f"method must be one of {valid_methods!r}; got {method!r}")
+
+    # --- Validate density_kind ---
     density_kind = density_kind.lower()
-    if slice_axis is not None:
-        slice_axis = slice_axis.lower()
     if density_kind not in ("volume", "surface"):
         warnings.warn(f"density_kind '{density_kind}' invalid, forcing 'surface'.")
         density_kind = "surface"
@@ -192,95 +224,98 @@ def plot_density(
         warnings.warn("slice_width=0 invalid for volume density, forcing 1.")
         slice_width = 1.0
 
+    spec = spec.lower()
+    xval = xval.lower()
+    yval = yval.lower()
+    if slice_axis is not None:
+        slice_axis = slice_axis.lower()
+
     from matplotlib import offsetbox
     from matplotlib.lines import Line2D
 
-    if cosmo_box and part is None:
-        warnings.warn("cosmo_box=True but no `part`; forcing cosmo_box=False.")
-        cosmo_box = False
-
     # --- Extract pos / mass ---
-    scalef = 1.0
-    if part is None:
-        if "pos" not in kwargs:
-            raise ValueError("Either `part` or kwargs['pos'] (N,3) is required.")
-        pos = np.asarray(kwargs["pos"])
-        mass = kwargs.get("mass", np.ones(pos.shape[0], dtype=float))
-        if pos.ndim != 2 or pos.shape[1] != 3:
-            raise ValueError("pos must have shape (N, 3).")
-        if np.isscalar(mass):
-            mass = np.full(pos.shape[0], mass, dtype=float)
-        else:
-            mass = np.asarray(mass).ravel()
+    if snap is not None:
+        try:
+            spec_data = snap[spec] if hasattr(snap, "__getitem__") else getattr(snap, spec)
+        except (KeyError, AttributeError):
+            raise ValueError(
+                f"snap has no species '{spec}'. "
+                "Pass pos/mass directly or check the species name."
+            )
+        pos = np.asarray(spec_data["posvel"])[:, :3]
+        mass = np.asarray(spec_data["mass"])
+
+    if pos is None:
+        raise ValueError(
+            "Either pos=(N,3) or a ParticleReader snap object is required."
+        )
+
+    pos = np.asarray(pos, dtype=np.float32)
+    if pos.ndim != 2 or pos.shape[1] != 3:
+        raise ValueError("pos must have shape (N, 3).")
+
+    if mass is None:
+        mass = np.ones(pos.shape[0], dtype=np.float32)
+    elif np.isscalar(mass):
+        mass = np.full(pos.shape[0], float(mass), dtype=np.float32)
+    else:
+        mass = np.asarray(mass, dtype=np.float32).ravel()
         if mass.shape[0] != pos.shape[0]:
             raise ValueError("mass length must match pos length.")
-        bins = np.linspace(-grid_len, grid_len, no_bins + 1)
-    else:
-        if "rot" not in host_props:
-            try:
-                host_props["rot"] = part.host["rotation"][0]
-            except Exception:
-                host_props["rot"] = np.identity(3)
-        if "pos" not in host_props:
-            try:
-                host_props["pos"] = part.host["position"].flatten()
-            except Exception:
-                host_props["pos"] = np.zeros(3)
-
-        if len(spec_ind) < 1:
-            spec_ind = np.arange(part[spec]["mass"].shape[0])
-
-        pos = np.dot(
-            part[spec]["position"][spec_ind] - host_props["pos"],
-            host_props["rot"].T,
-        )
-        mass = part[spec]["mass"][spec_ind].ravel()
-
-        if cosmo_box:
-            scalef = part.info.get("scalefactor", 1.0)
-            bins = np.linspace(-grid_len / scalef, grid_len / scalef, no_bins + 1)
-        else:
-            bins = np.linspace(-grid_len, grid_len, no_bins + 1)
 
     # --- Axes mapping ---
     axes_kind = {"x": 0, "y": 1, "z": 2}
     if xval not in axes_kind or yval not in axes_kind:
-        raise ValueError("xval and yval must be one of 'x','y','z'.")
+        raise ValueError("xval and yval must be one of 'x', 'y', 'z'.")
+    if xval == yval:
+        raise ValueError("xval and yval must be different axes.")
     if slice_axis is None:
         leftover = set(axes_kind) - {xval, yval}
         slice_axis = leftover.pop() if len(leftover) == 1 else "y"
     if slice_axis not in axes_kind:
-        raise ValueError("slice_axis must be one of 'x','y','z'.")
+        raise ValueError("slice_axis must be one of 'x', 'y', 'z'.")
+
+    xi = axes_kind[xval]
+    yi = axes_kind[yval]
+    zi = axes_kind[slice_axis]
 
     # --- Slice ---
     if slice_width > 0:
-        mask = np.abs(pos[:, axes_kind[slice_axis]]) <= slice_width
+        mask = np.abs(pos[:, zi]) <= slice_width
         if mask.sum() == 0:
             warnings.warn("Slice contains zero particles; result will be empty.")
         pos = pos[mask]
         mass = mass[mask]
 
-    # --- Histogram + density ---
-    mass_bin, xedges, yedges = np.histogram2d(
-        pos[:, axes_kind[xval]],
-        pos[:, axes_kind[yval]],
-        weights=mass,
-        bins=bins,
-    )
+    x_2d = pos[:, xi]
+    y_2d = pos[:, yi]
 
-    if gauss_convol:
-        calc_density = _gauss_filter_surf_dens(
-            mass_bin, xedges, yedges, sigma=no_bins / 4000
+    # --- Compute density ---
+    if method == "sph":
+        from .sph_kernels import render_surface_density
+        calc_density, _ = render_surface_density(
+            x_2d, y_2d, mass,
+            resolution=resolution, gridsize=gridsize,
+            k_neighbors=k_neighbors, arch=arch, chunk_size=chunk_size,
         )
     else:
-        calc_density = mass_bin / (np.diff(xedges)[0] * np.diff(yedges)[0])
+        half = gridsize / 2.0
+        bins = np.linspace(-half, half, resolution + 1)
+        mass_bin, xedges, yedges = np.histogram2d(x_2d, y_2d, weights=mass, bins=bins)
+        if method == "gauss_smooth":
+            calc_density = _gauss_filter_surf_dens(
+                mass_bin, xedges, yedges, sigma=smooth_sigma
+            )
+        else:  # "histogram"
+            calc_density = mass_bin / (np.diff(xedges)[0] * np.diff(yedges)[0])
 
     if slice_width > 0 and density_kind == "volume":
-        calc_density /= 2.0 * slice_width
+        calc_density = calc_density / (2.0 * slice_width)
 
     if return_dens:
         dens_to_return = calc_density.copy()
 
+    # --- Log scale (zeros -> 1 so log10 = 0, rendered as background colour) ---
     calc_density[calc_density == 0] = 1
     calc_density = np.log10(calc_density)
 
@@ -314,7 +349,7 @@ def plot_density(
         vmin=vmin_use,
         vmax=vmax_use,
         aspect=1,
-        extent=None if cosmo_box else [-grid_len, grid_len, -grid_len, grid_len],
+        extent=[-gridsize/2, gridsize/2, -gridsize/2, gridsize/2],
     )
     vmin_use, vmax_use = im_obj.get_clim()
 
@@ -346,9 +381,8 @@ def plot_density(
                     child=self.vpac, prop=prop, frameon=frameon,
                 )
 
-        bar_size = scale_size / ((grid_len * 2 / scalef / no_bins) if cosmo_box else 1)
         ob = _AnchoredHScaleBar(
-            size=bar_size,
+            size=scale_size,
             label=f'{{\\bf {int(scale_size)} kpc}}',
             loc=3, frameon=False, pad=0.2, sep=0.3, borderpad=0.7,
             color="white", linewidth=2.0, ax=ax,
@@ -378,7 +412,6 @@ def plot_density(
         cbar.set_ticks(ticks)
         cbar.set_ticklabels([rf'$\mathbf{{10^{{{int(t)}}}}}$' for t in ticks])
 
-        filtered_kw = {k: v for k, v in kwargs.items() if k not in ("pos", "mass")}
         if density_kind == "volume":
             label = rf'$\mathbf{{{{\rho_{{{spec}}}[M_{{\odot}}/kpc^3]}}}}$'
         else:
@@ -386,7 +419,7 @@ def plot_density(
         ax.text(
             0.7, 0.2, label, ha="center", va="center", transform=ax.transAxes,
             color="w", fontsize=12,
-            bbox=dict(facecolor="none", edgecolor="none"), **filtered_kw,
+            bbox=dict(facecolor="none", edgecolor="none"), **kwargs,
         )
 
     if return_dens:
@@ -395,7 +428,7 @@ def plot_density(
 
 
 # =====================================================================
-# plot_mollweide — Healpix Mollweide sky projection
+# plot_mollweide -- Healpix Mollweide sky projection
 # =====================================================================
 def plot_mollweide(
     pos: np.ndarray,
@@ -582,7 +615,7 @@ def plot_mollweide(
 
 
 # =====================================================================
-# plot_stream_sky — 2x3 observed-coordinate panels (requires agama)
+# plot_stream_sky -- 2x3 observed-coordinate panels (requires agama)
 # =====================================================================
 def plot_stream_sky(
     xv_stream: np.ndarray,
@@ -675,7 +708,7 @@ def plot_stream_sky(
 
 
 # =====================================================================
-# plot_stream_evolution — 3-panel N-body evolution
+# plot_stream_evolution -- 3-panel N-body evolution
 # =====================================================================
 def plot_stream_evolution(
     prog_xv: np.ndarray | dict,
