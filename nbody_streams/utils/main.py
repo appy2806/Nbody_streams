@@ -91,7 +91,8 @@ __all__ = [
     "uniform_spherical_grid",
     "spherical_spiral_grid",
     # centre finding
-    "find_center_position",
+    "find_center",
+    "find_center_position",   # deprecated alias
     # boundness
     "compute_iterative_boundness",
     "iterative_unbinding",
@@ -101,9 +102,7 @@ __all__ = [
 G_DEFAULT = 4.300917270069976e-06
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  1. Grid / binning helpers                                             ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# --- 1. Grid / binning helpers ---
 
 def make_uneven_grid(
     xmin: float,
@@ -142,10 +141,10 @@ def make_uneven_grid(
 
     N = nbins - 1  # number of intervals
 
-    # Check feasibility — fall back to uniform if grading impossible
+    # Check feasibility - fall back to uniform if grading impossible
     if xmax <= N * xmin:
         return np.linspace(0, xmax, nbins)
-    
+
     # Define equation to solve for Z:
     # f(Z) = (exp(Z * 1) - 1) / (exp(Z * N) - 1) - xmin/xmax = 0
     def f(Z):
@@ -164,9 +163,7 @@ def make_uneven_grid(
     return x
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  2. Empirical radial profiles                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# --- 2. Empirical radial profiles ---
 
 def empirical_density_profile(
     pos: np.ndarray,
@@ -199,21 +196,12 @@ def empirical_density_profile(
     mass_arr = validate_masses(mass, r_p.shape[0])
     validate_nbins(nbins)
 
-    # Define the binning scheme
     bins = make_uneven_grid(rmin, rmax, nbins=nbins + 1)
-    
-    # Calculate the volumes of the spherical shells within each bin
     V_shells = (4.0 / 3.0) * np.pi * (bins[1:] ** 3 - bins[:-1] ** 3)
-    
-    # Histogram the particle positions into the radial bins and compute the sum of masses within each bin
     density, _ = np.histogram(r_p, bins=bins, weights=mass_arr)
-    
-    # Normalize the density by the volumes of the shells to obtain the number density
     density = density / V_shells
-    
-    # Calculate the average radius within each bin
     radius = 0.5 * (bins[1:] + bins[:-1])
-    
+
     return radius, density
 
 
@@ -259,7 +247,6 @@ def empirical_circular_velocity_profile(
 
     with np.errstate(divide="ignore", invalid="ignore"):
         v_circ = np.sqrt(G * M_enclosed / radius)
-        # where radius is zero (shouldn't happen given rmin > 0), set v_circ to 0
         v_circ = np.where(radius > 0, v_circ, 0.0)
 
     return radius, v_circ
@@ -367,7 +354,7 @@ def empirical_velocity_anisotropy_profile(
     Parameters
     ----------
     pos : array_like, shape ``(N, 3)``
-        Particle positions (Cartesian, **not** radii — needed for
+        Particle positions (Cartesian, **not** radii - needed for
         radial/tangential decomposition).
     vel : array_like, shape ``(N, 3)``
         Particle velocities.
@@ -412,18 +399,13 @@ def empirical_velocity_anisotropy_profile(
     edges = make_uneven_grid(rmin, rmax, nbins=nbins + 1)
     r_centres = 0.5 * (edges[:-1] + edges[1:])
 
-    # Compute mass-weighted quantities using binned_statistic
-    # Total mass in each bin
     hist_mass = binned_statistic(r, mass_arr, statistic="sum", bins=edges)[0]
 
-    # Mass-weighted mean radial velocity: sum(m*vr) / sum(m)
     hist_m_vr = binned_statistic(r, mass_arr * vr, statistic="sum", bins=edges)[0]
     mean_vr = np.divide(
         hist_m_vr, hist_mass, where=hist_mass > 0, out=np.zeros_like(hist_mass)
     )
 
-    # Mass-weighted radial dispersion: sum(m*(vr - <vr>)^2) / sum(m)
-    # We'll compute sum(m*vr^2) first, then subtract the mean contribution
     hist_m_vr2 = binned_statistic(r, mass_arr * vr ** 2, statistic="sum", bins=edges)[0]
     sigma_r2 = (
         np.divide(
@@ -432,22 +414,18 @@ def empirical_velocity_anisotropy_profile(
         - mean_vr ** 2
     )
 
-    # Mass-weighted tangential dispersion: sum(m*vt^2) / sum(m)
     hist_m_vt2 = binned_statistic(r, mass_arr * vt2, statistic="sum", bins=edges)[0]
     sigma_t2 = np.divide(
         hist_m_vt2, hist_mass, where=hist_mass > 0, out=np.zeros_like(hist_mass)
     )
 
-    # Avoid division by zero
     sigma_r2[sigma_r2 == 0] = np.nan
     beta = 1.0 - sigma_t2 / (2.0 * sigma_r2)
 
     return r_centres, beta
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  3. Density-profile fitting                                            ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# --- 3. Density-profile fitting ---
 
 def double_power_law_density(
     mass: float,
@@ -534,8 +512,8 @@ def double_power_law_density(
 def fit_double_spheroid_profile(
     r_centers: np.ndarray = np.array([]),
     rho_vals: np.ndarray = np.array([]),
-    positions: np.ndarray = np.array([]),
-    masses: np.ndarray | float = np.array([]),
+    pos: np.ndarray = np.array([]),
+    mass: np.ndarray | float = np.array([]),
     bins: int = 20,
     axis_y: float = 1.0,
     axis_z: float = 1.0,
@@ -554,7 +532,7 @@ def fit_double_spheroid_profile(
     r"""Fit a spheroid (Zhao / generalised double-power-law) density profile.
 
     If *r_centers* and *rho_vals* are not supplied, the radial density
-    profile is estimated from *positions* and *masses* using ellipsoidal
+    profile is estimated from *pos* and *mass* using ellipsoidal
     radii :math:`\tilde r = \sqrt{x^2 + (y/q_y)^2 + (z/q_z)^2}`.
 
     When ``agama`` is available the fit uses ``agama.Potential(type='Spheroid')``;
@@ -563,12 +541,12 @@ def fit_double_spheroid_profile(
     Parameters
     ----------
     r_centers : array_like
-        Radii at which densities are known (if empty, derived from *positions*).
+        Radii at which densities are known (if empty, derived from *pos*).
     rho_vals : array_like
         Densities at *r_centers*.
-    positions : array_like, shape ``(N, 3)``
+    pos : array_like, shape ``(N, 3)``
         Particle positions (used when *r_centers*/*rho_vals* are empty).
-    masses : scalar or array_like
+    mass : scalar or array_like
         Particle masses.
     bins : int
         Number of radial bins when estimating density from particles.
@@ -597,21 +575,21 @@ def fit_double_spheroid_profile(
     r_centers = np.asarray(r_centers, dtype=float)
     rho_vals = np.asarray(rho_vals, dtype=float)
 
-    # --- Derive profile from particles when not supplied ---
+    # Derive profile from particles when not supplied
     if len(r_centers) != len(rho_vals) or len(rho_vals) < 2:
-        if positions is None or len(np.asarray(positions)) == 0:
+        if pos is None or len(np.asarray(pos)) == 0:
             raise ValueError(
-                "Either supply r_centers & rho_vals, or positions & masses."
+                "Either supply r_centers & rho_vals, or pos & mass."
             )
-        positions = np.asarray(positions, dtype=float)
-        if positions.ndim != 2 or positions.shape[1] != 3:
+        pos = np.asarray(pos, dtype=float)
+        if pos.ndim != 2 or pos.shape[1] != 3:
             raise ValueError(
-                f"positions must be (N, 3), got shape {positions.shape}"
+                f"pos must be (N, 3), got shape {pos.shape}"
             )
 
-        mass_arr = validate_masses(masses, positions.shape[0])
+        mass_arr = validate_masses(mass, pos.shape[0])
 
-        x, y, z = positions.T
+        x, y, z = pos.T
         r_tilde = np.sqrt(x ** 2 + (y / axis_y) ** 2 + (z / axis_z) ** 2)
 
         rmin_auto = 0.1
@@ -630,7 +608,7 @@ def fit_double_spheroid_profile(
         y = rho_vals * r_centers ** 3
         M0 = float(4.0 * np.pi * np.trapezoid(y, x=lnr))
 
-    # --- Weights ---
+    # Weights
     if isinstance(weighting, str):
         weight_map = {
             "uniform": np.ones_like(r_centers),
@@ -650,7 +628,7 @@ def fit_double_spheroid_profile(
 
     log_rho_data = np.log10(np.maximum(rho_vals, 1e-12))
 
-    # --- Objective ---
+    # Objective
     def objective(params):
         logM, loga, alpha, beta, gamma = params
         try:
@@ -700,7 +678,7 @@ def fit_double_spheroid_profile(
 
     M_fit, a_fit = 10 ** logM_fit, 10 ** loga_fit
 
-    # --- Evaluate best-fit model for residuals ---
+    # Evaluate best-fit model for residuals
     if AGAMA_AVAILABLE:
         pot_fit = agama.Potential(
             type="Spheroid",
@@ -731,12 +709,12 @@ def fit_double_spheroid_profile(
     rho_residuals = rho_vals - rho_model
     r2_rho_vals = r_centers ** 2 * rho_vals
 
-    # --- Diagnostic plot (optional) ---
+    # Diagnostic plot (optional)
     if plot_results:
         try:
             import matplotlib.pyplot as plt
         except ImportError:
-            warnings.warn("matplotlib not available — skipping plot.", ImportWarning)
+            warnings.warn("matplotlib not available - skipping plot.", ImportWarning)
         else:
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6, 3), dpi=300)
 
@@ -801,8 +779,8 @@ def fit_double_spheroid_profile(
     return (M_fit, a_fit, alpha_fit, beta_fit, gamma_fit)
 
 def fit_dehnen_profile(
-    positions: np.ndarray,
-    masses: np.ndarray,
+    pos: np.ndarray,
+    mass: np.ndarray,
     axis_y: float = 1.0,
     axis_z: float = 1.0,
     bins: int = 50,
@@ -815,9 +793,9 @@ def fit_dehnen_profile(
 
     Parameters
     ----------
-    positions : array_like, shape ``(N, 3)``
+    pos : array_like, shape ``(N, 3)``
         Particle positions.
-    masses : array_like, shape ``(N,)``
+    mass : array_like, shape ``(N,)``
         Particle masses.
     axis_y, axis_z : float
         Axis ratios *b/a* and *c/a* for the ellipsoidal radius.
@@ -837,18 +815,18 @@ def fit_dehnen_profile(
     rho_vals : np.ndarray
         Measured density in each bin.
     """
-    positions, _ = validate_positions(positions)
-    masses = validate_masses(masses, positions.shape[0], non_negative=True)
+    pos, _ = validate_positions(pos)
+    mass = validate_masses(mass, pos.shape[0], non_negative=True)
     validate_nbins(bins)
 
-    x, y, z = positions.T
+    x, y, z = pos.T
     r_tilde = np.sqrt(x**2 + (y / axis_y)**2 + (z / axis_z)**2)
 
     rmin, rmax = np.percentile(r_tilde, [0.1, 99.9])
     edges = np.logspace(np.log10(rmin), np.log10(rmax), bins + 1)
     r_centers = np.sqrt(edges[:-1] * edges[1:])
 
-    counts, _ = np.histogram(r_tilde, edges, weights=masses)
+    counts, _ = np.histogram(r_tilde, edges, weights=mass)
     volumes = 4 / 3 * np.pi * (edges[1:]**3 - edges[:-1]**3)
     rho_vals = counts / volumes
 
@@ -860,7 +838,7 @@ def fit_dehnen_profile(
         pref = (3 - gamma) / (4 * np.pi) * M / a**3
         return np.log10(pref * (r / a)**(-gamma) * (1 + r / a)**(gamma - 4))
 
-    p0 = [np.log10(masses.sum()), np.log10(np.median(r_tilde)), 1.0]
+    p0 = [np.log10(mass.sum()), np.log10(np.median(r_tilde)), 1.0]
     bounds = ([-np.inf, -np.inf, 0], [np.inf, np.inf, 3])
 
     popt, _ = curve_fit(log_model, r_centers, log_rho, p0=p0, bounds=bounds)
@@ -872,8 +850,8 @@ def fit_dehnen_profile(
 
 
 def fit_plummer_profile(
-    positions: np.ndarray,
-    masses: np.ndarray,
+    pos: np.ndarray,
+    mass: np.ndarray,
     bins: int = 30,
 ) -> tuple[float, float, np.ndarray, np.ndarray]:
     r"""Fit a spherical Plummer profile to particle data.
@@ -884,9 +862,9 @@ def fit_plummer_profile(
 
     Parameters
     ----------
-    positions : array_like, shape ``(N, 3)``
+    pos : array_like, shape ``(N, 3)``
         Particle positions.
-    masses : array_like, shape ``(N,)``
+    mass : array_like, shape ``(N,)``
         Particle masses.
     bins : int
         Number of radial bins.
@@ -902,15 +880,15 @@ def fit_plummer_profile(
     rho_vals : np.ndarray
         Measured density in each bin.
     """
-    positions, r = validate_positions(positions)
-    masses = validate_masses(masses, positions.shape[0], non_negative=True)
+    pos, r = validate_positions(pos)
+    mass = validate_masses(mass, pos.shape[0], non_negative=True)
     validate_nbins(bins)
 
     rmin, rmax = np.percentile(r, [0.1, 99.9])
     edges = np.logspace(np.log10(rmin), np.log10(rmax), bins + 1)
     r_centers = np.sqrt(edges[:-1] * edges[1:])
 
-    counts, _ = np.histogram(r, edges, weights=masses)
+    counts, _ = np.histogram(r, edges, weights=mass)
     volumes = 4 / 3 * np.pi * (edges[1:]**3 - edges[:-1]**3)
     rho_vals = counts / volumes
 
@@ -921,7 +899,7 @@ def fit_plummer_profile(
         b = 10**logb
         return np.log10(3 * M / (4 * np.pi * b**3) * (1 + (r / b)**2)**(-2.5))
 
-    p0 = [np.log10(masses.sum()), np.log10(np.median(r))]
+    p0 = [np.log10(mass.sum()), np.log10(np.median(r))]
     popt, _ = curve_fit(log_model, r_centers, log_rho, p0=p0)
 
     M_fit = 10**popt[0]
@@ -929,32 +907,29 @@ def fit_plummer_profile(
 
     return M_fit, b_fit, r_centers, rho_vals
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  4. Morphological diagnostics                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+
+# --- 4. Morphological diagnostics ---
 
 @jit(nopython=True, cache=True)
-def _calculate_particle_distances_sq(xyz_coords: np.ndarray) -> np.ndarray:
+def _calculate_particle_distances_sq(pos: np.ndarray) -> np.ndarray:
     """Squared Euclidean distances from the origin (numba-accelerated)."""
-    return np.sum(xyz_coords ** 2, axis=1)
+    return np.sum(pos ** 2, axis=1)
 
 
 @jit(nopython=True, cache=True)
 def _compute_weighted_structure_tensor(
     coords: np.ndarray,
-    masses: np.ndarray,
+    mass: np.ndarray,
     weights: np.ndarray,
 ) -> np.ndarray:
-    """Weighted structure (second-moment) tensor :math:`S_{ij}` (numba-accelerated).
+    """Weighted structure (second-moment) tensor S_ij (numba-accelerated).
 
-    .. math::
-
-        S_{ij} = \\frac{\\sum_k m_k w_k x_{i,k} x_{j,k}}{\\sum_k m_k w_k}
+    S_ij = sum(m_k * w_k * x_i,k * x_j,k) / sum(m_k * w_k)
     """
     if coords.shape[0] == 0:
         return np.diag(np.array([1e-9, 1e-9, 1e-9], dtype=coords.dtype))
 
-    effective_weights = masses * weights
+    effective_weights = mass * weights
     sum_ew = np.sum(effective_weights)
 
     if sum_ew == 0:
@@ -980,7 +955,7 @@ def _compute_weighted_structure_tensor(
 
 @jit(nopython=True, cache=True)
 def _calculate_Rsphall_and_extract(
-    all_coords: np.ndarray,
+    pos: np.ndarray,
     transform_matrix_cols_bca: np.ndarray,
     q_ratio: float,
     s_ratio: float,
@@ -993,16 +968,16 @@ def _calculate_Rsphall_and_extract(
     boolean mask selecting those within ``[Rmin, Rmax]`` (scaled by
     the current axis ratios).
     """
-    if all_coords.shape[0] == 0:
+    if pos.shape[0] == 0:
         return (
-            np.empty(0, dtype=all_coords.dtype),
+            np.empty(0, dtype=pos.dtype),
             np.empty(0, dtype=np.bool_),
-            np.empty(0, dtype=all_coords.dtype),
+            np.empty(0, dtype=pos.dtype),
         )
 
-    coords_eigen = np.dot(all_coords, transform_matrix_cols_bca)
+    coords_eigen = np.dot(pos, transform_matrix_cols_bca)
 
-    scales = np.array([q_ratio, s_ratio, 1.0], dtype=all_coords.dtype)
+    scales = np.array([q_ratio, s_ratio, 1.0], dtype=pos.dtype)
     epsilon = 1e-9
     if scales[0] < epsilon:
         scales[0] = epsilon
@@ -1028,9 +1003,9 @@ def _calculate_Rsphall_and_extract(
 
 
 def fit_iterative_ellipsoid(
-    XYZ: np.ndarray,
+    pos: np.ndarray,
     mass: np.ndarray | None = None,
-    Vxyz: np.ndarray | None = None,
+    vel: np.ndarray | None = None,
     Rmin: float = 0.0,
     Rmax: float = 1.0,
     reduced_structure: bool = True,
@@ -1045,33 +1020,23 @@ def fit_iterative_ellipsoid(
     Iteratively selects particles inside an adaptive ellipsoid and diagonalises
     the (optionally reduced/weighted) structure tensor to determine the principal
     axis ratios and principal-axis directions. Iteration continues until the axis
-    ratios q = b/a and s = c/a converge within `tol` or until `max_iter` is reached
-
-    Determines principal axis lengths (*a >= b >= c*, normalised so
-    *a = 1*), principal-axis directions, and optionally ellipticity and
-    triaxiality for a particle distribution.
-
-    The method iterates between particle selection inside an ellipsoid
-    (whose shape adapts each step) and diagonalisation of the
-    (optionally reduced / weighted) structure tensor until the axis
-    ratios *q = b/a* and *s = c/a* converge.
+    ratios q = b/a and s = c/a converge within `tol` or until `max_iter` is reached.
 
     Parameters
     ----------
-    XYZ : array_like, shape ``(N, 3)``
+    pos : array_like, shape ``(N, 3)``
         Particle coordinates.
     mass : array_like, shape ``(N,)``, optional
         Particle masses.  *None* -> unit mass.
-    Vxyz : array_like, shape ``(N, 3)``, optional
-        Particle velocities.  Required when *orient_with_momentum* is
-        *True*.
+    vel : array_like, shape ``(N, 3)``, optional
+        Particle velocities.  Required when *orient_with_momentum* is *True*.
     Rmin, Rmax : float
         Inner / outer radii for the initial spherical selection.
     reduced_structure : bool
-        Use the iterative reduced inertia tensor (weights ∝ 1/R²_sph).
+        Use the iterative reduced inertia tensor
+        (weights proportional to 1/R^2_sph).
     orient_with_momentum : bool
-        Align the minor axis with the angular-momentum vector each
-        iteration.
+        Align the minor axis with the angular-momentum vector each iteration.
     tol : float
         Convergence tolerance on axis-ratio changes.
     max_iter : int
@@ -1090,29 +1055,28 @@ def fit_iterative_ellipsoid(
     ellip : float
         ``1 - c/a``.  Only returned when *return_ellip_triax* is *True*.
     triax : float
-        ``(a²-b²)/(a²-c²)``.  Only when *return_ellip_triax* is *True*.
+        ``(a^2-b^2)/(a^2-c^2)``.  Only when *return_ellip_triax* is *True*.
     """
     from scipy import linalg
 
-    XYZ, _ = validate_positions(XYZ)  # ensures (N, 3) float array
-    n_particles = XYZ.shape[0]
+    pos, _ = validate_positions(pos)  # ensures (N, 3) float array
+    n_particles = pos.shape[0]
 
     mass_arr = validate_masses(mass, n_particles, non_negative=True)
-    Vxyz_arr = validate_velocities(Vxyz, n_particles)  # None -> zeros
+    vel_arr = validate_velocities(vel, n_particles)  # None -> zeros
 
     use_momentum = False
-    if Vxyz is not None and orient_with_momentum:
+    if vel is not None and orient_with_momentum:
         use_momentum = True
-    elif Vxyz is None and orient_with_momentum and verbose:
+    elif vel is None and orient_with_momentum and verbose:
         print(
-            "Warning: orient_with_momentum=True but Vxyz not provided. "
+            "Warning: orient_with_momentum=True but vel not provided. "
             "Disabling momentum orientation."
         )
 
     if not (Rmin >= 0 and Rmax > 0 and Rmax > Rmin):
         raise ValueError("Need Rmin >= 0, Rmax > 0, and Rmax > Rmin.")
 
-    # Helper for returning NaN results
     def _nan_result():
         nan_abc = np.full(3, np.nan)
         nan_T = np.full((3, 3), np.nan)
@@ -1120,17 +1084,17 @@ def fit_iterative_ellipsoid(
             return nan_abc, nan_T, np.nan, np.nan
         return nan_abc, nan_T
 
-    # --- Initialise ---
+    # Initialise
     q_iter, s_iter = 1.0, 1.0
     transform_bca = np.array(
         [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=float
     ).T
     eigval_bca = np.array([1.0, 1.0, 1.0], dtype=float)
 
-    dist_sq = _calculate_particle_distances_sq(XYZ)
+    dist_sq = _calculate_particle_distances_sq(pos)
     extract_mask = (dist_sq < Rmax ** 2) & (dist_sq >= Rmin ** 2)
 
-    # --- Iterate ---
+    # Iterate
     for it in range(max_iter):
         if verbose:
             print(f"Iteration {it + 1}/{max_iter}...")
@@ -1142,12 +1106,12 @@ def fit_iterative_ellipsoid(
             Rmax_sc = Rmax / vol_inv if vol_inv > 1e-9 else Rmax * 1e9
 
             _, extract_mask, Rsph_ext = _calculate_Rsphall_and_extract(
-                XYZ, transform_bca, q_iter, s_iter, Rmax_sc, Rmin
+                pos, transform_bca, q_iter, s_iter, Rmax_sc, Rmin
             )
 
             if np.sum(extract_mask) < 10:
                 if verbose:
-                    print("Too few particles in reduced step — stopping.")
+                    print("Too few particles in reduced step - stopping.")
                 break
 
             med = np.median(Rsph_ext)
@@ -1158,31 +1122,31 @@ def fit_iterative_ellipsoid(
             st_weights = 1.0 / (factors ** 2)
         else:
             if it > 0 and not reduced_structure:
-                dist_sq = _calculate_particle_distances_sq(XYZ)
+                dist_sq = _calculate_particle_distances_sq(pos)
                 extract_mask = (dist_sq < Rmax ** 2) & (dist_sq >= Rmin ** 2)
 
             if np.sum(extract_mask) < 10:
                 if verbose:
                     print(
-                        f"Too few particles ({np.sum(extract_mask)}) — "
+                        f"Too few particles ({np.sum(extract_mask)}) - "
                         f"check Rmin/Rmax."
                     )
                 return _nan_result()
 
             st_weights = np.ones(np.sum(extract_mask), dtype=float)
 
-        cur_XYZ = XYZ[extract_mask]
+        cur_pos = pos[extract_mask]
         cur_mass = mass_arr[extract_mask]
 
         # 2. Structure tensor
-        S = _compute_weighted_structure_tensor(cur_XYZ, cur_mass, st_weights)
+        S = _compute_weighted_structure_tensor(cur_pos, cur_mass, st_weights)
 
         # 3. Diagonalise
         try:
             eigvals, eigvecs = linalg.eigh(S)
         except linalg.LinAlgError:
             if verbose:
-                print("eigh failed — stopping.")
+                print("eigh failed - stopping.")
             break
         eigvals = np.maximum(eigvals, 1e-12)
 
@@ -1196,10 +1160,10 @@ def fit_iterative_ellipsoid(
             e_c *= -1.0
 
         # 4. Optional momentum alignment
-        if use_momentum and cur_XYZ.shape[0] > 0:
-            cur_V = Vxyz_arr[extract_mask]
+        if use_momentum and cur_pos.shape[0] > 0:
+            cur_V = vel_arr[extract_mask]
             L = np.sum(
-                cur_mass[:, np.newaxis] * np.cross(cur_XYZ, cur_V), axis=0
+                cur_mass[:, np.newaxis] * np.cross(cur_pos, cur_V), axis=0
             )
             if np.linalg.norm(L) > 1e-9:
                 if np.dot(e_c, L) < 0:
@@ -1284,7 +1248,7 @@ def fit_iterative_ellipsoid(
         if verbose:
             print(f"Reached max_iter ({max_iter}) without convergence.")
 
-    # --- Final output ---
+    # Final output
     if np.any(np.isnan(eigval_bca)) or np.sum(extract_mask) < 3:
         if verbose:
             print("Warning: invalid eigenvalues or too few particles.")
@@ -1312,7 +1276,7 @@ def fit_iterative_ellipsoid(
     else:
         abc = np.array([1.0, 1.0, 1.0])
         if verbose:
-            print("Warning: major axis near zero — shape ill-defined.")
+            print("Warning: major axis near zero - shape ill-defined.")
 
     transform = np.vstack((e_a_out, e_b_out, e_c_out))
 
@@ -1338,19 +1302,17 @@ def fit_iterative_ellipsoid(
     return abc, transform, ellip, triax
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  5. Spherical grid generators                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# --- 5. Spherical grid generators ---
 
 def uniform_spherical_grid(
-    rad: float = 1.0,
+    radius: float = 1.0,
     num_pts: int = 500,
 ) -> np.ndarray:
     """Generate uniformly random points on the surface of a sphere.
 
     Parameters
     ----------
-    rad : float
+    radius : float
         Sphere radius.
     num_pts : int
         Number of points.
@@ -1360,7 +1322,7 @@ def uniform_spherical_grid(
     xyz : np.ndarray, shape ``(num_pts, 3)``
         Cartesian coordinates.
     """
-    if rad <= 0:
+    if radius <= 0:
         raise ValueError("Radius must be positive.")
     if not isinstance(num_pts, (int, np.integer)) or num_pts <= 0:
         raise ValueError("num_pts must be a positive integer.")
@@ -1369,15 +1331,15 @@ def uniform_spherical_grid(
     cos_theta = np.random.uniform(-1, 1, num_pts)
     theta = np.arccos(cos_theta)
 
-    x = rad * np.sin(theta) * np.cos(phi)
-    y = rad * np.sin(theta) * np.sin(phi)
-    z = rad * np.cos(theta)
+    x = radius * np.sin(theta) * np.cos(phi)
+    y = radius * np.sin(theta) * np.sin(phi)
+    z = radius * np.cos(theta)
 
     return np.column_stack((x, y, z))
 
 
 def spherical_spiral_grid(
-    rad: float = 1.0,
+    radius: float = 1.0,
     proj: str = "Cart",
 ) -> np.ndarray:
     """Load a pre-defined spherical spiral grid scaled to a given radius.
@@ -1387,14 +1349,14 @@ def spherical_spiral_grid(
 
     Parameters
     ----------
-    rad : float
+    radius : float
         Radius to scale the unit grid to.
     proj : ``'Cart'`` | ``'Sph'`` | ``'Cyl'``
         Coordinate system of the returned array.
 
-        * ``'Cart'`` — Cartesian ``(x, y, z)``.
-        * ``'Sph'``  — Spherical ``(r, theta, phi)``.
-        * ``'Cyl'``  — Cylindrical ``(R, phi, z)``.
+        * ``'Cart'`` - Cartesian ``(x, y, z)``.
+        * ``'Sph'``  - Spherical ``(r, theta, phi)``.
+        * ``'Cyl'``  - Cylindrical ``(R, phi, z)``.
 
     Returns
     -------
@@ -1402,7 +1364,7 @@ def spherical_spiral_grid(
     """
     if proj not in ("Cart", "Sph", "Cyl"):
         raise ValueError("proj must be 'Cart', 'Sph', or 'Cyl'.")
-    if rad <= 0:
+    if radius <= 0:
         raise ValueError("Radius must be positive.")
 
     data_dir = Path(__file__).resolve().parent.parent / "data"
@@ -1413,12 +1375,12 @@ def spherical_spiral_grid(
             f"Place the file 'spherical_grid_unit.xyz' in {data_dir}."
         )
 
-    XYZ = rad * np.loadtxt(grid_file)
+    XYZ = radius * np.loadtxt(grid_file)
 
     if proj == "Cart":
         return XYZ
 
-    # Inline coordinate conversions (avoids pulling the full coord module)
+    # Inline coordinate conversions
     x, y, z = XYZ[:, 0], XYZ[:, 1], XYZ[:, 2]
 
     if proj == "Sph":
@@ -1433,13 +1395,11 @@ def spherical_spiral_grid(
     return np.column_stack((R, phi, z))
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  6. Centre finding                                                     ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# --- 6. Centre finding ---
 
 def _shrinking_sphere_center(
-    positions: np.ndarray,
-    masses: np.ndarray,
+    pos: np.ndarray,
+    mass: np.ndarray,
     r_init: float = 30.0,
     shrink_factor: float = 0.9,
     min_particles: int = 10,
@@ -1451,8 +1411,8 @@ def _shrinking_sphere_center(
 
     Parameters
     ----------
-    positions : array_like, shape ``(N, 3)``
-    masses : array_like, shape ``(N,)``
+    pos : array_like, shape ``(N, 3)``
+    mass : array_like, shape ``(N,)``
     r_init : float
         Initial sphere radius.
     shrink_factor : float
@@ -1464,108 +1424,232 @@ def _shrinking_sphere_center(
     -------
     centre : np.ndarray, shape ``(3,)``
     """
-    center = np.average(positions, axis=0, weights=masses)
+    center = np.average(pos, axis=0, weights=mass)
     radius = r_init
     while True:
-        dist2 = np.sum((positions - center) ** 2, axis=1)
+        dist2 = np.sum((pos - center) ** 2, axis=1)
         mask = dist2 < radius ** 2
         if np.sum(mask) < min_particles:
             break
-        center = np.average(positions[mask], axis=0, weights=masses[mask])
+        center = np.average(pos[mask], axis=0, weights=mass[mask])
         radius *= shrink_factor
     return center
 
 
-def find_center_position(
-    positions: np.ndarray,
-    masses: np.ndarray | float | None = None,
-    method: str = "shrinking_sphere",
+def _density_peak_center(
+    pos: np.ndarray,
+    mass: np.ndarray,
+    softening: float = 0.1,
+    top_fraction: float = 0.01,
     **kwargs,
 ) -> np.ndarray:
-    """Find the centre of a particle distribution.
+    """Find the density peak by locating the minimum gravitational potential.
+
+    Uses the first available solver in order:
+      1. GPU tree code (nbody_streams.tree_gpu) - O(N log N), fastest
+      2. pyfalcon CPU tree code               - O(N log N)
+      3. agama Multipole BFE                  - approximate
+    Raises ImportError if none are available.
 
     Parameters
     ----------
-    positions : array_like, shape ``(N, 3)`` or ``(N, 6)``
-        Particle positions (or positions + velocities for KDE).
-    masses : scalar, array_like, or None
-        Particle masses.
-    method : ``'shrinking_sphere'`` | ``'density_peak'`` | ``'kde'``
-        Algorithm:
-
-        * ``'shrinking_sphere'`` — iterative shrinking sphere (fast,
-          good for roughly spherical systems).
-        * ``'density_peak'`` — KDE pre-centre then Agama multipole
-          density peak (more accurate, requires ``agama``).
-        * ``'kde'`` — Gaussian KDE only.
-
+    pos : np.ndarray, shape ``(N, 3)``
+    mass : np.ndarray, shape ``(N,)``
+    softening : float
+        Gravitational softening length (kpc).
+    top_fraction : float
+        Fraction of lowest-potential particles used to compute centroid.
     **kwargs
-        Extra parameters forwarded to the chosen method.
-
-        For ``shrinking_sphere``:
-            ``r_init`` (30), ``shrink_factor`` (0.9), ``min_particles`` (100).
-
-        For ``density_peak``:
-            ``lmax`` (8) — maximum multipole order.
+        Extra kwargs forwarded to the tree solver (e.g. ``theta=0.4``).
 
     Returns
     -------
-    centre : np.ndarray, shape ``(3,)`` or ``(6,)``
-        Estimated centre (position, or position + velocity when the
-        input has 6 columns and the KDE path is taken).
+    centre : np.ndarray, shape ``(3,)``
     """
-    positions = np.asarray(positions, dtype=float)
-    n = positions.shape[0]
-    masses_arr = validate_masses(masses, n)
+    theta = kwargs.get("theta", 0.4)
+    phi = None
 
-    if method == "shrinking_sphere":
-        return _shrinking_sphere_center(
-            positions[:, :3],
-            masses_arr,
+    # --- Try GPU tree ---
+    try:
+        from ..tree_gpu import tree_gravity_gpu
+        import cupy as cp
+        pos_cp = cp.asarray(pos, dtype=cp.float32)
+        mass_cp = cp.asarray(mass, dtype=cp.float32)
+        eps_cp = cp.full(len(pos), float(softening), dtype=cp.float32)
+        _, phi_cp = tree_gravity_gpu(
+            pos_cp, mass_cp, eps=eps_cp, G=G_DEFAULT, theta=theta,
+        )
+        phi = cp.asnumpy(phi_cp).astype(float)
+    except Exception:
+        pass
+
+    # --- Try pyfalcon ---
+    if phi is None:
+        try:
+            import pyfalcon
+            _, phi = pyfalcon.gravity(pos, mass * G_DEFAULT, eps=softening, theta=theta)
+            phi = np.asarray(phi, dtype=float)
+        except Exception:
+            pass
+
+    # --- Try agama ---
+    if phi is None:
+        if not AGAMA_AVAILABLE:
+            raise ImportError(
+                "density_peak centre finding requires at least one of:\n"
+                "  - nbody_streams GPU tree (compile: cd nbody_streams/tree_gpu && make -j)\n"
+                "  - pyfalcon  (pip install pyfalcon)\n"
+                "  - agama     (pip install agama)\n"
+                "Alternatively use method='shrinking_sphere' or method='kde'."
+            )
+        lmax = kwargs.get("lmax", 8)
+        pot = agama.Potential(
+            type="Multipole",
+            particles=(pos, mass),
+            symmetry="n",
+            lmax=lmax,
+        )
+        phi = pot.potential(pos)
+
+    # Centroid of the lowest-potential particles
+    n_pick = max(10, int(len(phi) * top_fraction))
+    idxs = np.argsort(phi)[:n_pick]
+    return np.average(pos[idxs], axis=0, weights=mass[idxs])
+
+
+def find_center(
+    pos: np.ndarray,
+    mass: np.ndarray | float | None = None,
+    vel: np.ndarray | None = None,
+    method: str = "density_peak",
+    return_velocity: bool = False,
+    vel_aperture: float = 5.0,
+    **kwargs,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    """Find the centre (and optionally the velocity centre) of a particle distribution.
+
+    Parameters
+    ----------
+    pos : array_like, shape ``(N, 3)``
+        Particle positions.
+    mass : scalar, array_like, or None
+        Particle masses.
+    vel : array_like, shape ``(N, 3)``, optional
+        Particle velocities.  Required when *return_velocity* is *True*.
+    method : ``'density_peak'`` | ``'shrinking_sphere'`` | ``'kde'``
+        Algorithm:
+
+        * ``'density_peak'`` - gravitational potential minimum via tree/BFE.
+          Tries GPU tree, then pyfalcon, then agama (in that order). Raises
+          ImportError if none are available - does NOT silently fall back.
+        * ``'shrinking_sphere'`` - iterative shrinking sphere (fast, robust
+          for virialized systems; may be unreliable for tidal debris).
+        * ``'kde'`` - Gaussian KDE density peak (slow for large N).
+
+    return_velocity : bool
+        If *True*, also return the velocity centre (mass-weighted mean
+        velocity of particles within *vel_aperture* kpc of the position centre).
+        Requires *vel* to be supplied.
+    vel_aperture : float
+        Aperture radius (kpc) for velocity centering.
+    **kwargs
+        Extra parameters forwarded to the chosen method.
+
+        For ``density_peak``:
+            ``softening`` (0.1 kpc), ``top_fraction`` (0.01), ``theta`` (0.4),
+            ``lmax`` (8, agama fallback only).
+        For ``shrinking_sphere``:
+            ``r_init`` (30), ``shrink_factor`` (0.9), ``min_particles`` (100).
+
+    Returns
+    -------
+    centre_pos : np.ndarray, shape ``(3,)``
+        Estimated position centre.
+    centre_vel : np.ndarray, shape ``(3,)``
+        Estimated velocity centre.  Only returned when *return_velocity* is *True*.
+    """
+    pos = np.asarray(pos, dtype=float)
+    if pos.ndim == 2 and pos.shape[1] == 6:
+        # Legacy: accept (N, 6) phase-space; split internally
+        if vel is None:
+            vel = pos[:, 3:]
+        pos = pos[:, :3]
+
+    n = pos.shape[0]
+    mass_arr = validate_masses(mass, n)
+
+    if method == "density_peak":
+        centre_pos = _density_peak_center(
+            pos, mass_arr,
+            softening=kwargs.get("softening", 0.1),
+            top_fraction=kwargs.get("top_fraction", 0.01),
+            **{k: v for k, v in kwargs.items()
+               if k in ("theta", "lmax")},
+        )
+
+    elif method == "shrinking_sphere":
+        centre_pos = _shrinking_sphere_center(
+            pos,
+            mass_arr,
             r_init=kwargs.get("r_init", 30.0),
             shrink_factor=kwargs.get("shrink_factor", 0.9),
             min_particles=kwargs.get("min_particles", 100),
         )
 
-    # KDE path (used by both 'kde' and 'density_peak')
-    from scipy.stats import gaussian_kde
+    elif method == "kde":
+        from scipy.stats import gaussian_kde
+        kde = gaussian_kde(pos.T, weights=mass_arr)
+        n_sample = min(10_000, n)
+        sample = pos[np.random.choice(n, size=n_sample, replace=False)]
+        dens = kde(sample.T)
+        n_pick = max(10, int(len(dens) * 0.01))
+        idxs = np.argsort(dens)[-n_pick:]
+        centre_pos = np.average(sample[idxs], axis=0)
 
-    kde = gaussian_kde(positions.T, weights=masses_arr)
-    n_sample = min(10_000, n)
-    sample = positions[np.random.choice(n, size=n_sample, replace=False)]
-    dens = kde(sample.T)
-    n_pick = max(10, int(len(dens) * 0.01))
-    idxs = np.argsort(dens)[-n_pick:]
-    centroid = np.average(sample[idxs], axis=0)
-
-    if method == "density_peak":
-        if not AGAMA_AVAILABLE:
-            warnings.warn(
-                "agama not available — falling back to KDE centre.",
-                ImportWarning,
-            )
-            return centroid
-
-        pos_c = positions[:, :3] - centroid[:3]
-        dens_agama = agama.Potential(
-            type="Multipole",
-            particles=(pos_c, masses_arr),
-            symmetry="n",
-            lmax=kwargs.get("lmax", 8),
-        ).density(pos_c)
-
-        n_pick2 = max(50, int(len(dens_agama) * 0.01))
-        idxs2 = np.argsort(dens_agama)[-n_pick2:]
-        centroid[:3] += np.average(
-            pos_c[idxs2], axis=0, weights=dens_agama[idxs2]
+    else:
+        raise ValueError(
+            f"Unknown method '{method}'. "
+            "Choose 'density_peak', 'shrinking_sphere', or 'kde'."
         )
 
-    return centroid
+    if not return_velocity:
+        return centre_pos
+
+    # Velocity centering via aperture selection
+    if vel is None:
+        raise ValueError("vel must be supplied when return_velocity=True.")
+    vel = np.asarray(vel, dtype=float)
+    dist2 = np.sum((pos - centre_pos) ** 2, axis=1)
+    sel = dist2 < vel_aperture ** 2
+    if np.any(sel):
+        centre_vel = np.average(vel[sel], axis=0, weights=mass_arr[sel])
+    else:
+        centre_vel = np.average(vel, axis=0, weights=mass_arr)
+
+    return centre_pos, centre_vel
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  7. Iterative boundness                                                ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+def find_center_position(
+    pos: np.ndarray,
+    mass: np.ndarray | float | None = None,
+    method: str = "density_peak",
+    **kwargs,
+) -> np.ndarray:
+    """Find the centre of a particle distribution.
+
+    .. deprecated::
+        Use :func:`find_center` instead.  This alias will be removed in a
+        future release.
+    """
+    warnings.warn(
+        "find_center_position is deprecated; use find_center instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return find_center(pos, mass=mass, method=method, **kwargs)
+
+
+# --- 7. Iterative boundness ---
 
 def compute_iterative_boundness(*args, **kwargs):
     warnings.warn(
@@ -1576,87 +1660,86 @@ def compute_iterative_boundness(*args, **kwargs):
     return iterative_unbinding(*args, **kwargs)
 
 def iterative_unbinding(
-    positions_dark: np.ndarray,
-    velocity_dark: np.ndarray,
+    pos_dark: np.ndarray,
+    vel_dark: np.ndarray,
     mass_dark: np.ndarray | float,
-    positions_star: np.ndarray | None = None,
-    velocity_star: np.ndarray | None = None,
+    pos_star: np.ndarray | None = None,
+    vel_star: np.ndarray | None = None,
     mass_star: np.ndarray | float | None = None,
     center_position: np.ndarray | list = [],
     center_velocity: np.ndarray | list = [],
     recursive_iter_converg: int = 50,
     potential_compute_method: str = "tree",
-    BFE_lmax: int = 8,
     softening: float = 0.03,
     G: float = G_DEFAULT,
-    center_method: str = "shrinking_sphere",
+    center_method: str = "density_peak",
     center_params: Any = None,
-    center_vel_with_KDE: bool = False,
+    vel_aperture: float = 5.0,
     center_on: str = "dark",
-    vel_rmax: float = 5.0,
     tol_frac_change: float = 0.0001,
     verbose: bool = True,
     return_history: bool = False,
+    **kwargs,
 ) -> tuple:
     """Iterative unbinding to determine bound particles.
 
     Computes the gravitational potential, evaluates total energy per
-    particle (E = Φ + ½v²), and iteratively removes unbound (E > 0)
-    and repeats until the bound mass fraction changes by
-    less than `tol_frac_change` or `recursive_iter_converg` is reached.
+    particle (E = phi + 1/2 * vel^2), and iteratively removes unbound (E > 0)
+    particles, repeating until the bound mass fraction changes by less than
+    `tol_frac_change` or `recursive_iter_converg` is reached.
 
     Supports multi-component systems (e.g. dark matter and stars) and
     optional re-centering between iterations.
 
     Parameters
     ----------
-    positions_dark : array_like, shape ``(N_d, 3)``
+    pos_dark : array_like, shape ``(N_d, 3)``
         Dark-matter positions (kpc).
-    velocity_dark : array_like, shape ``(N_d, 3)``
+    vel_dark : array_like, shape ``(N_d, 3)``
         Dark-matter velocities (km/s).
     mass_dark : scalar or array_like
         Dark-matter masses (M_sun).
-    positions_star, velocity_star, mass_star : optional
+    pos_star, vel_star, mass_star : optional
         Stellar component (same conventions).
     center_position, center_velocity : array_like, shape ``(3,)``
         Pre-computed centre.  If empty, determined automatically.
     recursive_iter_converg : int
         Maximum iterations.
-    potential_compute_method : ``'tree'`` | ``'bfe'`` | ``'direct'``
+    potential_compute_method : ``'tree'`` | ``'tree_gpu'`` | ``'bfe'`` | ``'direct'`` | ``'direct_gpu'``
         Potential solver:
 
-        * ``'tree'``   — pyfalcon tree code.
-        * ``'bfe'``    — Agama multipole expansion.
-        * ``'direct'`` — :func:`nbody_streams.fields.compute_nbody_potential_cpu`
-          (exact O(N²), practical for N ≲ 50 000).  Also accepts
-          ``'direct_gpu'`` to use the GPU variant.
-    BFE_lmax : int
-        Multipole order for ``'bfe'``.
+        * ``'tree'``      - pyfalcon CPU tree code, O(N log N).
+        * ``'tree_gpu'``  - GPU Barnes-Hut tree (nbody_streams.tree_gpu).
+        * ``'bfe'``       - Agama multipole expansion.
+        * ``'direct'``    - O(N^2) CPU direct summation (practical for N <= ~50 000).
+        * ``'direct_gpu'``- GPU direct summation variant.
     softening : float
         Gravitational softening (kpc).
     G : float
         Gravitational constant.
     center_method : str
-        Passed to :func:`find_center_position`.
+        Passed to :func:`find_center`.  Default ``'density_peak'``.
     center_params : dict, optional
         Extra kwargs for the centre finder.
-    center_vel_with_KDE : bool
-        Use KDE for velocity centering.
+    vel_aperture : float
+        Aperture radius (kpc) for velocity centering when centre_position
+        is not pre-supplied.
     center_on : ``'dark'`` | ``'star'`` | ``'both'``
         Which component to centre on.
-    vel_rmax : float
-        Radius for velocity centering (kpc).
     tol_frac_change : float
         Convergence tolerance on bound-fraction change.
     verbose : bool
         Print diagnostics.
     return_history : bool
         Return per-iteration bound masks.
+    **kwargs
+        Extra keyword arguments forwarded to the potential solver,
+        e.g. ``theta=0.4`` (tree codes), ``lmax=8`` (bfe).
 
     Returns
     -------
     results : tuple
-        ``(bound_dark,)`` or ``(bound_dark, bound_star)`` — integer
+        ``(bound_dark,)`` or ``(bound_dark, bound_star)`` - integer
         masks (1 = bound).
     center_position : np.ndarray
     center_velocity : np.ndarray
@@ -1664,23 +1747,24 @@ def iterative_unbinding(
     # --- Input validation ---
     potential_compute_method = potential_compute_method.lower()
 
-    positions_dark, _ = validate_positions(positions_dark)
-    velocity_dark = validate_velocities(velocity_dark, positions_dark.shape[0])
-    mass_dark_arr = validate_masses(mass_dark, positions_dark.shape[0])
-    n_dark = positions_dark.shape[0]
+    pos_dark, _ = validate_positions(pos_dark)
+    vel_dark = validate_velocities(vel_dark, pos_dark.shape[0])
+    mass_dark_arr = validate_masses(mass_dark, pos_dark.shape[0])
+    n_dark = pos_dark.shape[0]
 
-    has_stars = positions_star is not None
+    has_stars = pos_star is not None
     if has_stars:
-        positions_star, _ = validate_positions(positions_star)
-        velocity_star = validate_velocities(velocity_star, positions_star.shape[0])
-        mass_star_arr = validate_masses(mass_star, positions_star.shape[0])
-        n_star = positions_star.shape[0]
+        pos_star, _ = validate_positions(pos_star)
+        vel_star = validate_velocities(vel_star, pos_star.shape[0])
+        mass_star_arr = validate_masses(mass_star, pos_star.shape[0])
+        n_star = pos_star.shape[0]
 
     if center_on == "star" and not has_stars:
         raise ValueError("center_on='star' requires star data.")
 
     # --- Resolve potential backend ---
     _use_pyfalcon = False
+    _use_tree_gpu = False
     _use_direct = potential_compute_method in ("direct", "direct_gpu")
 
     if potential_compute_method == "tree":
@@ -1688,13 +1772,42 @@ def iterative_unbinding(
             import pyfalcon
             _use_pyfalcon = True
         except ImportError:
-            warnings.warn(
-                "pyfalcon not available — falling back to 'bfe'.",
-                ImportWarning,
+            raise ImportError(
+                "potential_compute_method='tree' requires pyfalcon. "
+                "Install with: pip install pyfalcon\n"
+                "Or choose 'tree_gpu', 'bfe', 'direct', or 'direct_gpu'."
             )
-            potential_compute_method = "bfe"
+
+    elif potential_compute_method == "tree_gpu":
+        try:
+            from ..tree_gpu import tree_gravity_gpu as _tree_gravity_gpu
+            import cupy as _cp_mod
+            _use_tree_gpu = True
+            _tree_gpu_fn = _tree_gravity_gpu
+            _cp = _cp_mod
+        except ImportError as e:
+            raise ImportError(
+                "potential_compute_method='tree_gpu' requires CuPy and the compiled "
+                "GPU tree library. Either:\n"
+                "  - CuPy is not installed (pip install cupy-cudaXX)\n"
+                "  - libtreeGPU.so has not been built: "
+                "cd nbody_streams/tree_gpu && make -j\n"
+                f"Original error: {e}"
+            ) from e
+
+    elif potential_compute_method == "bfe":
+        if not AGAMA_AVAILABLE:
+            raise ImportError(
+                "potential_compute_method='bfe' requires agama. "
+                "Install with: pip install agama\n"
+                "Or choose 'tree', 'tree_gpu', 'direct', or 'direct_gpu'."
+            )
 
     if _use_direct:
+        from ..species import _emit_performance_warnings
+        N_total = n_dark + (n_star if has_stars else 0)
+        arch = "gpu" if potential_compute_method == "direct_gpu" else "cpu"
+        _emit_performance_warnings(N_total, arch, "direct")
         try:
             if potential_compute_method == "direct_gpu":
                 from ..fields import compute_nbody_potential_gpu as _potential_fn
@@ -1717,50 +1830,40 @@ def iterative_unbinding(
 
     # --- Centre finding ---
     if center_on == "both" and has_stars:
-        pos_ctr = np.vstack((positions_dark, positions_star))
+        pos_ctr = np.vstack((pos_dark, pos_star))
         mass_ctr = np.concatenate((mass_dark_arr, mass_star_arr))
-        vel_ctr = np.vstack((velocity_dark, velocity_star))
+        vel_ctr = np.vstack((vel_dark, vel_star))
     elif center_on == "star" and has_stars:
-        pos_ctr = positions_star
+        pos_ctr = pos_star
         mass_ctr = mass_star_arr
-        vel_ctr = velocity_star
+        vel_ctr = vel_star
     else:
-        pos_ctr = positions_dark
+        pos_ctr = pos_dark
         mass_ctr = mass_dark_arr
-        vel_ctr = velocity_dark
+        vel_ctr = vel_dark
 
     center_position = np.asarray(center_position, dtype=float)
     center_velocity = np.asarray(center_velocity, dtype=float)
 
     if center_position.size < 3:
-        if center_vel_with_KDE:
-            posvel = np.hstack((pos_ctr, vel_ctr))
-            ctr = find_center_position(
-                posvel, mass_ctr, method=center_method,
-                **(center_params or {}),
-            )
-            center_position, center_velocity = ctr[:3], ctr[3:]
-        else:
-            center_position = find_center_position(
-                pos_ctr, mass_ctr, method=center_method,
-                **(center_params or {}),
-            )
-
-    if center_velocity.size < 3:
-        vel_rmax_eff = min(
-            vel_rmax,
-            0.1 * np.std(np.linalg.norm(vel_ctr, axis=1)),
+        center_position, center_velocity = find_center(
+            pos_ctr,
+            mass=mass_ctr,
+            vel=vel_ctr,
+            method=center_method,
+            return_velocity=True,
+            vel_aperture=vel_aperture,
+            **(center_params or {}),
         )
+    elif center_velocity.size < 3:
         dist2 = np.sum((pos_ctr - center_position) ** 2, axis=1)
-        sel = dist2 < vel_rmax_eff ** 2
+        sel = dist2 < vel_aperture ** 2
         if np.any(sel):
             center_velocity = np.average(
                 vel_ctr[sel], axis=0, weights=mass_ctr[sel]
             )
         else:
-            center_velocity = np.average(
-                vel_ctr, axis=0, weights=mass_ctr
-            )
+            center_velocity = np.average(vel_ctr, axis=0, weights=mass_ctr)
 
     logger.info(
         "Center position (%s): %s",
@@ -1771,12 +1874,12 @@ def iterative_unbinding(
 
     # --- Stack arrays ---
     if has_stars:
-        pos_all = np.vstack((positions_dark, positions_star))
-        vel_all = np.vstack((velocity_dark, velocity_star))
+        pos_all = np.vstack((pos_dark, pos_star))
+        vel_all = np.vstack((vel_dark, vel_star))
         mass_all = np.concatenate((mass_dark_arr, mass_star_arr))
     else:
-        pos_all = positions_dark.copy()
-        vel_all = velocity_dark.copy()
+        pos_all = pos_dark.copy()
+        vel_all = vel_dark.copy()
         mass_all = mass_dark_arr.copy()
 
     pos_rel = pos_all - center_position
@@ -1787,6 +1890,9 @@ def iterative_unbinding(
     bound_history_star: list[np.ndarray] = []
     min_particles = 5
 
+    theta = kwargs.get("theta", 0.4)
+    lmax = kwargs.get("lmax", 8)
+
     # --- Iterative unbinding ---
     for i in range(recursive_iter_converg):
         n_bound = int(np.sum(mask_all))
@@ -1794,22 +1900,38 @@ def iterative_unbinding(
             logger.info("Stopping: only %d particles remaining.", n_bound)
             break
 
+        # Unbound particles receive a near-zero mass so they still contribute
+        # to the potential field at their positions, allowing them to re-bind
+        # in early iterations if they are near the energy boundary.
         if _use_pyfalcon:
             mass_src = mass_all.copy()
             mass_src[~mask_all] = 0.01
             _, phi = pyfalcon.gravity(
-                pos_rel, mass_src * G, eps=softening, theta=0.4
+                pos_rel, mass_src * G, eps=softening, theta=theta
             )
+
+        elif _use_tree_gpu:
+            mass_src = mass_all.copy()
+            mass_src[~mask_all] = 0.01
+            pos_cp = _cp.asarray(pos_rel, dtype=_cp.float32)
+            mass_cp = _cp.asarray(mass_src, dtype=_cp.float32)
+            eps_cp = _cp.full(len(pos_rel), float(softening), dtype=_cp.float32)
+            _, phi_cp = _tree_gpu_fn(
+                pos_cp, mass_cp, eps=eps_cp, G=G, theta=theta,
+            )
+            phi = _cp.asnumpy(phi_cp).astype(float)
+
         elif _use_direct:
             phi = _potential_fn(
                 pos_rel, mass_all * mask_all, softening=softening, G=G,
             )
         else:
+            # bfe via agama
             pot = agama.Potential(
                 type="Multipole",
                 particles=(pos_rel[mask_all], mass_all[mask_all]),
                 symmetry="n",
-                lmax=BFE_lmax,
+                lmax=lmax,
             )
             phi = pot.potential(pos_rel)
 
@@ -1821,7 +1943,7 @@ def iterative_unbinding(
             bound_history_star.append(bound_mask[n_dark:].copy())
 
         frac_change = np.mean(bound_mask != mask_all)
-        logger.info("Iter %d: Δ bound mask = %.5f", i, frac_change)
+        logger.info("Iter %d: delta bound mask = %.5f", i, frac_change)
         mask_all = bound_mask
         if frac_change < tol_frac_change:
             logger.info("Converged after %d iterations.", i + 1)

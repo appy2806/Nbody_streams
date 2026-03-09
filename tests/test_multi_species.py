@@ -213,8 +213,8 @@ class TestPerformanceWarnings:
         with pytest.warns(PerformanceWarning, match="GPU direct"):
             _emit_performance_warnings(600_000, "gpu", "direct")
 
-    def test_future_warning_2m(self):
-        with pytest.warns(FutureWarning, match="GPU.Tree"):
+    def test_perf_warning_2m(self):
+        with pytest.warns(PerformanceWarning, match="method='tree'"):
             _emit_performance_warnings(2_100_000, "cpu", "direct")
 
     def test_cpu_tree_no_warning(self):

@@ -479,33 +479,37 @@ from nbody_streams.utils import (
     fit_plummer_profile,
     fit_double_spheroid_profile,
     fit_iterative_ellipsoid,
-    find_center_position,
+    find_center,
     iterative_unbinding,
 )
 
 # Radial profiles
-r_bins, rho = empirical_density_profile(positions, masses, bins=50)
-r_bins, v_circ = empirical_circular_velocity_profile(positions, masses)
-r_bins, sigma = empirical_velocity_dispersion_profile(positions, velocities)
+r_bins, rho = empirical_density_profile(pos, mass, bins=50)
+r_bins, v_circ = empirical_circular_velocity_profile(pos, mass)
+r_bins, sigma = empirical_velocity_dispersion_profile(pos, vel)
 
 # Profile fitting
-gamma, a, M, r_fit, rho_fit = fit_dehnen_profile(positions, masses)
-a, M, r_fit, rho_fit = fit_plummer_profile(positions, masses)
+gamma, a, M, r_fit, rho_fit = fit_dehnen_profile(pos, mass)
+a, M, r_fit, rho_fit = fit_plummer_profile(pos, mass)
 
 # Iterative shape measurement
-axes, axis_ratios, eigvecs = fit_iterative_ellipsoid(positions, masses)
+axes, axis_ratios, eigvecs = fit_iterative_ellipsoid(pos, mass)
 
-# Centre finding
-cen = find_center_position(positions, masses)
+# Centre finding (default method="density_peak" via gravitational potential minimum)
+cen = find_center(pos, mass)
+
+# Centre finding with velocity centering
+cen_pos, cen_vel = find_center(pos, mass, vel=vel, return_velocity=True, vel_aperture=5.0)
 
 # Energy-based iterative unbinding
 bound_mask = iterative_unbinding(
-    positions, velocities, masses,
+    pos, vel, mass,
     center_position=cen,
 )
 ```
 
-> **Note:** `compute_iterative_boundness` is deprecated — use `iterative_unbinding` instead.
+> **Note:** `find_center_position` is a deprecated alias for `find_center`.
+> `compute_iterative_boundness` is also deprecated -- use `iterative_unbinding` instead.
 
 ### Coordinates (`coords`)
 

@@ -1,4 +1,4 @@
-"""nbody_streams.utils — analysis and diagnostic utilities."""
+"""nbody_streams.utils - analysis and diagnostic utilities."""
 
 from .main import (
     make_uneven_grid,
@@ -18,7 +18,8 @@ from .main import (
     uniform_spherical_grid,
     spherical_spiral_grid,
     # Centre finding
-    find_center_position,
+    find_center,
+    find_center_position,   # deprecated alias
     # Boundness
     compute_iterative_boundness,
     iterative_unbinding,
@@ -37,6 +38,7 @@ __all__ = [
     "fit_iterative_ellipsoid",
     "uniform_spherical_grid",
     "spherical_spiral_grid",
+    "find_center",
     "find_center_position",
     "compute_iterative_boundness",
     "iterative_unbinding",

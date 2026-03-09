@@ -5,7 +5,7 @@ tests/test_utils.py
 Tests for ``nbody_streams.utils`` using a Plummer sphere as ground truth.
 
 The Plummer model has well-known analytic profiles, is spherically
-symmetric, and is in virial equilibrium — making it ideal for
+symmetric, and is in virial equilibrium -- making it ideal for
 validating density profiles, velocity profiles, morphological shape,
 density fitting, centre finding, and iterative boundness.
 
@@ -19,7 +19,7 @@ from __future__ import annotations
 import sys
 import numpy as np
 
-# ── Package imports ──────────────────────────────────────────────────────
+# --- Package imports ---
 from nbody_streams.run import make_plummer_sphere
 from nbody_streams.utils import (
     make_uneven_grid,
@@ -31,17 +31,17 @@ from nbody_streams.utils import (
     fit_double_spheroid_profile,
     fit_iterative_ellipsoid,
     uniform_spherical_grid,
-    find_center_position,
+    find_center,
     iterative_unbinding,
 )
 
-# ── Constants ────────────────────────────────────────────────────────────
+# --- Constants ---
 N_PARTICLES = 100_000
 M_TOTAL = 1.0
 A_SCALE = 1.0          # Plummer scale radius
 G_NBODY = 1.0          # make_plummer_sphere uses G = 1
 
-# ── Fixture: generate Plummer sphere once ────────────────────────────────
+# --- Fixture: generate Plummer sphere once ---
 print(f"Generating Plummer sphere with N={N_PARTICLES} ...")
 phase_space, masses = make_plummer_sphere(N_PARTICLES, M_total=M_TOTAL, a=A_SCALE)
 pos = phase_space[:, :3]        # (N, 3) kpc-equivalent
@@ -51,14 +51,14 @@ mass = masses.astype(np.float64)
 print("  done.\n")
 
 
-# ── Analytic Plummer functions ───────────────────────────────────────────
+# --- Analytic Plummer functions ---
 def plummer_density(r, M=M_TOTAL, a=A_SCALE):
-    """ρ(r) = (3M / 4πa³) (1 + r²/a²)^{-5/2}"""
+    """rho(r) = (3M / 4*pi*a^3) (1 + r^2/a^2)^{-5/2}"""
     return (3 * M / (4 * np.pi * a ** 3)) * (1 + (r / a) ** 2) ** (-2.5)
 
 
 def plummer_enclosed_mass(r, M=M_TOTAL, a=A_SCALE):
-    """M(<r) = M r³ / (r² + a²)^{3/2}"""
+    """M(<r) = M r^3 / (r^2 + a^2)^{3/2}"""
     return M * r ** 3 / (r ** 2 + a ** 2) ** 1.5
 
 
@@ -68,9 +68,9 @@ def plummer_v_circ(r, M=M_TOTAL, a=A_SCALE, G=G_NBODY):
     return np.sqrt(G * M_enc / r)
 
 
-# ═════════════════════════════════════════════════════════════════════════
+# =============================================================================
 # Tests
-# ═════════════════════════════════════════════════════════════════════════
+# =============================================================================
 
 def test_make_uneven_grid():
     """Grid starts at 0, second node at xmin, last at xmax."""
@@ -140,23 +140,23 @@ def test_empirical_velocity_rms():
 
 
 def test_empirical_velocity_anisotropy():
-    """For an isotropic Plummer sphere, β ≈ 0 on average."""
+    """For an isotropic Plummer sphere, beta ~= 0 on average."""
     r_bins, beta = empirical_velocity_anisotropy_profile(
         pos, vel, mass, nbins=25, rmin=0.3, rmax=5.0
     )
     finite = np.isfinite(beta)
     mean_beta = np.nanmean(beta[finite])
-    # Isotropic -> β = 0;  allow |β| < 0.15 due to sampling noise
+    # Isotropic -> beta = 0;  allow |beta| < 0.15 due to sampling noise
     assert abs(mean_beta) < 0.15, (
-        f"Mean β = {mean_beta:.3f} (expected ≈ 0 for isotropic system)"
+        f"Mean beta = {mean_beta:.3f} (expected ~= 0 for isotropic system)"
     )
-    print(f"test_empirical_velocity_anisotropy: [OK]  (mean β = {mean_beta:.3f})")
+    print(f"test_empirical_velocity_anisotropy: [OK]  (mean beta = {mean_beta:.3f})")
 
 
 def test_fit_double_spheroid_profile():
     """Fitted profile should recover the Plummer mass to ~30%."""
     result = fit_double_spheroid_profile(
-        positions=pos, masses=mass, bins=30
+        pos=pos, mass=mass, bins=30
     )
     M_fit, a_fit, alpha_fit, beta_fit, gamma_fit = result
     rel_mass_err = abs(M_fit - M_TOTAL) / M_TOTAL
@@ -168,46 +168,63 @@ def test_fit_double_spheroid_profile():
     print(
         f"test_fit_double_spheroid_profile: [OK]  "
         f"(M={M_fit:.4f}, a={a_fit:.3f}, "
-        f"α={alpha_fit:.2f}, β={beta_fit:.2f}, γ={gamma_fit:.2f})"
+        f"alpha={alpha_fit:.2f}, beta={beta_fit:.2f}, gamma={gamma_fit:.2f})"
     )
 
 
 def test_morphology_sphere():
-    """A perfect Plummer sphere should have abc ≈ [1, 1, 1]."""
+    """A perfect Plummer sphere should have abc ~= [1, 1, 1]."""
     abc, T = fit_iterative_ellipsoid(
         pos, mass=mass, Rmax=5.0
     )
     assert np.allclose(abc, [1.0, 1.0, 1.0], atol=0.05), (
-        f"Shape abc = {abc} (expected ≈ [1, 1, 1] for a sphere)"
+        f"Shape abc = {abc} (expected ~= [1, 1, 1] for a sphere)"
     )
     print(f"test_morphology_sphere: [OK]  (abc = {abc})")
 
 
 def test_morphology_ellipticity_triaxiality():
-    """Sphere: ellipticity ≈ 0, triaxiality ≈ 0."""
+    """Sphere: ellipticity ~= 0, triaxiality ~= 0."""
     abc, T, ell, tri = fit_iterative_ellipsoid(
         pos, mass=mass, Rmax=5.0, return_ellip_triax=True
     )
     assert ell < 0.08, f"Ellipticity = {ell:.3f} (expected < 0.08 for sphere)"
-    print(f"test_morphology_ellipticity_triaxiality: [OK]  (ε={ell:.3f}, T={tri:.3f})")
+    print(f"test_morphology_ellipticity_triaxiality: [OK]  (ell={ell:.3f}, T={tri:.3f})")
 
 
 def test_uniform_spherical_grid():
     """Points should lie on the sphere surface."""
-    grid = uniform_spherical_grid(rad=5.0, num_pts=1000)
+    grid = uniform_spherical_grid(radius=5.0, num_pts=1000)
     r = np.linalg.norm(grid, axis=1)
     assert np.allclose(r, 5.0, atol=1e-10), "All points should have r = 5.0"
     print("test_uniform_spherical_grid: [OK]")
 
 
-def test_find_center_position():
+def test_find_center():
     """Centre of the Plummer sphere should be near the origin."""
-    ctr = find_center_position(pos, mass, method="shrinking_sphere", r_init=10.0)
+    ctr = find_center(pos, mass, method="shrinking_sphere", r_init=10.0)
     dist = np.linalg.norm(ctr)
     assert dist < 0.1, (
         f"Centre at {ctr}, distance from origin = {dist:.4f} (expected < 0.1)"
     )
-    print(f"test_find_center_position: [OK]  (centre = {np.round(ctr, 4)})")
+    print(f"test_find_center: [OK]  (centre = {np.round(ctr, 4)})")
+
+
+def test_find_center_with_velocity():
+    """Centre finding with velocity should return both position and velocity."""
+    ctr_pos, ctr_vel = find_center(
+        pos, mass, vel=vel, method="shrinking_sphere",
+        return_velocity=True, vel_aperture=3.0, r_init=10.0
+    )
+    dist = np.linalg.norm(ctr_pos)
+    assert dist < 0.1, (
+        f"Centre at {ctr_pos}, distance from origin = {dist:.4f} (expected < 0.1)"
+    )
+    assert ctr_vel.shape == (3,), f"Centre velocity shape {ctr_vel.shape} (expected (3,))"
+    print(
+        f"test_find_center_with_velocity: [OK]  "
+        f"(centre = {np.round(ctr_pos, 4)}, v_ctr = {np.round(ctr_vel, 4)})"
+    )
 
 
 def test_iterative_unbinding():
@@ -217,7 +234,7 @@ def test_iterative_unbinding():
         potential_compute_method="direct",
         softening=0.05,
         G=G_NBODY,
-        center_method="shrinking_sphere",
+        center_method="shrinking_sphere",   # explicit: default changed to "density_peak"
         verbose=False,
     )
     bound_mask = result[0]
@@ -228,9 +245,9 @@ def test_iterative_unbinding():
     print(f"test_iterative_unbinding: [OK]  (bound frac = {bound_frac:.3f})")
 
 
-# ═════════════════════════════════════════════════════════════════════════
+# =============================================================================
 # Runner
-# ═════════════════════════════════════════════════════════════════════════
+# =============================================================================
 
 ALL_TESTS = [
     test_make_uneven_grid,
@@ -243,15 +260,15 @@ ALL_TESTS = [
     test_morphology_sphere,
     test_morphology_ellipticity_triaxiality,
     test_uniform_spherical_grid,
-    test_find_center_position,
+    test_find_center,
+    test_find_center_with_velocity,
     test_iterative_unbinding,
-
 ]
 
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  nbody_streams.utils — Plummer sphere test suite")
+    print("  nbody_streams.utils -- Plummer sphere test suite")
     print("=" * 60 + "\n")
 
     passed, failed = 0, 0
