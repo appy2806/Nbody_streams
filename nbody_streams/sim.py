@@ -120,6 +120,14 @@ def run_simulation(
           ``'float32'``, ``'float64'``, ``'float32_kahan'``.  Ignored for
           tree backends (which are always float32 internally).
 
+        GPU tree only (``architecture='gpu', method='tree'``):
+
+        * ``nleaf`` (int, default 64) -- Minimum leaf node size.
+        * ``ncrit`` (int, default 64) -- Group criticality threshold.
+        * ``level_split`` (int, default 5) -- Level at which tree splits groups.
+        * ``step_timeout_s`` (float, default 60.0) -- Per-step watchdog timeout
+          in seconds; raises ``RuntimeError`` if a step exceeds this.
+
     Returns
     -------
     dict[str, ndarray]
@@ -227,7 +235,8 @@ def run_simulation(
     _emit_performance_warnings(N_total, architecture, method)
 
     # ------------------------------------------------------------------
-    # Pull advanced options from kwargs with backend-appropriate defaults
+    # Pull advanced options from kwargs with backend-appropriate defaults.
+    # These span multiple backends so we handle them explicitly.
     # ------------------------------------------------------------------
     theta = kwargs.pop("theta", 0.6)
     nthreads = kwargs.pop("nthreads", None)
@@ -238,6 +247,9 @@ def run_simulation(
     # Dispatch
     # ------------------------------------------------------------------
     if architecture == "gpu" and method == "tree":
+        # Remaining kwargs are forwarded to run_nbody_gpu_tree, which
+        # accepts extra tree-tuning params: nleaf, ncrit, level_split,
+        # step_timeout_s.  An unrecognised key will raise TypeError there.
         final_xv = run_nbody_gpu_tree(
             phase_space=phase_space,
             masses=mass_arr,
@@ -259,8 +271,14 @@ def run_simulation(
             verbose=verbose,
             debug_energy=debug_energy,
             species=species,
+            **kwargs,
         )
     elif architecture == "gpu":  # direct
+        if kwargs:
+            raise TypeError(
+                f"run_simulation() got unexpected keyword argument(s) for "
+                f"architecture='gpu', method='direct': {sorted(kwargs)}"
+            )
         final_xv = run_nbody_gpu(
             phase_space=phase_space,
             masses=mass_arr,
@@ -284,6 +302,11 @@ def run_simulation(
             species=species,
         )
     else:  # architecture == "cpu"
+        if kwargs:
+            raise TypeError(
+                f"run_simulation() got unexpected keyword argument(s) for "
+                f"architecture='cpu': {sorted(kwargs)}"
+            )
         # CPU tree uses integer kernel 1 (dehnen_k1); direct uses 'spline'
         cpu_kernel = 1 if method == "tree" else "spline"
         final_xv = run_nbody_cpu(
