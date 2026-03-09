@@ -705,3 +705,95 @@ class TestOldAPIBackwardCompat:
             save_snapshots=False, verbose=False,
         )
         assert final.shape == (N, 6)
+
+
+# ===========================================================================
+# 14. debug_energy -- dispatcher coverage for all CPU paths
+# ===========================================================================
+
+class TestDebugEnergy:
+    """
+    Verify that debug_energy=True works without errors on all dispatcher paths
+    that are available without a GPU (CPU direct and CPU tree).
+    The test only checks that the run completes and returns correct shapes --
+    energy correctness is covered by test_physics.py.
+    """
+
+    N    = 20
+    DT   = 1e-3
+    T    = 2e-3   # 2 steps
+
+    def test_debug_energy_cpu_direct(self, tmp_path, capsys):
+        xv = _plummer_like(self.N)
+        dm = Species.dark(self.N, mass=1.0, softening=0.05)
+        result = nb.run_simulation(
+            xv, [dm],
+            time_start=0.0, time_end=self.T, dt=self.DT,
+            G=1.0, architecture="cpu", method="direct",
+            output_dir=str(tmp_path / "de_cpu_direct"),
+            save_snapshots=False, verbose=True,
+            debug_energy=True,
+        )
+        assert result["dark"].shape == (self.N, 6)
+        captured = capsys.readouterr()
+        assert "Energy" in captured.out or "dE" in captured.out, (
+            "debug_energy=True should print energy info"
+        )
+
+    @pytest.mark.skipif(not PYFALCON_AVAILABLE, reason="pyfalcon not installed")
+    def test_debug_energy_cpu_tree(self, tmp_path, capsys):
+        xv = _plummer_like(self.N)
+        dm = Species.dark(self.N, mass=1.0, softening=0.05)
+        result = nb.run_simulation(
+            xv, [dm],
+            time_start=0.0, time_end=self.T, dt=self.DT,
+            G=1.0, architecture="cpu", method="tree",
+            output_dir=str(tmp_path / "de_cpu_tree"),
+            save_snapshots=False, verbose=True,
+            debug_energy=True,
+        )
+        assert result["dark"].shape == (self.N, 6)
+        captured = capsys.readouterr()
+        assert "Energy" in captured.out or "dE" in captured.out
+
+    def test_debug_energy_false_no_output(self, tmp_path, capsys):
+        """debug_energy=False (default) must not print energy lines."""
+        xv = _plummer_like(self.N)
+        dm = Species.dark(self.N, mass=1.0, softening=0.05)
+        nb.run_simulation(
+            xv, [dm],
+            time_start=0.0, time_end=self.T, dt=self.DT,
+            G=1.0, architecture="cpu", method="direct",
+            output_dir=str(tmp_path / "de_off"),
+            save_snapshots=False, verbose=False,
+            debug_energy=False,
+        )
+        captured = capsys.readouterr()
+        assert "dE/E" not in captured.out
+
+    def test_unexpected_kwarg_cpu_raises(self):
+        """run_simulation must raise TypeError on unknown kwargs for CPU path."""
+        xv = _plummer_like(self.N)
+        dm = Species.dark(self.N, mass=1.0, softening=0.05)
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            nb.run_simulation(
+                xv, [dm],
+                time_start=0.0, time_end=self.T, dt=self.DT,
+                G=1.0, architecture="cpu", method="direct",
+                save_snapshots=False, verbose=False,
+                totally_unknown_kwarg=42,
+            )
+
+    @pytest.mark.skipif(not CUPY_AVAILABLE, reason="CuPy not installed")
+    def test_unexpected_kwarg_gpu_direct_raises(self):
+        """run_simulation must raise TypeError on unknown kwargs for GPU direct path."""
+        xv = _plummer_like(self.N)
+        dm = Species.dark(self.N, mass=1.0, softening=0.05)
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            nb.run_simulation(
+                xv, [dm],
+                time_start=0.0, time_end=self.T, dt=self.DT,
+                G=1.0, architecture="gpu", method="direct",
+                save_snapshots=False, verbose=False,
+                totally_unknown_kwarg=42,
+            )

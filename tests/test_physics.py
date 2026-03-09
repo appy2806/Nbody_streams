@@ -125,15 +125,15 @@ def _run_old_api(xv: np.ndarray, tmp_dir: str | Path, *,
                  N: int = N_PHYS,
                  m: float = M_TOT / N_PHYS) -> tuple[np.ndarray, np.ndarray]:
     """
-    OLD API — identical to what the ``devel`` branch does:
-    ``run_nbody_cpu`` with scalar softening and no ``species`` kwarg.
+    OLD API — ``run_nbody_cpu`` with scalar softening and no ``species`` kwarg.
+    Uses 'spline' kernel to match run_simulation's hardcoded default.
     """
     masses = np.full(N, m)
     final = nb.run_nbody_cpu(
         xv, masses,
         time_start=0.0, time_end=T_END, dt=DT,
         softening=EPS, G=G,
-        method="direct", kernel="plummer",
+        method="direct", kernel="spline",
         output_dir=str(Path(tmp_dir) / "old"),
         save_snapshots=False, verbose=False,
     )
@@ -152,7 +152,7 @@ def _run_new_api(xv: np.ndarray, tmp_dir: str | Path, *,
         xv, [dm],
         time_start=0.0, time_end=T_END, dt=DT,
         G=G,
-        architecture="cpu", method="direct", kernel="plummer",
+        architecture="cpu", method="direct",
         output_dir=str(Path(tmp_dir) / "new"),
         save_snapshots=False, verbose=False,
     )
@@ -272,7 +272,7 @@ class TestConservationNewAPI:
         result = nb.run_simulation(
             xv0, [dm],
             time_start=0.0, time_end=T_END, dt=DT,
-            G=G, architecture="cpu", method="direct", kernel="plummer",
+            G=G, architecture="cpu", method="direct",
             output_dir=str(tmp_path / "dict_check"),
             save_snapshots=False, verbose=False,
         )
@@ -331,7 +331,7 @@ class TestConservationMultiSpecies:
         result = nb.run_simulation(
             xv0, self._two_species_list(),
             time_start=0.0, time_end=T_END, dt=DT,
-            G=G, architecture="cpu", method="direct", kernel="plummer",
+            G=G, architecture="cpu", method="direct",
             output_dir=str(tmp_path / "two"),
             save_snapshots=False, verbose=False,
         )
@@ -350,7 +350,7 @@ class TestConservationMultiSpecies:
         result = nb.run_simulation(
             xv0, self._two_species_list(),
             time_start=0.0, time_end=T_END, dt=DT,
-            G=G, architecture="cpu", method="direct", kernel="plummer",
+            G=G, architecture="cpu", method="direct",
             output_dir=str(tmp_path / "two_mom"),
             save_snapshots=False, verbose=False,
         )
@@ -364,7 +364,7 @@ class TestConservationMultiSpecies:
         result = nb.run_simulation(
             xv0, self._two_species_list(),
             time_start=0.0, time_end=T_END, dt=DT,
-            G=G, architecture="cpu", method="direct", kernel="plummer",
+            G=G, architecture="cpu", method="direct",
             output_dir=str(tmp_path / "two_shape"),
             save_snapshots=False, verbose=False,
         )
@@ -392,7 +392,7 @@ class TestConservationMultiSpecies:
         result = nb.run_simulation(
             xv0, sp,
             time_start=0.0, time_end=T_END, dt=DT,
-            G=G, architecture="cpu", method="direct", kernel="plummer",
+            G=G, architecture="cpu", method="direct",
             output_dir=str(tmp_path / "three"),
             save_snapshots=False, verbose=False,
         )
@@ -426,7 +426,7 @@ class TestConservationMultiSpecies:
         result = nb.run_simulation(
             xv0, sp,
             time_start=0.0, time_end=T_END, dt=DT,
-            G=G, architecture="cpu", method="direct", kernel="plummer",
+            G=G, architecture="cpu", method="direct",
             output_dir=str(tmp_path / "three_mom"),
             save_snapshots=False, verbose=False,
         )
@@ -535,7 +535,7 @@ class TestRegressionDevelVsMultiSpec:
         result = nb.run_simulation(
             xv0, [dm],
             time_start=0.0, time_end=T_END, dt=DT,
-            G=G, architecture="cpu", method="direct", kernel="plummer",
+            G=G, architecture="cpu", method="direct",
             output_dir=str(out),
             save_snapshots=True, snapshots=2, verbose=False,
         )
@@ -559,7 +559,7 @@ class TestRegressionDevelVsMultiSpec:
         result = nb.run_simulation(
             xv0, [dm],
             time_start=0.0, time_end=T_END, dt=DT,
-            G=G, architecture="cpu", method="direct", kernel="plummer",
+            G=G, architecture="cpu", method="direct",
             output_dir=str(out),
             save_snapshots=True, snapshots=3, verbose=False,
         )
@@ -622,7 +622,7 @@ class TestConservationGPU:
             xv0, [dm],
             time_start=0.0, time_end=T_END, dt=DT,
             G=G, architecture="gpu",
-            precision="float32_kahan", kernel="plummer",
+            precision="float32_kahan",
             output_dir=str(tmp_path / "gpu_new"),
             save_snapshots=False, verbose=False,
         )
@@ -652,7 +652,7 @@ class TestConservationGPU:
             xv0, mass,
             time_start=0.0, time_end=T_END, dt=DT,
             softening=EPS, G=G,
-            precision="float32_kahan", kernel="plummer",
+            precision="float32_kahan", kernel="spline",
             output_dir=str(tmp_path / "gpu_cpu_cmp"),
             save_snapshots=False, verbose=False,
         )

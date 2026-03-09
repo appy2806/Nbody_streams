@@ -102,10 +102,14 @@ def run_simulation(
     verbose : bool, optional
         Print progress information.  Default: ``True``.
     debug_energy : bool, optional
-        Print virial ratio Q and fractional energy drift dE/E alongside each
-        progress line.  Only available for ``architecture='gpu'`` and
-        ``method='tree'`` (where the potential is returned for free by the
-        tree force call).  Ignored for all other backends.  Default: ``False``.
+        Print virial ratio Q=KE/|PE| and relative energy drift dE/E alongside
+        each progress line.  Available for all backends:
+
+        * GPU tree / CPU tree -- potential returned for free; zero extra cost.
+        * GPU direct / CPU direct -- one extra O(N^2) potential pass per
+          output interval; meaningful overhead for large N.
+
+        Default: ``False``.
     **kwargs
         Backend-specific advanced options.  Commonly used:
 
@@ -189,8 +193,17 @@ def run_simulation(
     * CPU tree (pyfalcon/falcON) -- ``dehnen_k1`` (integer 1)
     * GPU tree (Barnes-Hut) -- Plummer softening hardcoded in C++
 
-    Advanced users who need a different kernel should call
-    :func:`run_nbody_gpu` or :func:`run_nbody_cpu` directly.
+    **Low-level API for full control**
+
+    ``run_simulation`` is the recommended entry point for most use cases.
+    Experienced users who need finer control -- custom softening kernels,
+    alternative floating-point precision, per-particle softening, or
+    ``external_update_interval`` on the CPU -- can call the backend
+    functions directly:
+
+    * :func:`run_nbody_gpu` -- GPU direct-sum integrator
+    * :func:`run_nbody_cpu` -- CPU direct / falcON tree integrator
+    * :func:`~nbody_streams.tree_gpu.run_gpu_tree.run_nbody_gpu_tree` -- GPU Barnes-Hut tree
 
     **Performance guidance** (warnings are also emitted automatically):
 
@@ -299,6 +312,7 @@ def run_simulation(
             continue_run=continue_run,
             overwrite=overwrite,
             verbose=verbose,
+            debug_energy=debug_energy,
             species=species,
         )
     else:  # architecture == "cpu"
@@ -328,6 +342,7 @@ def run_simulation(
             num_files_to_write=num_files_to_write,
             restart_interval=restart_interval,
             continue_run=continue_run,
+            debug_energy=debug_energy,
             overwrite=overwrite,
             verbose=verbose,
             species=species,

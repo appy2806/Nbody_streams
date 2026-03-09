@@ -126,14 +126,19 @@ result = run_simulation(
     time_end=1.0,
     dt=0.001,
     architecture='gpu',   # 'cpu' or 'gpu'
-    method='direct',      # 'direct' (O(N²)) or 'tree' (GPU: Barnes-Hut; CPU: pyfalcon)
-    precision='float32_kahan',
-    kernel='dehnen_k1',
+    method='direct',      # 'direct' (O(N^2)) or 'tree' (GPU: Barnes-Hut; CPU: falcON O(N))
     external_potential=pot,        # optional agama.Potential
     output_dir='./output',
     save_snapshots=True,
     snapshots=100,
     verbose=True,
+    debug_energy=False,   # True -> print Q=KE/|PE| and dE/E at each output interval
+    # Backend-specific kwargs (passed through **kwargs):
+    #   theta=0.6                  tree opening angle           (tree backends)
+    #   nthreads=None              CPU thread count             (CPU direct)
+    #   precision='float32_kahan'  force computation precision  (GPU direct)
+    #   external_update_interval=1 ext. force caching interval  (GPU backends)
+    #   nleaf=64, ncrit=64         tree node size params        (GPU tree only)
 )
 # result is dict[str, ndarray]  keyed by species name
 # result['dark'].shape  -> (N_dark,  6)
@@ -306,7 +311,9 @@ protecting against deadlocked CUDA kernels.
 
 ### Low-level API — Direct N-body (`fields`, `run`)
 
-The low-level functions remain available for fine-grained control.
+`run_simulation` covers the common case.  For full control — custom softening
+kernels, alternative float precision, per-particle softening, or
+`external_update_interval` on the CPU — call the backend functions directly:
 
 ```python
 from nbody_streams import (
@@ -330,7 +337,7 @@ phi = compute_nbody_potential_gpu(
     precision='float32_kahan', kernel='spline',
 )
 
-# Full N-body integration (GPU) — single species, backward-compatible
+# Full N-body integration (GPU direct) — full kernel / precision control
 run_nbody_gpu(
     phase_space,             # (N, 6) array [x, y, z, vx, vy, vz]
     masses,
@@ -338,10 +345,25 @@ run_nbody_gpu(
     time_end=1.0,
     dt=0.001,
     softening=0.01,
-    precision='float32_kahan',
-    kernel='spline',
-    external_potential=pot,   # optional agama.Potential
+    precision='float64',     # 'float32' | 'float64' | 'float32_kahan'
+    kernel='dehnen_k2',      # 'newtonian' | 'plummer' | 'dehnen_k1' | 'dehnen_k2' | 'spline'
+    external_potential=pot,
+    external_update_interval=5,  # cache ext. forces for 5 steps
+    debug_energy=True,       # print Q and dE/E at each output interval
     snapshots=10,
+    output_dir='./output',
+)
+
+# Full N-body integration (CPU) — tree with custom kernel / theta
+run_nbody_cpu(
+    phase_space, masses,
+    time_start=0.0, time_end=1.0, dt=0.001,
+    softening=0.02,
+    method='tree',
+    kernel='dehnen_k2',      # or integer 2; pyfalcon: 0=plummer 1=dehnen_k1 2=dehnen_k2
+    theta=0.5,
+    nthreads=32,
+    debug_energy=True,       # phi returned for free by falcON; zero overhead
     output_dir='./output',
 )
 ```

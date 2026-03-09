@@ -29,12 +29,18 @@ import time as pytime
 import h5py # For HDF5 snapshot output (if needed)
 
 try:
-    from .fields import compute_nbody_forces_gpu, compute_nbody_forces_cpu
+    from .fields import (
+        compute_nbody_forces_gpu, compute_nbody_forces_cpu,
+        compute_nbody_potential_gpu, compute_nbody_potential_cpu,
+    )
     from .nbody_io import _save_snapshot, _save_restart, _load_restart, _update_snapshot_times
     from .species import Species
 except ImportError as e:
     print(e)
-    from fields import compute_nbody_forces_gpu, compute_nbody_forces_cpu
+    from fields import (
+        compute_nbody_forces_gpu, compute_nbody_forces_cpu,
+        compute_nbody_potential_gpu, compute_nbody_potential_cpu,
+    )
     from nbody_io import _save_snapshot, _save_restart, _load_restart, _update_snapshot_times
     from species import Species
 
@@ -217,10 +223,10 @@ def _compute_accelerations_tree(
     G: float,
     external_potential: agama.Potential | None,
     time: float,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute accelerations using tree algorithm (pyfalcon).
-    
+
     Parameters
     ----------
     pos_cpu : np.ndarray
@@ -239,26 +245,29 @@ def _compute_accelerations_tree(
         External time-dependent potential.
     time : float
         Current simulation time.
-    
+
     Returns
     -------
-    np.ndarray
-        Total accelerations, shape (N, 3).
+    acc : np.ndarray, shape (N, 3)
+        Total accelerations.
+    phi : np.ndarray, shape (N,)
+        Gravitational potential per particle (self-gravity only).
+        Available for free from falcON -- useful for energy diagnostics.
     """
-    # Self-gravity from pyfalcon tree
-    acc, _ = pyfalcon.gravity(
-        pos_cpu, 
-        G * mass, 
-        eps=softening, 
+    # Self-gravity from pyfalcon tree — phi returned at no extra cost
+    acc, phi = pyfalcon.gravity(
+        pos_cpu,
+        G * mass,
+        eps=softening,
         theta=theta,
-        kernel=kernel
+        kernel=kernel,
     )
-    
+
     # Add external potential if provided
     if external_potential is not None:
         acc += external_potential.force(pos_cpu, t=time)
-    
-    return acc
+
+    return acc, phi
 
 def _compute_accelerations_cpu(
     pos_cpu: np.ndarray,
@@ -336,6 +345,7 @@ def run_nbody_gpu(
     continue_run: bool = False,
     overwrite: bool = False,
     verbose: bool = True,
+    debug_energy: bool = False,
     species: list[Species] | None = None,
 ) -> np.ndarray:
     """
@@ -575,15 +585,35 @@ def run_nbody_gpu(
     if verbose:
         print("Computing initial forces (compiling CUDA kernel)...")
     
-    acc_gpu, cached_external_acc = _compute_accelerations_gpu(  
+    acc_gpu, cached_external_acc = _compute_accelerations_gpu(
         pos_gpu, mass_gpu, softening, G, precision, kernel,
-        external_potential, time, external_update_interval, start_step, None     
+        external_potential, time, external_update_interval, start_step, None
     )
-    
+
+    # Energy diagnostics setup
+    _mass_f64 = mass_gpu.astype(cp.float64)
+
+    def _energy_gpu(vel_: cp.ndarray, phi_: cp.ndarray) -> tuple[float, float]:
+        v2 = cp.sum(vel_ ** 2, axis=1)
+        KE = 0.5 * float(cp.sum(_mass_f64 * v2))
+        PE = 0.5 * float(cp.sum(_mass_f64 * phi_.astype(cp.float64)))
+        return KE, PE
+
+    E_ref = 0.0
+    _phi_gpu: cp.ndarray | None = None
+    if debug_energy:
+        _phi_gpu = compute_nbody_potential_gpu(
+            pos_gpu, mass_gpu, softening, G, precision, kernel, return_cupy=True
+        )
+        KE0, PE0 = _energy_gpu(vel_gpu, _phi_gpu)
+        E_ref = KE0 + PE0
+        if verbose:
+            print(f"  [Energy t=0] KE={KE0:.4e}  PE={PE0:.4e}  E={E_ref:.4e}")
+
     # Warmup complete, start timing
     if verbose:
         print("\nStarting integration...")
-    
+
     # Save initial snapshot if requested
     if snapshot_counter < len(snapshot_steps) and snapshot_steps[snapshot_counter] == start_step:
         if save_snapshots:
@@ -595,11 +625,12 @@ def run_nbody_gpu(
                       f"{start_step}, time {time:.6e}...")
             _update_snapshot_times(output_path, snapshot_counter, time)
         snapshot_counter += 1
-    
+
     # ============================================================================
     # Main integration loop: iterate over the remaining steps (1..remaining_steps)
     # ============================================================================
     t_start = pytime.perf_counter()
+    _report_every = max(1, remaining_steps // 20)
 
     if _TQDM_OK and verbose:
         _loop   = _trange(1, remaining_steps + 1, desc="N-body simulation", unit="step")
@@ -646,17 +677,28 @@ def run_nbody_gpu(
             snapshot_counter += 1
 
         # Progress update — suppress manual line when tqdm bar is active
-        if verbose and (not _TQDM_OK) and step_i % max(1, remaining_steps // 20) == 0:
+        _is_report_step = step_i % _report_every == 0
+        if verbose and (not _TQDM_OK or debug_energy) and _is_report_step:
             elapsed = pytime.perf_counter() - t_start
             rate = step_i / elapsed if elapsed > 0 else 0
             eta = (remaining_steps - step_i) / rate if rate > 0 else 0
             avg_step_time = elapsed / step_i if step_i > 0 else 0
-            _vprint(f"  Step {current_step:>6}/{total_steps} | "
+            line = (f"  Step {current_step:>6}/{total_steps} | "
                     f"t={time:.4e} | "
                     f"Snapshots: {snapshot_counter}/{len(snapshot_steps)} | "
                     f"{rate:.1f} steps/s | "
                     f"avg {avg_step_time*1000:.1f}ms/step | "
                     f"ETA {eta:.0f}s")
+            if debug_energy and E_ref != 0.0:
+                _phi_gpu = compute_nbody_potential_gpu(
+                    pos_gpu, mass_gpu, softening, G, precision, kernel, return_cupy=True
+                )
+                KE, PE = _energy_gpu(vel_gpu, _phi_gpu)
+                dE = (KE + PE - E_ref) / abs(E_ref)
+                Q  = KE / abs(PE) if PE != 0.0 else float("nan")
+                line += f" | Q={Q:.3f}  dE/E={dE:+.2e}"
+            if not _TQDM_OK or debug_energy:
+                _vprint(line)
 
         # Save restart file
         if current_step > 0 and (current_step % restart_interval) == 0:
@@ -723,6 +765,7 @@ def run_nbody_cpu(
     continue_run: bool = False,
     overwrite: bool = False,
     verbose: bool = True,
+    debug_energy: bool = False,
     species: list[Species] | None = None,
 ) -> np.ndarray:
     """
@@ -962,26 +1005,38 @@ def run_nbody_cpu(
     # Initial acceleration (with warmup)
     if verbose:
         print("Computing initial forces (compiling NUMBA kernel)...")
-    
-    # Select acceleration computation method
+
     if method == 'tree':
         if verbose: print(f"Using tree method (theta={theta}, kernel={kernel})")
-        compute_acc = lambda pos, t: _compute_accelerations_tree(
-            pos, masses, softening, theta, kernel, G, external_potential, t
+        acc_cpu, phi_cpu = _compute_accelerations_tree(
+            xv[:, :3], masses, softening, theta, kernel, G, external_potential, time
         )
     else:  # method == 'direct'
         if verbose: print(f"Using direct method (kernel={kernel}, nthreads={nthreads})")
-        compute_acc = lambda pos, t: _compute_accelerations_cpu(
-            pos, masses, softening, G, kernel, nthreads, external_potential, t
+        acc_cpu = _compute_accelerations_cpu(
+            xv[:, :3], masses, softening, G, kernel, nthreads, external_potential, time
         )
-    
-    # Initial acceleration
-    acc_cpu = compute_acc(xv[:, :3], time)
-    
+        phi_cpu = (compute_nbody_potential_cpu(xv[:, :3], masses, softening, G, kernel, nthreads)
+                   if debug_energy else None)
+
+    # Energy diagnostics setup
+    def _energy_cpu(vel_: np.ndarray, phi_: np.ndarray) -> tuple[float, float]:
+        v2 = np.sum(vel_ ** 2, axis=1)
+        KE = 0.5 * np.dot(masses, v2)
+        PE = 0.5 * np.dot(masses, phi_)
+        return KE, PE
+
+    E_ref = 0.0
+    if debug_energy and phi_cpu is not None:
+        KE0, PE0 = _energy_cpu(xv[:, 3:6], phi_cpu)
+        E_ref = KE0 + PE0
+        if verbose:
+            print(f"  [Energy t=0] KE={KE0:.4e}  PE={PE0:.4e}  E={E_ref:.4e}")
+
     # Warmup complete, start timing
     if verbose:
         print("\nStarting integration...")
-    
+
     # Save initial snapshot if requested
     if snapshot_counter < len(snapshot_steps) and snapshot_steps[snapshot_counter] == start_step:
         if save_snapshots:
@@ -991,11 +1046,12 @@ def run_nbody_cpu(
                 print(f"Saved snapshot snap: {snapshot_counter:03d} at step "
                       f"{start_step}, time {time:.6e}...")
         snapshot_counter += 1
-    
+
     # ============================================================================
     # Main integration loop: iterate over the remaining steps (1..remaining_steps)
     # ============================================================================
     t_start = pytime.perf_counter()
+    _report_every = max(1, remaining_steps // 50)
 
     if _TQDM_OK and verbose:
         _loop   = _trange(1, remaining_steps + 1, desc="N-body simulation", unit="step")
@@ -1019,8 +1075,19 @@ def run_nbody_cpu(
         # Update time before force computation
         time += dt
 
-        # Recompute accelerations at new positions and time
-        acc_cpu = compute_acc(xv[:, :3], time)
+        # Recompute accelerations (and phi for tree — free; for direct only at report steps)
+        if method == 'tree':
+            acc_cpu, phi_cpu = _compute_accelerations_tree(
+                xv[:, :3], masses, softening, theta, kernel, G, external_potential, time
+            )
+        else:
+            acc_cpu = _compute_accelerations_cpu(
+                xv[:, :3], masses, softening, G, kernel, nthreads, external_potential, time
+            )
+            if debug_energy and step_i % _report_every == 0:
+                phi_cpu = compute_nbody_potential_cpu(
+                    xv[:, :3], masses, softening, G, kernel, nthreads
+                )
 
         # Kick (half-step)
         xv[:, 3:6] += acc_cpu * (dt / 2)
@@ -1036,17 +1103,25 @@ def run_nbody_cpu(
             snapshot_counter += 1
 
         # Progress update — suppress manual line when tqdm bar is active
-        if verbose and (not _TQDM_OK) and step_i % max(1, remaining_steps // 50) == 0:
+        _is_report_step = step_i % _report_every == 0
+        if verbose and (not _TQDM_OK or debug_energy) and _is_report_step:
             elapsed = pytime.perf_counter() - t_start
             rate = step_i / elapsed if elapsed > 0 else 0
             eta = (remaining_steps - step_i) / rate if rate > 0 else 0
             avg_step_time = elapsed / step_i if step_i > 0 else 0
-            _vprint(f"  Step {current_step:>6}/{total_steps} | "
+            line = (f"  Step {current_step:>6}/{total_steps} | "
                     f"t={time:.4e} | "
                     f"Snapshots: {snapshot_counter}/{len(snapshot_steps)} | "
                     f"{rate:.1f} steps/s | "
                     f"avg {avg_step_time*1000:.1f}ms/step | "
                     f"ETA {eta:.0f}s")
+            if debug_energy and phi_cpu is not None and E_ref != 0.0:
+                KE, PE = _energy_cpu(xv[:, 3:6], phi_cpu)
+                dE = (KE + PE - E_ref) / abs(E_ref)
+                Q  = KE / abs(PE) if PE != 0.0 else float("nan")
+                line += f" | Q={Q:.3f}  dE/E={dE:+.2e}"
+            if not _TQDM_OK or debug_energy:
+                _vprint(line)
 
         # Save restart file
         if current_step > 0 and (current_step % restart_interval) == 0:
