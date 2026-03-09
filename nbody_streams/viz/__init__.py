@@ -1,4 +1,4 @@
-"""nbody_streams.viz — visualization and plotting.
+"""nbody_streams.viz - visualization and plotting.
 
 Projected density maps, Mollweide sky projections, and stream
 diagnostic plots.

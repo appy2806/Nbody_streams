@@ -33,9 +33,7 @@ __all__ = [
 ]
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  Jacobi radius / rotation matrices                                     ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# --- Jacobi radius / rotation matrices ---
 
 def _get_jacobi_rad_vel_mtx(
     pot_host,
@@ -127,9 +125,7 @@ def _get_jacobi_rad_vel_mtx(
     return r_jacobi, v_jacobi, R
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  IC generators                                                         ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# --- IC generators ---
 
 def create_ic_particle_spray_chen2025(
     orbit_sat: np.ndarray,
@@ -300,9 +296,7 @@ def create_ic_particle_spray_fardal2015(
     return ic_stream
 
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  Main driver                                                           ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# --- Main driver ---
 
 def create_particle_spray_stream(
     pot_host,
@@ -482,7 +476,7 @@ def create_particle_spray_stream(
             # Create a tiny "ramp" 
             # For N=5001, a step of 1e-11 results in a total shift of 5e-8.
             # This is physically negligible but mathematically sufficient for splines.   
-            # Enforce strict monotonicity — episodic sampling can produce
+            # Enforce strict monotonicity - episodic sampling can produce
             # duplicate times which would create multi-valued functions.
             dt_eps = 1e-10
             ramp = np.arange(len(time_stripping)) * dt_eps

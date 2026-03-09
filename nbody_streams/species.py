@@ -87,7 +87,7 @@ class Species:
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers — not exported in __all__ but importable if needed
+# Internal helpers - not exported in __all__ but importable if needed
 # ---------------------------------------------------------------------------
 
 def _build_particle_arrays(

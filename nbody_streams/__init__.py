@@ -1,4 +1,4 @@
-"""nbody_streams — lightweight direct N-body utilities."""
+"""nbody_streams - lightweight direct N-body utilities."""
 
 from importlib.metadata import version as _version_lookup, PackageNotFoundError
 
@@ -37,7 +37,7 @@ from . import coords
 from . import fast_sims
 from . import viz
 
-# GPU tree-code (optional — requires libtreeGPU.so; built separately with make)
+# GPU tree-code (optional - requires libtreeGPU.so; built separately with make)
 try:
     from . import tree_gpu
     from .tree_gpu import tree_gravity_gpu, TreeGPU, cuda_alive, run_nbody_gpu_tree

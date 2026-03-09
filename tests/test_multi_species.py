@@ -58,7 +58,7 @@ RNG = np.random.default_rng(42)
 # ---------------------------------------------------------------------------
 
 def _random_xv(N: int) -> np.ndarray:
-    """Random (N, 6) phase space — tiny, just for IO tests."""
+    """Random (N, 6) phase space  - tiny, just for IO tests."""
     return RNG.standard_normal((N, 6)).astype(np.float64)
 
 
@@ -247,7 +247,7 @@ class TestIsUniform:
 
 
 # ===========================================================================
-# 7. Smart IO — _save_snapshot (new multi-species path)
+# 7. Smart IO  - _save_snapshot (new multi-species path)
 # ===========================================================================
 
 class TestSmartSnapshotIO:
@@ -318,7 +318,7 @@ class TestSmartSnapshotIO:
 
 
 # ===========================================================================
-# 8. ParticleReader — backward compat (old dark/star format)
+# 8. ParticleReader  - backward compat (old dark/star format)
 # ===========================================================================
 
 class TestParticleReaderBackwardCompat:
@@ -379,7 +379,7 @@ class TestParticleReaderBackwardCompat:
 
 
 # ===========================================================================
-# 9. ParticleReader — new multi-species format
+# 9. ParticleReader  - new multi-species format
 # ===========================================================================
 
 class TestParticleReaderMultiSpecies:
@@ -439,7 +439,7 @@ class TestParticleReaderMultiSpecies:
 
 
 # ===========================================================================
-# 10. Restart file — species metadata
+# 10. Restart file  - species metadata
 # ===========================================================================
 
 class TestRestartFileSpecies:
@@ -495,14 +495,14 @@ class TestRestartFileSpecies:
 
 
 # ===========================================================================
-# 11. run_simulation — CPU integration tests (no GPU needed)
+# 11. run_simulation  - CPU integration tests (no GPU needed)
 # ===========================================================================
 
 class TestRunSimulationCPU:
     N_DARK = 50
     N_STAR = 30
     DT     = 1e-3
-    T_END  = 5e-3   # 5 steps — just check it runs and returns
+    T_END  = 5e-3   # 5 steps  - just check it runs and returns
 
     def test_single_species_returns_dict(self, tmp_path):
         xv = _plummer_like(self.N_DARK)
@@ -611,7 +611,7 @@ class TestRunSimulationCPU:
 
 
 # ===========================================================================
-# 12. run_simulation — validation / error paths
+# 12. run_simulation  - validation / error paths
 # ===========================================================================
 
 class TestRunSimulationValidation:
@@ -637,7 +637,7 @@ class TestRunSimulationValidation:
                               architecture="cpu")
 
     def test_wrong_phase_space_shape_raises(self):
-        xv = _random_xv(10)[:, :5]   # (10, 5) — wrong
+        xv = _random_xv(10)[:, :5]   # (10, 5)  - wrong
         sp = [Species.dark(10, 1.0)]
         with pytest.raises(ValueError, match="shape"):
             nb.run_simulation(xv, sp, 0.0, 0.01, 0.001,
@@ -649,7 +649,7 @@ class TestRunSimulationValidation:
         xv = np.zeros((N, 6))
         sp = [Species.dark(N, 1.0, 0.1)]
         with pytest.warns(PerformanceWarning):
-            # Raises ImportError or actually runs — we only care about warning
+            # Raises ImportError or actually runs  - we only care about warning
             try:
                 nb.run_simulation(xv, sp, 0.0, 1e-10, 1e-10,
                                   architecture="cpu", method="direct",
@@ -659,7 +659,7 @@ class TestRunSimulationValidation:
 
 
 # ===========================================================================
-# 13. Backward compat — old run_nbody_cpu / run_nbody_gpu work unchanged
+# 13. Backward compat  - old run_nbody_cpu / run_nbody_gpu work unchanged
 # ===========================================================================
 
 class TestOldAPIBackwardCompat:

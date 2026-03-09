@@ -83,8 +83,8 @@ def run_simulation(
     method : {'direct', 'tree'}, optional
         Gravity solver algorithm.
 
-        * ``'direct'`` — O(N²) pairwise summation (GPU or CPU).
-        * ``'tree'`` — hierarchical tree algorithm.  CPU: pyfalcon falcON O(N);
+        * ``'direct'`` - O(N^2) pairwise summation (GPU or CPU).
+        * ``'tree'`` - hierarchical tree algorithm.  CPU: pyfalcon falcON O(N);
           GPU: Barnes-Hut tree code (requires ``libtreeGPU.so`` built from
           ``nbody_streams/tree_gpu/``).
 
@@ -180,9 +180,9 @@ def run_simulation(
     -----
     **Performance guidance** (warnings are also emitted automatically):
 
-    * CPU direct  > 20 000 particles → very slow (O N²).
-    * GPU direct  > 500 000 particles → slow at this scale.
-    * Any method  > 2 000 000 particles → use GPU+Tree (``architecture='gpu', method='tree'``).
+    * CPU direct  > 20 000 particles -> very slow (O(N^2)).
+    * GPU direct  > 500 000 particles -> slow at this scale.
+    * Any method  > 2 000 000 particles -> use GPU+Tree (``architecture='gpu', method='tree'``).
     """
     # ------------------------------------------------------------------
     # Validate

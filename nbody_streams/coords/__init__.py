@@ -1,4 +1,4 @@
-"""nbody_streams.coords — coordinate transformations.
+"""nbody_streams.coords - coordinate transformations.
 
 Cartesian/spherical/cylindrical conversions, vector field transforms,
 stream coordinate generation, and conversion to observable sky coordinates.
