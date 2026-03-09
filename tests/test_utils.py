@@ -234,7 +234,6 @@ def test_iterative_unbinding():
         potential_compute_method="direct",
         softening=0.05,
         G=G_NBODY,
-        center_method="shrinking_sphere",   # explicit: default changed to "density_peak"
         verbose=False,
     )
     bound_mask = result[0]

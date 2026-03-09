@@ -1672,10 +1672,8 @@ def iterative_unbinding(
     potential_compute_method: str = "tree",
     softening: float = 0.03,
     G: float = G_DEFAULT,
-    center_method: str = "density_peak",
-    center_params: Any = None,
-    vel_aperture: float = 5.0,
     center_on: str = "dark",
+    vel_aperture: float = 5.0,
     tol_frac_change: float = 0.0001,
     verbose: bool = True,
     return_history: bool = False,
@@ -1688,8 +1686,16 @@ def iterative_unbinding(
     particles, repeating until the bound mass fraction changes by less than
     `tol_frac_change` or `recursive_iter_converg` is reached.
 
-    Supports multi-component systems (e.g. dark matter and stars) and
-    optional re-centering between iterations.
+    Supports multi-component systems (e.g. dark matter and stars).
+
+    The centre of the system is determined automatically via a density-peak
+    method: the full-system gravitational potential (DM + stars) is computed
+    once using the same solver as ``potential_compute_method``, and the
+    centroid of the lowest-potential ``center_on`` particles (bottom 1%) is
+    taken as the position centre.  The velocity centre is the mass-weighted
+    mean velocity of ``center_on`` particles within ``vel_aperture`` of that
+    position.  Pass explicit ``center_position`` / ``center_velocity`` to
+    bypass automatic centering entirely.
 
     Parameters
     ----------
@@ -1706,28 +1712,26 @@ def iterative_unbinding(
     recursive_iter_converg : int
         Maximum iterations.
     potential_compute_method : ``'tree'`` | ``'tree_gpu'`` | ``'bfe'`` | ``'direct'`` | ``'direct_gpu'``
-        Potential solver:
+        Potential solver used for both centering and unbinding:
 
-        * ``'tree'``      - pyfalcon CPU tree code, O(N log N).
-        * ``'tree_gpu'``  - GPU Barnes-Hut tree (nbody_streams.tree_gpu).
-        * ``'bfe'``       - Agama multipole expansion.
-        * ``'direct'``    - O(N^2) CPU direct summation (practical for N <= ~50 000).
-        * ``'direct_gpu'``- GPU direct summation variant.
+        * ``'tree'``       - pyfalcon CPU tree code, O(N log N).
+        * ``'tree_gpu'``   - GPU Barnes-Hut tree (nbody_streams.tree_gpu).
+        * ``'bfe'``        - Agama multipole expansion.
+        * ``'direct'``     - O(N^2) CPU direct summation (practical for N <= ~50 000).
+        * ``'direct_gpu'`` - GPU direct summation variant.
     softening : float
         Gravitational softening (kpc).
     G : float
         Gravitational constant.
-    center_method : str
-        Passed to :func:`find_center`.  Default ``'density_peak'``.
-    center_params : dict, optional
-        Extra kwargs for the centre finder.
-    vel_aperture : float
-        Aperture radius (kpc) for velocity centering when centre_position
-        is not pre-supplied.
     center_on : ``'dark'`` | ``'star'`` | ``'both'``
-        Which component to centre on.
+        Which component's particles are used to compute the position centroid
+        (lowest-phi subset) and velocity aperture average.  The potential is
+        always computed from the full DM + star system regardless.
+    vel_aperture : float
+        Aperture radius (kpc) for velocity centering.  Only ``center_on``
+        particles within this distance of the position centre contribute.
     tol_frac_change : float
-        Convergence tolerance on bound-fraction change.
+        Convergence tolerance on bound-fraction change per iteration.
     verbose : bool
         Print diagnostics.
     return_history : bool
@@ -1828,51 +1832,11 @@ def iterative_unbinding(
         logger.addHandler(handler)
     logger.setLevel(logging.INFO if verbose else logging.WARNING)
 
-    # --- Centre finding ---
-    if center_on == "both" and has_stars:
-        pos_ctr = np.vstack((pos_dark, pos_star))
-        mass_ctr = np.concatenate((mass_dark_arr, mass_star_arr))
-        vel_ctr = np.vstack((vel_dark, vel_star))
-    elif center_on == "star" and has_stars:
-        pos_ctr = pos_star
-        mass_ctr = mass_star_arr
-        vel_ctr = vel_star
-    else:
-        pos_ctr = pos_dark
-        mass_ctr = mass_dark_arr
-        vel_ctr = vel_dark
+    theta = kwargs.get("theta", 0.4)
+    lmax = kwargs.get("lmax", 8)
+    top_fraction = kwargs.get("top_fraction", 0.01)
 
-    center_position = np.asarray(center_position, dtype=float)
-    center_velocity = np.asarray(center_velocity, dtype=float)
-
-    if center_position.size < 3:
-        center_position, center_velocity = find_center(
-            pos_ctr,
-            mass=mass_ctr,
-            vel=vel_ctr,
-            method=center_method,
-            return_velocity=True,
-            vel_aperture=vel_aperture,
-            **(center_params or {}),
-        )
-    elif center_velocity.size < 3:
-        dist2 = np.sum((pos_ctr - center_position) ** 2, axis=1)
-        sel = dist2 < vel_aperture ** 2
-        if np.any(sel):
-            center_velocity = np.average(
-                vel_ctr[sel], axis=0, weights=mass_ctr[sel]
-            )
-        else:
-            center_velocity = np.average(vel_ctr, axis=0, weights=mass_ctr)
-
-    logger.info(
-        "Center position (%s): %s",
-        center_method,
-        np.around(center_position, 2),
-    )
-    logger.info("Center velocity: %s", np.around(center_velocity, 2))
-
-    # --- Stack arrays ---
+    # --- Stack full particle arrays ---
     if has_stars:
         pos_all = np.vstack((pos_dark, pos_star))
         vel_all = np.vstack((vel_dark, vel_star))
@@ -1882,6 +1846,70 @@ def iterative_unbinding(
         vel_all = vel_dark.copy()
         mass_all = mass_dark_arr.copy()
 
+    # Slice selecting which component is used for centroid + velocity averaging.
+    # Phi is always computed from the full (DM + star) system so that the
+    # gravitational well of the dominant component is always included.
+    if center_on == "both" or not has_stars:
+        ctr_sl = slice(None)
+    elif center_on == "star":
+        ctr_sl = slice(n_dark, None)
+    else:  # "dark"
+        ctr_sl = slice(None, n_dark)
+
+    # --- Centre finding ---
+    center_position = np.asarray(center_position, dtype=float)
+    center_velocity = np.asarray(center_velocity, dtype=float)
+
+    if center_position.size < 3:
+        # Compute full-system phi using the same solver selected for unbinding.
+        if _use_pyfalcon:
+            _, phi_init = pyfalcon.gravity(
+                pos_all, mass_all * G, eps=softening, theta=theta,
+            )
+            phi_init = np.asarray(phi_init, dtype=float)
+        elif _use_tree_gpu:
+            _pos_cp = _cp.asarray(pos_all, dtype=_cp.float32)
+            _mass_cp = _cp.asarray(mass_all, dtype=_cp.float32)
+            _eps_cp = _cp.full(len(pos_all), float(softening), dtype=_cp.float32)
+            _, _phi_cp = _tree_gpu_fn(_pos_cp, _mass_cp, eps=_eps_cp, G=G, theta=theta)
+            phi_init = _cp.asnumpy(_phi_cp).astype(float)
+        elif _use_direct:
+            phi_init = _potential_fn(pos_all, mass_all, softening=softening, G=G)
+        else:
+            # bfe
+            _pot_init = agama.Potential(
+                type="Multipole",
+                particles=(pos_all, mass_all),
+                symmetry="n",
+                lmax=lmax,
+            )
+            phi_init = _pot_init.potential(pos_all)
+
+        # Position centroid: mass-weighted average of the lowest-phi
+        # center_on particles (bottom top_fraction of the component).
+        phi_ctr = phi_init[ctr_sl]
+        pos_ctr = pos_all[ctr_sl]
+        mass_ctr = mass_all[ctr_sl]
+        n_pick = max(10, int(len(phi_ctr) * top_fraction))
+        idxs = np.argsort(phi_ctr)[:n_pick]
+        center_position = np.average(pos_ctr[idxs], axis=0, weights=mass_ctr[idxs])
+
+    if center_velocity.size < 3:
+        # Velocity centre: mass-weighted mean of center_on particles within
+        # vel_aperture of the position centre.
+        pos_ctr = pos_all[ctr_sl]
+        vel_ctr = vel_all[ctr_sl]
+        mass_ctr = mass_all[ctr_sl]
+        dist2 = np.sum((pos_ctr - center_position) ** 2, axis=1)
+        sel = dist2 < vel_aperture ** 2
+        if np.any(sel):
+            center_velocity = np.average(vel_ctr[sel], axis=0, weights=mass_ctr[sel])
+        else:
+            center_velocity = np.average(vel_ctr, axis=0, weights=mass_ctr)
+
+    logger.info("Center position (density_peak): %s", np.around(center_position, 2))
+    logger.info("Center velocity: %s", np.around(center_velocity, 2))
+
     pos_rel = pos_all - center_position
     vel_rel = vel_all - center_velocity
 
@@ -1889,9 +1917,6 @@ def iterative_unbinding(
     bound_history_dm: list[np.ndarray] = []
     bound_history_star: list[np.ndarray] = []
     min_particles = 5
-
-    theta = kwargs.get("theta", 0.4)
-    lmax = kwargs.get("lmax", 8)
 
     # --- Iterative unbinding ---
     for i in range(recursive_iter_converg):
