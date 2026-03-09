@@ -1714,11 +1714,11 @@ def iterative_unbinding(
     potential_compute_method : ``'tree'`` | ``'tree_gpu'`` | ``'bfe'`` | ``'direct'`` | ``'direct_gpu'``
         Potential solver used for both centering and unbinding:
 
-        * ``'tree'``       - pyfalcon CPU tree code, O(N log N).
-        * ``'tree_gpu'``   - GPU Barnes-Hut tree (nbody_streams.tree_gpu).
-        * ``'bfe'``        - Agama multipole expansion.
+        * ``'tree'``       - pyfalcon falcON FMM, O(N).
+        * ``'tree_gpu'``   - GPU Barnes-Hut tree (nbody_streams.tree_gpu), O(N log N).
+        * ``'bfe'``        - Agama multipole/BFE expansion, O(N).
         * ``'direct'``     - O(N^2) CPU direct summation (practical for N <= ~50 000).
-        * ``'direct_gpu'`` - GPU direct summation variant.
+        * ``'direct_gpu'`` - GPU direct summation, O(N^2).
     softening : float
         Gravitational softening (kpc).
     G : float
