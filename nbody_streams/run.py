@@ -844,9 +844,34 @@ def run_nbody_cpu(
             "Install it or use method='direct' instead."
         )
     
-    # Set default kernel for direct method if not specified
-    if method == 'direct' and isinstance(kernel, int):
-        kernel = 'spline'
+    # Validate and normalise kernel for each method path
+    _DIRECT_KERNELS = {'newtonian', 'plummer', 'dehnen_k1', 'dehnen_k2', 'spline'}
+    _TREE_KERNEL_MAP = {'plummer': 0, 'dehnen_k1': 1, 'dehnen_k2': 2}
+
+    if method == 'direct':
+        if isinstance(kernel, int):
+            raise ValueError(
+                f"method='direct' requires a string kernel, got int {kernel!r}. "
+                f"Valid options: {sorted(_DIRECT_KERNELS)}"
+            )
+        if kernel not in _DIRECT_KERNELS:
+            raise ValueError(
+                f"Unknown kernel {kernel!r} for method='direct'. "
+                f"Valid options: {sorted(_DIRECT_KERNELS)}"
+            )
+    else:  # method == 'tree'
+        if isinstance(kernel, str):
+            if kernel not in _TREE_KERNEL_MAP:
+                raise ValueError(
+                    f"Unknown kernel {kernel!r} for method='tree'. "
+                    f"Valid string options: {sorted(_TREE_KERNEL_MAP)} "
+                    f"or pass an integer (0=plummer, 1=dehnen_k1, 2=dehnen_k2)."
+                )
+            kernel = _TREE_KERNEL_MAP[kernel]
+        elif kernel not in (0, 1, 2):
+            raise ValueError(
+                f"method='tree' kernel must be 0, 1, or 2, got {kernel!r}."
+            )
 
     N = phase_space.shape[0]
     output_path = Path(output_dir)

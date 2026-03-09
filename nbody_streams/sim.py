@@ -39,12 +39,7 @@ def run_simulation(
     G: float = G_DEFAULT,
     architecture: Literal["cpu", "gpu"] = "gpu",
     method: Literal["direct", "tree"] = "direct",
-    precision: Literal["float32", "float64", "float32_kahan"] = "float32_kahan",
-    kernel: str = "dehnen_k1",
-    theta: float = 0.6,
-    nthreads: int | None = None,
     external_potential=None,
-    external_update_interval: int = 1,
     output_dir: str = "./output",
     save_snapshots: bool = True,
     snapshots: int = 100,
@@ -54,6 +49,7 @@ def run_simulation(
     overwrite: bool = False,
     verbose: bool = True,
     debug_energy: bool = False,
+    **kwargs,
 ) -> dict[str, NDArray]:
     """
     Run a direct N-body simulation with one or more particle species.
@@ -89,24 +85,8 @@ def run_simulation(
           ``nbody_streams/tree_gpu/``).
 
         Default: ``'direct'``.
-    precision : {'float32', 'float64', 'float32_kahan'}, optional
-        Floating-point precision for GPU force computation.  Ignored for CPU.
-        Default: ``'float32_kahan'``.
-    kernel : str, optional
-        Softening kernel.  For CPU direct: one of ``'newtonian'``,
-        ``'plummer'``, ``'dehnen_k1'``, ``'dehnen_k2'``, ``'spline'``.
-        For CPU tree: integer kernel index (passed through to pyfalcon).
-        For GPU: same string options as CPU direct.
-        Default: ``'dehnen_k1'``.
-    theta : float, optional
-        Tree opening angle.  Only used for ``method='tree'``.  Default: 0.6.
-    nthreads : int or None, optional
-        CPU thread count for direct summation.  ``None`` = auto.
     external_potential : agama.Potential or None, optional
         Time-varying external potential (requires Agama).  Default: ``None``.
-    external_update_interval : int, optional
-        Recompute external forces every this many steps.  GPU only.
-        Default: 1.
     output_dir : str, optional
         Directory for snapshot and restart files.  Default: ``'./output'``.
     save_snapshots : bool, optional
@@ -126,17 +106,25 @@ def run_simulation(
         progress line.  Only available for ``architecture='gpu'`` and
         ``method='tree'`` (where the potential is returned for free by the
         tree force call).  Ignored for all other backends.  Default: ``False``.
+    **kwargs
+        Backend-specific advanced options.  Commonly used:
+
+        * ``theta`` (float, default 0.6) -- Tree opening angle.  Only used
+          for ``method='tree'``.
+        * ``nthreads`` (int or None, default None) -- CPU thread count for
+          direct summation.  ``None`` = auto.
+        * ``external_update_interval`` (int, default 1) -- Recompute external
+          forces every this many steps.  GPU only.
+        * ``precision`` (str, default ``'float32_kahan'``) -- Floating-point
+          precision for GPU direct force computation.  One of
+          ``'float32'``, ``'float64'``, ``'float32_kahan'``.  Ignored for
+          tree backends (which are always float32 internally).
 
     Returns
     -------
     dict[str, ndarray]
         Final phase-space coordinates, keyed by species name.
         Each value has shape ``(N_k, 6)``.
-
-    overwrite : bool, optional
-        If ``True`` and snapshot files already exist in *output_dir*, delete
-        them before starting.  If ``False`` (default) and files exist, raise
-        ``FileExistsError``.  Ignored when *continue_run* is ``True``.
 
     Raises
     ------
@@ -176,8 +164,26 @@ def run_simulation(
     >>> result.keys()
     dict_keys(['dark', 'star'])
 
+    Using the GPU tree backend with a non-default opening angle:
+
+    >>> result = run_simulation(xv, [dm], 0.0, 1.0, 1e-3,
+    ...                         architecture='gpu', method='tree',
+    ...                         save_snapshots=False, verbose=False,
+    ...                         theta=0.5)
+
     Notes
     -----
+    **Softening kernels by backend** (hardcoded; not user-configurable via
+    ``run_simulation``):
+
+    * GPU direct  -- ``'spline'`` kernel
+    * CPU direct  -- ``'spline'`` kernel
+    * CPU tree (pyfalcon/falcON) -- ``dehnen_k1`` (integer 1)
+    * GPU tree (Barnes-Hut) -- Plummer softening hardcoded in C++
+
+    Advanced users who need a different kernel should call
+    :func:`run_nbody_gpu` or :func:`run_nbody_cpu` directly.
+
     **Performance guidance** (warnings are also emitted automatically):
 
     * CPU direct  > 20 000 particles -> very slow (O(N^2)).
@@ -221,6 +227,14 @@ def run_simulation(
     _emit_performance_warnings(N_total, architecture, method)
 
     # ------------------------------------------------------------------
+    # Pull advanced options from kwargs with backend-appropriate defaults
+    # ------------------------------------------------------------------
+    theta = kwargs.pop("theta", 0.6)
+    nthreads = kwargs.pop("nthreads", None)
+    external_update_interval = kwargs.pop("external_update_interval", 1)
+    precision = kwargs.pop("precision", "float32_kahan")
+
+    # ------------------------------------------------------------------
     # Dispatch
     # ------------------------------------------------------------------
     if architecture == "gpu" and method == "tree":
@@ -256,7 +270,7 @@ def run_simulation(
             softening=softening_arr,
             G=G,
             precision=precision,
-            kernel=kernel,
+            kernel="spline",
             external_potential=external_potential,
             external_update_interval=external_update_interval,
             output_dir=output_dir,
@@ -270,6 +284,8 @@ def run_simulation(
             species=species,
         )
     else:  # architecture == "cpu"
+        # CPU tree uses integer kernel 1 (dehnen_k1); direct uses 'spline'
+        cpu_kernel = 1 if method == "tree" else "spline"
         final_xv = run_nbody_cpu(
             phase_space=phase_space,
             masses=mass_arr,
@@ -280,7 +296,7 @@ def run_simulation(
             G=G,
             method=method,
             theta=theta,
-            kernel=kernel,
+            kernel=cpu_kernel,
             nthreads=nthreads,
             external_potential=external_potential,
             output_dir=output_dir,

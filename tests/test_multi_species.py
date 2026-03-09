@@ -512,7 +512,6 @@ class TestRunSimulationCPU:
             time_start=0.0, time_end=self.T_END, dt=self.DT,
             G=1.0,
             architecture="cpu", method="direct",
-            kernel="plummer",
             output_dir=str(tmp_path / "out_single"),
             save_snapshots=False, verbose=False,
         )
@@ -531,7 +530,6 @@ class TestRunSimulationCPU:
             time_start=0.0, time_end=self.T_END, dt=self.DT,
             G=1.0,
             architecture="cpu", method="direct",
-            kernel="plummer",
             output_dir=str(tmp_path / "out_two"),
             save_snapshots=False, verbose=False,
         )
@@ -551,7 +549,6 @@ class TestRunSimulationCPU:
             time_start=0.0, time_end=self.T_END, dt=self.DT,
             G=1.0,
             architecture="cpu", method="direct",
-            kernel="plummer",
             output_dir=str(tmp_path / "out_three"),
             save_snapshots=False, verbose=False,
         )
@@ -566,7 +563,6 @@ class TestRunSimulationCPU:
             time_start=0.0, time_end=self.T_END, dt=self.DT,
             G=1.0,
             architecture="cpu", method="direct",
-            kernel="plummer",
             output_dir=str(out),
             save_snapshots=True, snapshots=2, verbose=False,
         )
@@ -585,7 +581,6 @@ class TestRunSimulationCPU:
             time_start=0.0, time_end=self.T_END, dt=self.DT,
             G=1.0,
             architecture="cpu", method="direct",
-            kernel="plummer",
             output_dir=str(out),
             save_snapshots=True, snapshots=2, verbose=False,
         )
@@ -603,7 +598,6 @@ class TestRunSimulationCPU:
             time_start=0.0, time_end=self.T_END, dt=self.DT,
             G=1.0,
             architecture="cpu", method="tree",
-            kernel=1,
             output_dir=str(tmp_path / "out_tree"),
             save_snapshots=False, verbose=False,
         )
