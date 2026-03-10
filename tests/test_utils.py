@@ -231,7 +231,7 @@ def test_iterative_unbinding():
     """A virialised Plummer sphere should be >90% bound."""
     result, ctr_pos, ctr_vel = iterative_unbinding(
         pos, vel, mass,
-        potential_compute_method="direct",
+        potential_compute_method="direct_gpu",
         softening=0.05,
         G=G_NBODY,
         verbose=False,
