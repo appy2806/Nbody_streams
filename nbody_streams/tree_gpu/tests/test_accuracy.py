@@ -108,7 +108,6 @@ def test_theta_convergence():
     print(f"\n  Monotonically decreasing: {'PASS' if monotonic else 'FAIL'}")
     assert monotonic, f"Error not decreasing with theta: {errors}"
     print()
-    return True
 
 
 # ─── Test 2: Linear momentum conservation ───────────────────────────────────
@@ -145,7 +144,7 @@ def test_momentum_conservation():
     passed = relative_imbalance < 0.01
     print(f"  Result: {'PASS' if passed else 'FAIL'} (expect < 1% imbalance)")
     print()
-    return passed
+    assert passed, f"Momentum imbalance too large: {relative_imbalance:.3e} (expect < 0.01)"
 
 
 # ─── Test 3: Angular momentum conservation ──────────────────────────────────
@@ -180,7 +179,7 @@ def test_angular_momentum_conservation():
     passed = relative_torque < 0.01
     print(f"  Result: {'PASS' if passed else 'FAIL'} (expect < 1%)")
     print()
-    return passed
+    assert passed, f"Angular momentum imbalance too large: {relative_torque:.3e} (expect < 0.01)"
 
 
 # ─── Test 4: Potential energy consistency ────────────────────────────────────
@@ -218,7 +217,7 @@ def test_potential_consistency():
     passed = rel_err < 0.01  # 1% for theta=0.5
     print(f"  Result: {'PASS' if passed else 'FAIL'} (expect < 1% error)")
     print()
-    return passed
+    assert passed, f"Potential energy error too large: {rel_err:.3e} (expect < 0.01)"
 
 
 # ─── Test 5: Forces point inward for a Plummer sphere ───────────────────────
@@ -250,7 +249,8 @@ def test_forces_inward():
     print(f"  Inward fraction: {'PASS' if p1 else 'FAIL'}")
     print(f"  Negative potential: {'PASS' if p2 else 'FAIL'}")
     print()
-    return p1 and p2
+    assert p1, f"Too few inward forces: {frac_inward:.4f} (expect > 0.95)"
+    assert p2, f"Mean potential not negative: {mean_phi:.4f}"
 
 
 # ─── Test 6: Accuracy vs N (should be stable) ───────────────────────────────
@@ -287,7 +287,7 @@ def test_accuracy_vs_n():
     passed = ratio < 3.0
     print(f"\n  Max/min error ratio: {ratio:.2f}  ({'PASS' if passed else 'FAIL'}, expect < 3)")
     print()
-    return passed
+    assert passed, f"Error degrades too much across N: max/min ratio = {ratio:.2f} (expect < 3)"
 
 
 # ─── Test 7: Reproducibility (same input → same output) ─────────────────────
@@ -327,7 +327,8 @@ def test_reproducibility():
     print(f"  Accelerations reproducible (< {tol}): {'PASS' if acc_ok else 'FAIL'}")
     print(f"  Potentials reproducible (< {tol}):    {'PASS' if phi_ok else 'FAIL'}")
     print()
-    return acc_ok and phi_ok
+    assert acc_ok, f"Acceleration non-determinism too large: {acc_max_rel:.3e} (expect < {tol})"
+    assert phi_ok, f"Potential non-determinism too large: {phi_max_rel:.3e} (expect < {tol})"
 
 
 # ─── Test 8: Two-body problem ───────────────────────────────────────────────
@@ -390,7 +391,9 @@ def test_two_body():
     passed = (stats_acc['median'] < 1e-3 and mean_ax1 > 0 and mean_ax2 < 0)
     print(f"  Result: {'PASS' if passed else 'FAIL'}")
     print()
-    return passed
+    assert stats_acc['median'] < 1e-3, f"Two-body acc error too large: {stats_acc['median']:.3e}"
+    assert mean_ax1 > 0, f"Clump 1 should feel force toward clump 2 (a_x > 0), got {mean_ax1:.3e}"
+    assert mean_ax2 < 0, f"Clump 2 should feel force toward clump 1 (a_x < 0), got {mean_ax2:.3e}"
 
 
 # ─── Run all tests ──────────────────────────────────────────────────────────

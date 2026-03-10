@@ -116,11 +116,18 @@ _lib.tree_delete.argtypes = [_ptr]
 _lib.tree_alloc.argtypes  = [_ptr, _int]
 _lib.tree_set_verbose.argtypes = [_ptr, _int]
 
-# Primary load: pos + mass + per-particle eps (float* GPU pointer)
+# Primary load: pos + mass + per-particle eps, all particles active
 _lib.tree_set_pos_mass_eps_device.argtypes = [
     _ptr, _int,
     _ptr, _ptr, _ptr,   # x, y, z
     _ptr, _ptr,         # mass, eps_arr
+]
+
+# Active-flag load: pos + mass + eps + per-particle active flag (float32, 1.0=active)
+_lib.tree_set_pos_mass_eps_active_device.argtypes = [
+    _ptr, _int,
+    _ptr, _ptr, _ptr,   # x, y, z
+    _ptr, _ptr, _ptr,   # mass, eps_arr, active_arr
 ]
 
 # Legacy load: pos + mass only (uses constructor eps as uniform)
@@ -159,6 +166,27 @@ def _coerce_eps(eps, n: int) -> cp.ndarray:
         return cp.asarray(eps, dtype=cp.float32)
     # cp.ndarray
     return cp.ascontiguousarray(eps, dtype=cp.float32)
+
+def _coerce_active(active, n: int) -> cp.ndarray | None:
+    """Return a contiguous float32 CuPy array of length n for active flags, or None.
+
+    Accepts:
+      - None           → return None (all particles active; fastest path)
+      - list           → converted via np.asarray
+      - np.ndarray     → transferred to GPU as float32
+      - cp.ndarray     → contiguous float32 view (zero-copy if already correct)
+    Bool arrays are cast to float32 (True→1.0, False→0.0).
+    """
+    if active is None:
+        return None
+    if isinstance(active, list):
+        active = np.asarray(active, dtype=np.float32)
+    if isinstance(active, np.ndarray):
+        active = cp.asarray(active, dtype=cp.float32)
+    else:
+        active = cp.ascontiguousarray(active, dtype=cp.float32)
+    assert active.shape == (n,), f"active must be shape ({n},), got {active.shape}"
+    return active
 
 # ---------------------------------------------------------------------------
 # Reusable tree handle
@@ -222,18 +250,19 @@ class TreeGPU:
 # ---------------------------------------------------------------------------
 
 def tree_gravity_gpu(
-    pos: cp.ndarray,
-    mass,
-    eps,
-    G: float            = G_DEFAULT,
+    pos:  cp.ndarray,
+    mass: float | np.ndarray | cp.ndarray,
+    eps:  float | np.ndarray | cp.ndarray,
+    G:    float = G_DEFAULT,
     *,
-    theta: float        = 0.6,
-    nleaf: int          = 64,
-    ncrit: int          = 64,
-    level_split: int    = 5,
-    verbose: bool       = False,
-    tree: TreeGPU | None = None,
-):
+    theta:       float                                  = 0.6,
+    nleaf:       int                                    = 64,
+    ncrit:       int                                    = 64,
+    level_split: int                                    = 5,
+    verbose:     bool                                   = False,
+    tree:        TreeGPU | None                         = None,
+    active:      np.ndarray | cp.ndarray | list | None  = None,
+) -> tuple[cp.ndarray, cp.ndarray]:
     """
     Compute gravitational accelerations and potential using the GPU tree code
     (Barnes-Hut with monopole + quadrupole moments).
@@ -265,6 +294,23 @@ def tree_gravity_gpu(
         Print timing / interaction counts from the C++ layer.
     tree : TreeGPU, optional
         Pre-allocated tree handle.  Skips ~27 ms malloc/free per call.
+    active : array-like of shape (N,) or None
+        Per-particle active flag (1.0 = active, 0.0 = inactive).
+        Accepts bool, float32, int arrays as np.ndarray, cp.ndarray, or list.
+        When None (default), all particles receive a force update.
+
+        The returned ``acc`` and ``phi`` always have shape (N,).
+        For **inactive** particles the returned values are undefined —
+        callers implementing block timesteps should maintain a cache::
+
+            acc_cache = cp.zeros((N, 3), dtype=cp.float32)  # init to zero
+            ...
+            acc_new, phi_new = tree_gravity_gpu(..., active=mask, tree=tree)
+            acc_cache[mask] = acc_new[mask]   # only trust active slots
+
+        Internally: active flag rides in d_ptclAux.y through the tree sort,
+        is extracted into d_ptclActiveTree/Grp, then used to compact the
+        group list before the treewalk (inactive groups entirely skipped).
 
     Returns
     -------
@@ -292,6 +338,9 @@ def tree_gravity_gpu(
     # --- coerce eps (scalar or array) ---
     eps_arr = _coerce_eps(eps, n)
 
+    # --- coerce active flag (None = all active) ---
+    active_arr = _coerce_active(active, n)
+
     assert pos_f.shape == (n, 3), f"pos must be (N,3), got {pos_f.shape}"
     assert mass.shape == (n,),    f"mass must be (N,), got {mass.shape}"
     assert eps_arr.shape == (n,), f"eps must be scalar or (N,), got {eps_arr.shape}"
@@ -318,11 +367,18 @@ def tree_gravity_gpu(
         _tree = tree._ptr
 
     try:
-        _lib.tree_set_pos_mass_eps_device(
-            _tree, n,
-            _gpu_ptr(x), _gpu_ptr(y), _gpu_ptr(z),
-            _gpu_ptr(mass), _gpu_ptr(eps_arr),
-        )
+        if active_arr is not None:
+            _lib.tree_set_pos_mass_eps_active_device(
+                _tree, n,
+                _gpu_ptr(x), _gpu_ptr(y), _gpu_ptr(z),
+                _gpu_ptr(mass), _gpu_ptr(eps_arr), _gpu_ptr(active_arr),
+            )
+        else:
+            _lib.tree_set_pos_mass_eps_device(
+                _tree, n,
+                _gpu_ptr(x), _gpu_ptr(y), _gpu_ptr(z),
+                _gpu_ptr(mass), _gpu_ptr(eps_arr),
+            )
 
         _lib.tree_build(_tree, nleaf)
         _lib.tree_compute_multipoles(_tree)

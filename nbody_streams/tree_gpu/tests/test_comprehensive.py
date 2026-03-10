@@ -28,6 +28,7 @@ import sys
 import time
 import numpy as np
 import cupy as cp
+import pytest
 
 # ---------------------------------------------------------------------------
 # tree_gpu  (the code under test)
@@ -186,7 +187,7 @@ def test_nan_inf():
         all_ok &= ok
 
     print(f"\n  {'[PASS] All NaN/Inf checks passed' if all_ok else '[FAIL] Some checks failed'}")
-    return all_ok
+    assert all_ok, "NaN/Inf detected in tree_gravity_gpu output"
 
 
 # ============================================================================
@@ -219,7 +220,7 @@ def test_scalar_vs_array_eps():
     print(f"  relative diff: acc={rel_acc:.2e}  phi={rel_phi:.2e}  (expect < 1e-4)")
     ok = rel_acc < 1e-4 and rel_phi < 1e-4
     print(f"  {PASS if ok else FAIL}: scalar and array paths agree within GPU non-determinism")
-    return ok
+    assert ok, f"scalar vs array eps mismatch: rel_acc={rel_acc:.2e} rel_phi={rel_phi:.2e} (expect < 1e-4)"
 
 
 # ============================================================================
@@ -230,7 +231,7 @@ def test_vs_modern():
 
     if not HAS_MODERN:
         print("  [SKIP] cross-validation reference not available")
-        return True
+        pytest.skip("cross-validation reference not available")
 
     n   = 1_000_000
     eps = 0.05
@@ -267,7 +268,7 @@ def test_vs_modern():
     # Same algorithm, any difference is due to float32 non-determinism
     ok = ae['mean'] < 1e-3 and pe['mean'] < 1e-3
     print(f"  {PASS if ok else FAIL}: mean rel-err < 1e-3 for both acc and phi")
-    return ok
+    assert ok, f"tree_gpu vs reference mismatch: acc_mean={ae['mean']:.2e} phi_mean={pe['mean']:.2e}"
 
 
 # ============================================================================
@@ -316,6 +317,7 @@ def test_multi_species():
     # theta=0.5 → tighter tree walk, allow ~2% mean error vs exact
     ok_a = ae_all['mean'] < 2e-2 and pe_all['mean'] < 2e-2
     print(f"  {PASS if ok_a else FAIL}: mean rel-err < 2% (theta=0.5)")
+    assert ok_a, f"multi-species Part A error too large: acc={ae_all['mean']:.2e} phi={pe_all['mean']:.2e}"
 
     # --- Part B: symmetry check — force on i due to j vs force on j due to i ---
     subhdr("Part B: softening symmetry check")
@@ -330,6 +332,7 @@ def test_multi_species():
     ok_b = not bool(cp.any(cp.isnan(acc_sym))) and not bool(cp.any(cp.isnan(phi_sym)))
     print(f"  N={n_sym}, two eps values, theta=0.3 (many direct interactions)")
     print(f"  NaN-free: {PASS if ok_b else FAIL}")
+    assert ok_b, "NaN in multi-species symmetry check output"
 
     # Check: momentum conservation (sum of m_i * a_i = 0 for isolated system)
     mom = cp.sum(mass2.reshape(-1, 1) * acc_sym, axis=0)
@@ -337,6 +340,7 @@ def test_multi_species():
         cp.sum(mass2) * float(cp.linalg.norm(acc_sym, axis=1).mean()))
     print(f"  Momentum conservation: |Σ m_i a_i| / (M <|a|>) = {mom_rel:.2e}  (expect < 1e-3)")
     ok_b &= mom_rel < 1e-3
+    assert mom_rel < 1e-3, f"Momentum not conserved in symmetry check: {mom_rel:.2e}"
 
     # --- Part C: multi-species vs nbody_streams (N=25K — direct-sum GPU kernel, same max convention) ---
     if HAS_DIRECT:
@@ -376,6 +380,7 @@ def test_multi_species():
         print(f"  OVERALL: acc mean={ae3_all['mean']:.3e}  phi mean={pe3_all['mean']:.3e}")
         ok_c = ae3_all['mean'] < 2e-2 and pe3_all['mean'] < 2e-2
         print(f"  {PASS if ok_c else FAIL}: multi-species mean rel-err < 2% vs nbody_streams (theta=0.5)")
+        assert ok_c, f"multi-species Part C error too large: acc={ae3_all['mean']:.2e} phi={pe3_all['mean']:.2e}"
     else:
         ok_c = True
         print("  Part C: [SKIP] nbody_streams not available")
@@ -387,8 +392,6 @@ def test_multi_species():
     print(f"  tree_gpu max:  eps2_ij = max(eps_s^2, eps_dm^2) = {max(eps_s2,eps_d2):.5f}")
     print(f"  nbody_streams max:  eps_ij  = max(eps_s, eps_dm)^2   = {eps_dm**2:.5f}")
     print(f"  → same convention: both use the larger of the two softening radii.")
-
-    return ok_a and ok_b and ok_c
 
 
 # ============================================================================
@@ -443,7 +446,10 @@ def test_timing():
     print(f"\n  Interpretation:")
     print(f"  - eps overhead: scalar path calls cp.full() vs user-provided array — should be <5%")
     print(f"  - per-particle eps adds two extra GPU buffers — overhead should be <5%")
-    return True
+    # Verify no NaN for the largest N run (sanity that the timing loop didn't corrupt state)
+    acc_check, phi_check = tgg_simple(pos, mass, eps=eps_val, theta=theta, G=1.0)
+    assert not bool(cp.any(cp.isnan(acc_check))), "NaN in acc after timing loop"
+    assert not bool(cp.any(cp.isnan(phi_check))), "NaN in phi after timing loop"
 
 
 # ============================================================================
@@ -478,8 +484,7 @@ def test_nleaf_variants():
         if not ok:
             all_ok = False
         print(f"  {nleaf:>6}  {ms:>10.2f}  {ae:>14.3e}  {pe:>14.3e}  {'OK' if nan_ok else 'NaN!':>6}  {status:>8}")
-
-    return all_ok
+        assert ok, f"nleaf={nleaf}: nan_free={nan_ok} acc_err={ae:.2e} phi_err={pe:.2e}"
 
 
 # ============================================================================
@@ -516,7 +521,7 @@ def test_verbose_stats():
 
     ok = (-1.3 < phi_mean < -0.7) and (phi_max < 0)
     print(f"\n  {PASS if ok else FAIL}: phi_mean in (-1.3, -0.7) and phi_max < 0")
-    return ok
+    assert ok, f"Verbose stats sanity failed: phi_mean={phi_mean:.4f} phi_max={phi_max:.4f}"
 
 
 # ============================================================================
@@ -583,7 +588,10 @@ def test_edge_cases():
           f"{PASS if ok5 else FAIL}  (expect < 1e-2 for tree approx)")
     all_ok &= ok5
 
-    return all_ok
+    assert all_ok, (
+        f"Edge case failures: "
+        f"nan_free={ok4}, momentum_ok={ok5} ({mom_rel:.2e})"
+    )
 
 
 # ============================================================================
