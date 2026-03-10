@@ -81,6 +81,49 @@ def _pe(pos: np.ndarray, mass: np.ndarray,
     return -0.5 * G * float(np.einsum("i,j,ij->", mass, mass, inv_r))
 
 
+def _spline_pe(pos: np.ndarray, mass: np.ndarray,
+               softening: float = EPS, G: float = G) -> float:
+    """
+    Cubic spline-softened gravitational PE, kernel-consistent with
+    run_simulation(kernel='spline') / run_nbody_cpu(kernel='spline').
+
+    Matches _get_potential_kernel(kernel_id=4) from fields.py, using the
+    max(h_i, h_j) pair-softening convention of the backends.
+    Valid for uniform softening (single-species or same-eps multi-species).
+    """
+    diff = pos[:, None, :] - pos[None, :, :]   # (N, N, 3)
+    r    = np.sqrt(np.sum(diff ** 2, axis=-1))  # (N, N)
+    h    = float(softening)
+    hinv = 1.0 / h
+    q    = r * hinv
+    q2   = q * q
+
+    # Default: Newtonian (r >= h)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        phi = np.where(r > 0.0, -1.0 / r, 0.0)
+
+    # Outer spline region: 0.5 < q <= 1.0
+    m_out  = (q > 0.5) & (q <= 1.0)
+    safe_q = np.where(m_out, q, 1.0)   # avoid /0; only used where m_out is True
+    phi_out = (
+        -3.2
+        + 0.06666666666666666 / safe_q
+        + safe_q ** 2 * (
+            10.666666666666666
+            + safe_q * (-16.0 + safe_q * (9.6 - 2.1333333333333333 * safe_q))
+        )
+    ) * hinv
+    phi = np.where(m_out, phi_out, phi)
+
+    # Inner spline region: q <= 0.5 (limit q->0 gives -2.8*hinv)
+    m_inn   = q <= 0.5
+    phi_inn = (-2.8 + q2 * (5.333333333333333 + q2 * q2 * (6.4 * q - 9.6))) * hinv
+    phi = np.where(m_inn, phi_inn, phi)
+
+    np.fill_diagonal(phi, 0.0)   # no self-interaction
+    return 0.5 * G * float(np.einsum("i,j,ij->", mass, mass, phi))
+
+
 def _ke(xv: np.ndarray, mass: np.ndarray) -> float:
     """KE = (1/2) sum_i m_i |v_i|^2."""
     return 0.5 * float(np.sum(mass * np.sum(xv[:, 3:] ** 2, axis=-1)))
@@ -88,7 +131,14 @@ def _ke(xv: np.ndarray, mass: np.ndarray) -> float:
 
 def _total_energy(xv: np.ndarray, mass: np.ndarray,
                   softening: float = EPS, G: float = G) -> float:
+    """Plummer-softened total energy. Use only when the integrator also uses Plummer."""
     return _ke(xv, mass) + _pe(xv[:, :3], mass, softening, G)
+
+
+def _total_energy_spline(xv: np.ndarray, mass: np.ndarray,
+                         softening: float = EPS, G: float = G) -> float:
+    """Spline-softened total energy. Matches run_simulation's hardcoded kernel='spline'."""
+    return _ke(xv, mass) + _spline_pe(xv[:, :3], mass, softening, G)
 
 
 def _total_momentum(xv: np.ndarray, mass: np.ndarray) -> np.ndarray:
@@ -176,8 +226,8 @@ class TestConservationOldAPI:
     def test_energy_conserved(self, tmp_path):
         xv0 = _make_ic()
         final, mass = _run_old_api(xv0, tmp_path)
-        E0  = _total_energy(xv0,   mass)
-        Ef  = _total_energy(final, mass)
+        E0  = _total_energy_spline(xv0,   mass)
+        Ef  = _total_energy_spline(final, mass)
         rel = abs((Ef - E0) / E0)
         assert rel < E_REL_TOL, (
             f"Old API: energy drifted by {rel:.3%}  (limit {E_REL_TOL:.0%})"
@@ -236,8 +286,8 @@ class TestConservationNewAPI:
     def test_energy_conserved(self, tmp_path):
         xv0 = _make_ic()
         final, mass = _run_new_api(xv0, tmp_path)
-        E0  = _total_energy(xv0,   mass)
-        Ef  = _total_energy(final, mass)
+        E0  = _total_energy_spline(xv0,   mass)
+        Ef  = _total_energy_spline(final, mass)
         rel = abs((Ef - E0) / E0)
         assert rel < E_REL_TOL, (
             f"New API: energy drifted by {rel:.3%}  (limit {E_REL_TOL:.0%})"
@@ -336,11 +386,12 @@ class TestConservationMultiSpecies:
             save_snapshots=False, verbose=False,
         )
         final = np.vstack([result["dark"], result["star"]])
-        E0  = _total_energy(xv0,   mass, softening=self.EPS_DM)
-        Ef  = _total_energy(final, mass, softening=self.EPS_DM)
+        E0  = _total_energy_spline(xv0,   mass, softening=self.EPS_DM)
+        Ef  = _total_energy_spline(final, mass, softening=self.EPS_DM)
         rel = abs((Ef - E0) / E0)
         # Allow 5× tolerance: mixed softenings mean the PE helper slightly
-        # underestimates true PE, but conservation should still hold.
+        # underestimates true PE (uniform eps approximation), but conservation
+        # should still hold.
         assert rel < E_REL_TOL * 5, (
             f"Two-species: energy drifted by {rel:.3%}"
         )
@@ -397,8 +448,8 @@ class TestConservationMultiSpecies:
             save_snapshots=False, verbose=False,
         )
         final = np.vstack([result["dark"], result["star"], result["bh"]])
-        E0  = _total_energy(xv0,   mass, softening=self.EPS_DM)
-        Ef  = _total_energy(final, mass, softening=self.EPS_DM)
+        E0  = _total_energy_spline(xv0,   mass, softening=self.EPS_DM)
+        Ef  = _total_energy_spline(final, mass, softening=self.EPS_DM)
         rel = abs((Ef - E0) / E0)
         # BH is massive relative to the system, so allow more tolerance here
         assert rel < 0.15, (
@@ -481,9 +532,9 @@ class TestRegressionDevelVsMultiSpec:
         final_old, _ = _run_old_api(xv0, tmp_path)
         final_new, _ = _run_new_api(xv0, tmp_path)
 
-        E0     = _total_energy(xv0, mass)
-        dE_old = abs(_total_energy(final_old, mass) - E0) / abs(E0)
-        dE_new = abs(_total_energy(final_new, mass) - E0) / abs(E0)
+        E0     = _total_energy_spline(xv0, mass)
+        dE_old = abs(_total_energy_spline(final_old, mass) - E0) / abs(E0)
+        dE_new = abs(_total_energy_spline(final_new, mass) - E0) / abs(E0)
 
         assert dE_new < max(dE_old * 10.0, 1e-4), (
             f"New API energy error ({dE_new:.2e}) >> old API ({dE_old:.2e})"
@@ -627,8 +678,8 @@ class TestConservationGPU:
             save_snapshots=False, verbose=False,
         )
         mass = np.full(N, m)
-        E0   = _total_energy(xv0,           mass)
-        Ef   = _total_energy(result["dark"], mass)
+        E0   = _total_energy_spline(xv0,           mass)
+        Ef   = _total_energy_spline(result["dark"], mass)
         rel  = abs((Ef - E0) / E0)
         assert rel < self.GPU_E_TOL, (
             f"GPU new API: energy drifted by {rel:.3%}"
