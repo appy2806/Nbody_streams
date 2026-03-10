@@ -6,7 +6,7 @@ This will help diagnose if there's an issue with the package setup.
 import numpy as np
 import nbody_streams as nbody
 
-def test_newtons_third_law(N=1000, precision='float32', verbose=True):
+def _newtons_third_law(N=1000, precision='float32', verbose=True):
     """
     Test that net force is ~0 for isolated system.
     
@@ -97,7 +97,7 @@ def test_all_precisions():
     
     results = {}
     for precision in ['float32', 'float32_kahan', 'float64']:
-        passed, net_mag, rel_err = test_newtons_third_law(
+        passed, net_mag, rel_err = _newtons_third_law(
             N=1000, 
             precision=precision,
             verbose=True
@@ -129,7 +129,7 @@ def test_all_precisions():
         print("3. Check that pos/mass arrays are contiguous")
         print("4. Verify editable install: pip show nbody_streams")
     
-    return all_passed
+    assert all_passed, "precision tests failed."
 
 
 if __name__ == "__main__":

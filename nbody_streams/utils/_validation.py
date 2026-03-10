@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__: list[str] = []  # nothing public — internal helpers only
+__all__: list[str] = []  # nothing public - internal helpers only
 
 
 # ---------------------------------------------------------------------------
@@ -30,9 +30,9 @@ def validate_positions(
     pos : array_like
         Particle positions. Accepted shapes:
 
-        * ``(N,)``   — pre-computed radii (returned as-is for *radii*).
-        * ``(N, 3)`` — Cartesian coordinates.
-        * ``(..., 3)`` with ``allow_batched=True`` — batched coordinates
+        * ``(N,)``   - pre-computed radii (returned as-is for *radii*).
+        * ``(N, 3)`` - Cartesian coordinates.
+        * ``(..., 3)`` with ``allow_batched=True`` - batched coordinates
           (e.g. ``(T, N, 3)`` for multiple snapshots).
 
     allow_batched : bool, optional

@@ -41,7 +41,7 @@ def _propagate_nans(inp: np.ndarray, out: np.ndarray) -> np.ndarray:
 
 
 # =====================================================================
-# Private coordinate transforms — all work with (..., 3)
+# Private coordinate transforms - all work with (..., 3)
 # =====================================================================
 def _cart_to_sph(xyz: np.ndarray, mollweide: bool = False) -> np.ndarray:
     """Cartesian -> Spherical.  See `convert_coords` for details."""
@@ -198,7 +198,7 @@ def convert_coords(
 
 
 # =====================================================================
-# Private vector field rotation matrices — all (..., 3, 3)
+# Private vector field rotation matrices - all (..., 3, 3)
 # =====================================================================
 def _rotation_cart_to_sph(theta: np.ndarray, phi: np.ndarray) -> np.ndarray:
     """
@@ -321,7 +321,7 @@ def convert_vectors(
     # For sph<->cyl: chain through cart
 
     if {from_sys, to_sys} == {"cart", "sph"}:
-        # Need spherical angles — get them from whichever side has them
+        # Need spherical angles - get them from whichever side has them
         if from_sys == "cart":
             sph = pos_new  # we just converted cart -> sph
         else:

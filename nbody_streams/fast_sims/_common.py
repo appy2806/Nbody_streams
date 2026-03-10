@@ -1,6 +1,6 @@
 """Private helpers shared by fast_sims methods.
 
-Functions here are implementation details — not part of the public API.
+Functions here are implementation details - not part of the public API.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ try:
 except ImportError:
     AGAMA_AVAILABLE = False
 
-__all__: list[str] = []  # nothing public — internal helpers only
+__all__: list[str] = []  # nothing public - internal helpers only
 
 
 # ---------------------------------------------------------------------------
@@ -39,12 +39,12 @@ def _compute_vel_disp_from_Potential(
         Ideally an axisymmetric / spherically symmetric model.
     grid_r : np.ndarray, optional
         Radial grid for the dispersion spline.  Defaults to
-        ``np.logspace(-1, 2, 16)`` (0.1 – 100 kpc).
+        ``np.logspace(-1, 2, 16)`` (0.1 - 100 kpc).
 
     Returns
     -------
     Callable
-        ``sigma(r)`` — velocity dispersion at radius *r* (km/s).
+        ``sigma(r)`` - velocity dispersion at radius *r* (km/s).
     """
     if grid_r is None:
         grid_r = np.logspace(-1, 2, 16)

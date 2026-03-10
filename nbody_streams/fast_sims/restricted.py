@@ -86,7 +86,7 @@ def run_restricted_nbody(
         Progenitor potential profile (ignored when *xv_init* is given).
     xv_init : np.ndarray, shape ``(N, 6)``, optional
         Pre-existing particle phase-space.  When provided the code
-        integrates forward directly — no rewinding or sampling.
+        integrates forward directly - no rewinding or sampling.
     dynFric : bool
         Enable dynamical friction on the progenitor orbit.
     pot_for_dynFric_sigma : agama.Potential, optional

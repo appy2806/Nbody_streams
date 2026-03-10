@@ -28,6 +28,7 @@ venv/
 *.times
 test_orbit/
 test_plummer/
+output/
 dist/
 build/
 *.egg-info/
@@ -38,3 +39,8 @@ __pycache__/
 
 # Claude plans
 .claude/
+
+# Compiled C/CUDA build artifacts
+*.o
+*.so
+*.a

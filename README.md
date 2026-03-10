@@ -8,6 +8,7 @@ the hot path.
 - **Multi-species** simulations with any number of particle types (dark matter, stars, gas tracers, black holes, …).
 - Single entry point: `run_simulation` with `architecture='cpu'|'gpu'` and `method='direct'|'tree'` flags.
 - **GPU direct**: hand-written CUDA kernels compiled at runtime via CuPy + nvcc — `float4` 128-bit vectorized loads, optional Kahan compensated summation, `--use_fast_math`, and architecture-tuned PTX.
+- **GPU tree**: Barnes-Hut GPU tree code (C++ / CUDA shared library) — O(N log N) scaling, per-particle softening, watchdog-guarded KDK integrator.
 - **CPU direct**: Numba JIT-compiled, auto-parallelized force kernels (`@njit(parallel=True)`) using all available CPU cores.
 - **CPU tree / FMM**: falcON fast multipole method via pyfalcon — true O(N) scaling for large particle counts.
 - Optional external potentials via Agama (evaluated in C++ per timestep, added to N-body accelerations).
@@ -31,6 +32,11 @@ pip install -e ".[all]"    --no-build-isolation   # all of the above
 # GPU support — install CuPy matching your CUDA version
 pip install cupy-cuda12x   # CUDA 12.x
 pip install cupy-cuda13x   # CUDA 13.x
+
+# GPU tree code — build the shared library (requires nvcc in PATH)
+cd nbody_streams/tree_gpu
+make -j$(nproc)            # produces libtreeGPU.so alongside the source files
+cd ../..
 ```
 
 ---
@@ -40,15 +46,16 @@ pip install cupy-cuda13x   # CUDA 13.x
 | Subpackage | Description |
 |---|---|
 | `nbody_streams.species` | `Species` dataclass, `PerformanceWarning`, and array-building helpers |
-| `nbody_streams.sim` | `run_simulation` — unified multi-species entry point |
+| `nbody_streams.sim` | `run_simulation` — unified multi-species entry point (all backends) |
 | `nbody_streams.fields` | Force and potential kernels: dispatches to GPU (CUDA) or CPU (Numba) backends |
 | `nbody_streams.cuda_kernels` | Hand-written CUDA kernel source strings (float32 `float4`, float64); compiled at runtime via nvcc |
 | `nbody_streams.run` | KDK leapfrog integrators (`run_nbody_gpu`, `run_nbody_cpu`); `make_plummer_sphere` IC generator |
+| `nbody_streams.tree_gpu` | GPU Barnes-Hut tree code: `tree_gravity_gpu`, `TreeGPU`, `run_nbody_gpu_tree`, watchdog; requires `make` |
 | `nbody_streams.io` | `ParticleReader` for HDF5 snapshots, save/load helpers |
 | `nbody_streams.utils` | Profile fitting (Dehnen, Plummer, double-power-law), iterative shape measurement, energy-based unbinding |
 | `nbody_streams.fast_sims` | Fast stream generation: particle spray and restricted N-body (requires AGAMA) |
 | `nbody_streams.coords` | Coordinate transforms, vector field transforms, stream coordinate generation |
-| `nbody_streams.viz` | Mollweide projections, surface density, stream sky plots, stream evolution |
+| `nbody_streams.viz` | SPH/histogram surface density (`plot_density`), Mollweide projections, stream sky and evolution plots; `render_surface_density`, `get_smoothing_lengths` |
 
 ---
 
@@ -61,9 +68,10 @@ compiled, parallelized code:
 | Path | Implementation | Key details |
 |---|---|---|
 | **GPU direct** | CUDA kernels compiled at runtime (CuPy + nvcc) | `float4` 128-bit vectorized loads; optional Kahan compensated summation; `--use_fast_math`; arch-tuned PTX via `compute_capability` auto-detection |
+| **GPU tree** | C++/CUDA shared library (`libtreeGPU.so`); ctypes interface | Barnes-Hut with monopole + quadrupole; per-particle softening (max convention); watchdog-guarded KDK; float32 throughout |
 | **CPU direct** | Numba `@njit(parallel=True)` | Prange-parallelized inner loop; JIT-compiled on first call, cached thereafter |
 | **CPU tree / FMM** | falcON via pyfalcon (C++) | True O(N) fast multipole method; independent of the direct-force code path |
-| **Integration** | KDK symplectic leapfrog | Positions and velocities kept in float64; only force calls use float32/float64 kernels |
+| **Integration** | KDK symplectic leapfrog | GPU direct: float64 pos/vel; GPU tree: float32 throughout; only force calls use float32/float64 kernels |
 | **External potentials** | Agama C++ library | `agama.Potential.__call__` invoked once per timestep; result added directly to N-body accelerations |
 
 ---
@@ -118,14 +126,19 @@ result = run_simulation(
     time_end=1.0,
     dt=0.001,
     architecture='gpu',   # 'cpu' or 'gpu'
-    method='direct',      # 'direct' (O(N^2)) or 'tree' (CPU only, requires pyfalcon)
-    precision='float32_kahan',
-    kernel='dehnen_k1',
+    method='direct',      # 'direct' (O(N^2)) or 'tree' (GPU: Barnes-Hut; CPU: falcON O(N))
     external_potential=pot,        # optional agama.Potential
     output_dir='./output',
     save_snapshots=True,
     snapshots=100,
     verbose=True,
+    debug_energy=False,   # True -> print Q=KE/|PE| and dE/E at each output interval
+    # Backend-specific kwargs (passed through **kwargs):
+    #   theta=0.6                  tree opening angle           (tree backends)
+    #   nthreads=None              CPU thread count             (CPU direct)
+    #   precision='float32_kahan'  force computation precision  (GPU direct)
+    #   external_update_interval=1 ext. force caching interval  (GPU backends)
+    #   nleaf=64, ncrit=64         tree node size params        (GPU tree only)
 )
 # result is dict[str, ndarray]  keyed by species name
 # result['dark'].shape  -> (N_dark,  6)
@@ -244,9 +257,63 @@ corrected to zero before returning.
 
 ---
 
+### GPU tree-code (`tree_gpu`)
+
+The GPU tree backend must be compiled once before use:
+
+```bash
+cd nbody_streams/tree_gpu
+make -j$(nproc)    # auto-detects GPU architecture via nvidia-smi / CuPy
+```
+
+After building, it is available as a subpackage:
+
+```python
+from nbody_streams.tree_gpu import tree_gravity_gpu, TreeGPU, run_nbody_gpu_tree
+import cupy as cp
+
+# One-shot: compute forces + potential for N particles
+pos  = cp.asarray(xv[:, :3], dtype=cp.float32)
+mass = cp.asarray(masses,    dtype=cp.float32)
+eps  = cp.asarray(softening, dtype=cp.float32)   # per-particle or scalar
+
+acc, phi = tree_gravity_gpu(pos, mass, eps, G=4.3009e-6, theta=0.6)
+
+# Pre-allocated handle for time-stepping loops (saves ~27 ms of GPU malloc per step)
+with TreeGPU(N, eps=0.05, theta=0.6) as tree:
+    for step in range(n_steps):
+        acc, phi = tree_gravity_gpu(pos, mass, eps, tree=tree)
+        vel += 0.5 * dt * acc
+        pos += dt * vel
+        acc, phi = tree_gravity_gpu(pos, mass, eps, tree=tree)
+        vel += 0.5 * dt * acc
+
+# Full integration — same interface as run_simulation with method='tree'
+final_xv = run_nbody_gpu_tree(
+    phase_space, masses, time_start=0.0, time_end=5.0, dt=1e-4,
+    softening=eps_arr, theta=0.6, step_timeout_s=60.0,
+    output_dir="./output", snapshots=500,
+)
+
+# Or via the unified entry point:
+result = run_simulation(
+    phase_space, species,
+    time_start=0.0, time_end=5.0, dt=1e-4,
+    architecture='gpu', method='tree', theta=0.6,
+)
+```
+
+The `_StepWatchdog` inside `run_nbody_gpu_tree` fires a `KeyboardInterrupt` in
+the main thread if any single integration step exceeds `step_timeout_s` seconds,
+protecting against deadlocked CUDA kernels.
+
+---
+
 ### Low-level API — Direct N-body (`fields`, `run`)
 
-The low-level functions remain available for fine-grained control.
+`run_simulation` covers the common case.  For full control — custom softening
+kernels, alternative float precision, per-particle softening, or
+`external_update_interval` on the CPU — call the backend functions directly:
 
 ```python
 from nbody_streams import (
@@ -270,7 +337,7 @@ phi = compute_nbody_potential_gpu(
     precision='float32_kahan', kernel='spline',
 )
 
-# Full N-body integration (GPU) — single species, backward-compatible
+# Full N-body integration (GPU direct) — full kernel / precision control
 run_nbody_gpu(
     phase_space,             # (N, 6) array [x, y, z, vx, vy, vz]
     masses,
@@ -278,10 +345,25 @@ run_nbody_gpu(
     time_end=1.0,
     dt=0.001,
     softening=0.01,
-    precision='float32_kahan',
-    kernel='spline',
-    external_potential=pot,   # optional agama.Potential
+    precision='float64',     # 'float32' | 'float64' | 'float32_kahan'
+    kernel='dehnen_k2',      # 'newtonian' | 'plummer' | 'dehnen_k1' | 'dehnen_k2' | 'spline'
+    external_potential=pot,
+    external_update_interval=5,  # cache ext. forces for 5 steps
+    debug_energy=True,       # print Q and dE/E at each output interval
     snapshots=10,
+    output_dir='./output',
+)
+
+# Full N-body integration (CPU) — tree with custom kernel / theta
+run_nbody_cpu(
+    phase_space, masses,
+    time_start=0.0, time_end=1.0, dt=0.001,
+    softening=0.02,
+    method='tree',
+    kernel='dehnen_k2',      # or integer 2; pyfalcon: 0=plummer 1=dehnen_k1 2=dehnen_k2
+    theta=0.5,
+    nthreads=32,
+    debug_energy=True,       # phi returned for free by falcON; zero overhead
     output_dir='./output',
 )
 ```
@@ -419,33 +501,37 @@ from nbody_streams.utils import (
     fit_plummer_profile,
     fit_double_spheroid_profile,
     fit_iterative_ellipsoid,
-    find_center_position,
+    find_center,
     iterative_unbinding,
 )
 
 # Radial profiles
-r_bins, rho = empirical_density_profile(positions, masses, bins=50)
-r_bins, v_circ = empirical_circular_velocity_profile(positions, masses)
-r_bins, sigma = empirical_velocity_dispersion_profile(positions, velocities)
+r_bins, rho = empirical_density_profile(pos, mass, bins=50)
+r_bins, v_circ = empirical_circular_velocity_profile(pos, mass)
+r_bins, sigma = empirical_velocity_dispersion_profile(pos, vel)
 
 # Profile fitting
-gamma, a, M, r_fit, rho_fit = fit_dehnen_profile(positions, masses)
-a, M, r_fit, rho_fit = fit_plummer_profile(positions, masses)
+gamma, a, M, r_fit, rho_fit = fit_dehnen_profile(pos, mass)
+a, M, r_fit, rho_fit = fit_plummer_profile(pos, mass)
 
 # Iterative shape measurement
-axes, axis_ratios, eigvecs = fit_iterative_ellipsoid(positions, masses)
+axes, axis_ratios, eigvecs = fit_iterative_ellipsoid(pos, mass)
 
-# Centre finding
-cen = find_center_position(positions, masses)
+# Centre finding (default method="density_peak" via gravitational potential minimum)
+cen = find_center(pos, mass)
+
+# Centre finding with velocity centering
+cen_pos, cen_vel = find_center(pos, mass, vel=vel, return_velocity=True, vel_aperture=5.0)
 
 # Energy-based iterative unbinding
 bound_mask = iterative_unbinding(
-    positions, velocities, masses,
+    pos, vel, mass,
     center_position=cen,
 )
 ```
 
-> **Note:** `compute_iterative_boundness` is deprecated — use `iterative_unbinding` instead.
+> **Note:** `find_center_position` is a deprecated alias for `find_center`.
+> `compute_iterative_boundness` is also deprecated -- use `iterative_unbinding` instead.
 
 ### Coordinates (`coords`)
 
@@ -485,15 +571,40 @@ from nbody_streams.viz import (
     plot_mollweide,
     plot_stream_sky,
     plot_stream_evolution,
+    render_surface_density,   # low-level SPH renderer
+    get_smoothing_lengths,    # per-particle SPH smoothing lengths
 )
 
-# Projected density map — from a Gizmo-style particle object
-plot_density(part=snap, spec='dark', grid_len=50.0)
+# --- Projected density map ---
 
-# Projected density map — from raw arrays (e.g. ParticleReader snapshot)
+# From raw arrays — SPH (default, GPU-accelerated when CuPy is available)
+plot_density(pos=pos, mass=mass, gridsize=100.0)
+
+# From a ParticleReader snapshot — extract dark matter automatically
 snap = reader.read_snapshot(50)
-plot_density(pos=snap.dark['posvel'][:, :3], mass=snap.dark['mass'],
-             grid_len=5.0, vmin=4.0, vmax=9.0)
+plot_density(snap=snap, spec='dark', gridsize=100.0, vmin=4.0, vmax=9.0)
+
+# Choose rendering method
+plot_density(pos=pos, mass=mass, method='sph')          # SPH kernel (default)
+plot_density(pos=pos, mass=mass, method='gauss_smooth', smooth_sigma=1.5)
+plot_density(pos=pos, mass=mass, method='histogram')
+
+# Return the raw (pre-log10) density array for further analysis
+im, dens = plot_density(pos=pos, mass=mass, return_dens=True)
+
+# Slice along Z and render X-Y surface density
+plot_density(pos=pos, mass=mass, xval='x', yval='y',
+             slice_width=2.0, density_kind='surface')
+
+# --- Low-level SPH API ---
+
+# Full SPH surface-density grid (GPU -> CPU fallback)
+grid, bounds = render_surface_density(x, y, mass, resolution=512, gridsize=120.0)
+
+# Smoothing lengths only (useful for custom renderers)
+h = get_smoothing_lengths(np.column_stack([x, y]), k_neighbors=32)
+
+# --- Other viz ---
 
 # Mollweide sky projection (requires healpy)
 plot_mollweide(pos, weights=masses, initial_nside=60)
@@ -501,9 +612,17 @@ plot_mollweide(pos, weights=masses, initial_nside=60)
 # Stream in sky coordinates (alpha/delta and phi1/phi2)
 plot_stream_sky(xv_stream, xv_prog=xv_prog)
 
-# Stream evolution over time (from fast_sims output)
+# Stream evolution over time (from run_simulation output)
 plot_stream_evolution(result['prog_xv'], times=result['times'], part_xv=result['part_xv'])
 ```
+
+#### `plot_density` method options
+
+| `method`       | Description                                          | Best for                              |
+|----------------|------------------------------------------------------|---------------------------------------|
+| `'sph'`        | SPH cubic-spline kernel splatting (GPU-accelerated)  | Physics-accurate density maps (default) |
+| `'gauss_smooth'` | 2-D histogram + Gaussian filter                   | Quick smooth previews                 |
+| `'histogram'`  | Raw 2-D histogram / pixel area                       | Counting statistics, debugging        |
 
 ---
 

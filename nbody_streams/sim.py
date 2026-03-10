@@ -23,6 +23,12 @@ from .species import (
 )
 from .run import run_nbody_gpu, run_nbody_cpu, G_DEFAULT
 
+try:
+    from .tree_gpu.run_gpu_tree import run_nbody_gpu_tree
+    _TREE_GPU_OK = True
+except ImportError:
+    _TREE_GPU_OK = False
+
 
 def run_simulation(
     phase_space: np.ndarray,
@@ -33,12 +39,7 @@ def run_simulation(
     G: float = G_DEFAULT,
     architecture: Literal["cpu", "gpu"] = "gpu",
     method: Literal["direct", "tree"] = "direct",
-    precision: Literal["float32", "float64", "float32_kahan"] = "float32_kahan",
-    kernel: str = "dehnen_k1",
-    theta: float = 0.6,
-    nthreads: int | None = None,
     external_potential=None,
-    external_update_interval: int = 1,
     output_dir: str = "./output",
     save_snapshots: bool = True,
     snapshots: int = 100,
@@ -47,6 +48,8 @@ def run_simulation(
     continue_run: bool = False,
     overwrite: bool = False,
     verbose: bool = True,
+    debug_energy: bool = False,
+    **kwargs,
 ) -> dict[str, NDArray]:
     """
     Run a direct N-body simulation with one or more particle species.
@@ -76,29 +79,14 @@ def run_simulation(
     method : {'direct', 'tree'}, optional
         Gravity solver algorithm.
 
-        * ``'direct'`` — O(N²) pairwise summation (GPU or CPU).
-        * ``'tree'`` — hierarchical tree algorithm (CPU only via pyfalcon;
-          GPU tree is *not yet implemented*).
+        * ``'direct'`` - O(N^2) pairwise summation (GPU or CPU).
+        * ``'tree'`` - hierarchical tree algorithm.  CPU: pyfalcon falcON O(N);
+          GPU: Barnes-Hut tree code (requires ``libtreeGPU.so`` built from
+          ``nbody_streams/tree_gpu/``).
 
         Default: ``'direct'``.
-    precision : {'float32', 'float64', 'float32_kahan'}, optional
-        Floating-point precision for GPU force computation.  Ignored for CPU.
-        Default: ``'float32_kahan'``.
-    kernel : str, optional
-        Softening kernel.  For CPU direct: one of ``'newtonian'``,
-        ``'plummer'``, ``'dehnen_k1'``, ``'dehnen_k2'``, ``'spline'``.
-        For CPU tree: integer kernel index (passed through to pyfalcon).
-        For GPU: same string options as CPU direct.
-        Default: ``'dehnen_k1'``.
-    theta : float, optional
-        Tree opening angle.  Only used for ``method='tree'``.  Default: 0.6.
-    nthreads : int or None, optional
-        CPU thread count for direct summation.  ``None`` = auto.
     external_potential : agama.Potential or None, optional
         Time-varying external potential (requires Agama).  Default: ``None``.
-    external_update_interval : int, optional
-        Recompute external forces every this many steps.  GPU only.
-        Default: 1.
     output_dir : str, optional
         Directory for snapshot and restart files.  Default: ``'./output'``.
     save_snapshots : bool, optional
@@ -113,17 +101,42 @@ def run_simulation(
         Resume from an existing restart file.  Default: ``False``.
     verbose : bool, optional
         Print progress information.  Default: ``True``.
+    debug_energy : bool, optional
+        Print virial ratio Q=KE/|PE| and relative energy drift dE/E alongside
+        each progress line.  Available for all backends:
+
+        * GPU tree / CPU tree -- potential returned for free; zero extra cost.
+        * GPU direct / CPU direct -- one extra O(N^2) potential pass per
+          output interval; meaningful overhead for large N.
+
+        Default: ``False``.
+    **kwargs
+        Backend-specific advanced options.  Commonly used:
+
+        * ``theta`` (float, default 0.6) -- Tree opening angle.  Only used
+          for ``method='tree'``.
+        * ``nthreads`` (int or None, default None) -- CPU thread count for
+          direct summation.  ``None`` = auto.
+        * ``external_update_interval`` (int, default 1) -- Recompute external
+          forces every this many steps.  GPU only.
+        * ``precision`` (str, default ``'float32_kahan'``) -- Floating-point
+          precision for GPU direct force computation.  One of
+          ``'float32'``, ``'float64'``, ``'float32_kahan'``.  Ignored for
+          tree backends (which are always float32 internally).
+
+        GPU tree only (``architecture='gpu', method='tree'``):
+
+        * ``nleaf`` (int, default 64) -- Minimum leaf node size.
+        * ``ncrit`` (int, default 64) -- Group criticality threshold.
+        * ``level_split`` (int, default 5) -- Level at which tree splits groups.
+        * ``step_timeout_s`` (float, default 60.0) -- Per-step watchdog timeout
+          in seconds; raises ``RuntimeError`` if a step exceeds this.
 
     Returns
     -------
     dict[str, ndarray]
         Final phase-space coordinates, keyed by species name.
         Each value has shape ``(N_k, 6)``.
-
-    overwrite : bool, optional
-        If ``True`` and snapshot files already exist in *output_dir*, delete
-        them before starting.  If ``False`` (default) and files exist, raise
-        ``FileExistsError``.  Ignored when *continue_run* is ``True``.
 
     Raises
     ------
@@ -132,10 +145,10 @@ def run_simulation(
     FileExistsError
         If snapshot files already exist in *output_dir* and *overwrite* is
         ``False`` and *continue_run* is ``False``.
-    NotImplementedError
-        If ``architecture='gpu'`` and ``method='tree'``.
     ImportError
-        If CuPy is unavailable and ``architecture='gpu'``.
+        If ``architecture='gpu'``, ``method='tree'``, and ``libtreeGPU.so``
+        has not been built.  If CuPy is unavailable and
+        ``architecture='gpu'``.
 
     Examples
     --------
@@ -163,13 +176,40 @@ def run_simulation(
     >>> result.keys()
     dict_keys(['dark', 'star'])
 
+    Using the GPU tree backend with a non-default opening angle:
+
+    >>> result = run_simulation(xv, [dm], 0.0, 1.0, 1e-3,
+    ...                         architecture='gpu', method='tree',
+    ...                         save_snapshots=False, verbose=False,
+    ...                         theta=0.5)
+
     Notes
     -----
+    **Softening kernels by backend** (hardcoded; not user-configurable via
+    ``run_simulation``):
+
+    * GPU direct  -- ``'spline'`` kernel
+    * CPU direct  -- ``'spline'`` kernel
+    * CPU tree (pyfalcon/falcON) -- ``dehnen_k1`` (integer 1)
+    * GPU tree (Barnes-Hut) -- Plummer softening hardcoded in C++
+
+    **Low-level API for full control**
+
+    ``run_simulation`` is the recommended entry point for most use cases.
+    Experienced users who need finer control -- custom softening kernels,
+    alternative floating-point precision, per-particle softening, or
+    ``external_update_interval`` on the CPU -- can call the backend
+    functions directly:
+
+    * :func:`run_nbody_gpu` -- GPU direct-sum integrator
+    * :func:`run_nbody_cpu` -- CPU direct / falcON tree integrator
+    * :func:`~nbody_streams.tree_gpu.run_gpu_tree.run_nbody_gpu_tree` -- GPU Barnes-Hut tree
+
     **Performance guidance** (warnings are also emitted automatically):
 
-    * CPU direct  > 20 000 particles → very slow (O N²).
-    * GPU direct  > 500 000 particles → slow at this scale.
-    * Any method  > 2 000 000 particles → requires GPU+Tree (coming soon).
+    * CPU direct  > 20 000 particles -> very slow (O(N^2)).
+    * GPU direct  > 500 000 particles -> slow at this scale.
+    * Any method  > 2 000 000 particles -> use GPU+Tree (``architecture='gpu', method='tree'``).
     """
     # ------------------------------------------------------------------
     # Validate
@@ -180,11 +220,11 @@ def run_simulation(
         )
     if method not in ("direct", "tree"):
         raise ValueError(f"method must be 'direct' or 'tree', got '{method}'")
-    if architecture == "gpu" and method == "tree":
-        raise NotImplementedError(
-            "GPU tree-code (architecture='gpu', method='tree') is not yet "
-            "implemented.  Use architecture='cpu', method='tree' or "
-            "architecture='gpu', method='direct' instead."
+    if architecture == "gpu" and method == "tree" and not _TREE_GPU_OK:
+        raise ImportError(
+            "GPU tree-code requires libtreeGPU.so to be built first:\n\n"
+            "    cd nbody_streams/tree_gpu && make -j$(nproc)\n\n"
+            "Then re-import nbody_streams."
         )
 
     phase_space = np.asarray(phase_space, dtype=np.float64)
@@ -208,10 +248,22 @@ def run_simulation(
     _emit_performance_warnings(N_total, architecture, method)
 
     # ------------------------------------------------------------------
+    # Pull advanced options from kwargs with backend-appropriate defaults.
+    # These span multiple backends so we handle them explicitly.
+    # ------------------------------------------------------------------
+    theta = kwargs.pop("theta", 0.6)
+    nthreads = kwargs.pop("nthreads", None)
+    external_update_interval = kwargs.pop("external_update_interval", 1)
+    precision = kwargs.pop("precision", "float32_kahan")
+
+    # ------------------------------------------------------------------
     # Dispatch
     # ------------------------------------------------------------------
-    if architecture == "gpu":
-        final_xv = run_nbody_gpu(
+    if architecture == "gpu" and method == "tree":
+        # Remaining kwargs are forwarded to run_nbody_gpu_tree, which
+        # accepts extra tree-tuning params: nleaf, ncrit, level_split,
+        # step_timeout_s.  An unrecognised key will raise TypeError there.
+        final_xv = run_nbody_gpu_tree(
             phase_space=phase_space,
             masses=mass_arr,
             time_start=time_start,
@@ -219,8 +271,7 @@ def run_simulation(
             dt=dt,
             softening=softening_arr,
             G=G,
-            precision=precision,
-            kernel=kernel,
+            theta=theta,
             external_potential=external_potential,
             external_update_interval=external_update_interval,
             output_dir=output_dir,
@@ -231,9 +282,47 @@ def run_simulation(
             continue_run=continue_run,
             overwrite=overwrite,
             verbose=verbose,
+            debug_energy=debug_energy,
+            species=species,
+            **kwargs,
+        )
+    elif architecture == "gpu":  # direct
+        if kwargs:
+            raise TypeError(
+                f"run_simulation() got unexpected keyword argument(s) for "
+                f"architecture='gpu', method='direct': {sorted(kwargs)}"
+            )
+        final_xv = run_nbody_gpu(
+            phase_space=phase_space,
+            masses=mass_arr,
+            time_start=time_start,
+            time_end=time_end,
+            dt=dt,
+            softening=softening_arr,
+            G=G,
+            precision=precision,
+            kernel="spline",
+            external_potential=external_potential,
+            external_update_interval=external_update_interval,
+            output_dir=output_dir,
+            save_snapshots=save_snapshots,
+            snapshots=snapshots,
+            num_files_to_write=num_files_to_write,
+            restart_interval=restart_interval,
+            continue_run=continue_run,
+            overwrite=overwrite,
+            verbose=verbose,
+            debug_energy=debug_energy,
             species=species,
         )
     else:  # architecture == "cpu"
+        if kwargs:
+            raise TypeError(
+                f"run_simulation() got unexpected keyword argument(s) for "
+                f"architecture='cpu': {sorted(kwargs)}"
+            )
+        # CPU tree uses integer kernel 1 (dehnen_k1); direct uses 'spline'
+        cpu_kernel = 1 if method == "tree" else "spline"
         final_xv = run_nbody_cpu(
             phase_space=phase_space,
             masses=mass_arr,
@@ -244,7 +333,7 @@ def run_simulation(
             G=G,
             method=method,
             theta=theta,
-            kernel=kernel,
+            kernel=cpu_kernel,
             nthreads=nthreads,
             external_potential=external_potential,
             output_dir=output_dir,
@@ -253,6 +342,7 @@ def run_simulation(
             num_files_to_write=num_files_to_write,
             restart_interval=restart_interval,
             continue_run=continue_run,
+            debug_energy=debug_energy,
             overwrite=overwrite,
             verbose=verbose,
             species=species,

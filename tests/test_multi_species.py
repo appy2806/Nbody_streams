@@ -58,7 +58,7 @@ RNG = np.random.default_rng(42)
 # ---------------------------------------------------------------------------
 
 def _random_xv(N: int) -> np.ndarray:
-    """Random (N, 6) phase space — tiny, just for IO tests."""
+    """Random (N, 6) phase space  - tiny, just for IO tests."""
     return RNG.standard_normal((N, 6)).astype(np.float64)
 
 
@@ -213,8 +213,8 @@ class TestPerformanceWarnings:
         with pytest.warns(PerformanceWarning, match="GPU direct"):
             _emit_performance_warnings(600_000, "gpu", "direct")
 
-    def test_future_warning_2m(self):
-        with pytest.warns(FutureWarning, match="GPU.Tree"):
+    def test_perf_warning_2m(self):
+        with pytest.warns(PerformanceWarning, match="method='tree'"):
             _emit_performance_warnings(2_100_000, "cpu", "direct")
 
     def test_cpu_tree_no_warning(self):
@@ -247,7 +247,7 @@ class TestIsUniform:
 
 
 # ===========================================================================
-# 7. Smart IO — _save_snapshot (new multi-species path)
+# 7. Smart IO  - _save_snapshot (new multi-species path)
 # ===========================================================================
 
 class TestSmartSnapshotIO:
@@ -318,7 +318,7 @@ class TestSmartSnapshotIO:
 
 
 # ===========================================================================
-# 8. ParticleReader — backward compat (old dark/star format)
+# 8. ParticleReader  - backward compat (old dark/star format)
 # ===========================================================================
 
 class TestParticleReaderBackwardCompat:
@@ -379,7 +379,7 @@ class TestParticleReaderBackwardCompat:
 
 
 # ===========================================================================
-# 9. ParticleReader — new multi-species format
+# 9. ParticleReader  - new multi-species format
 # ===========================================================================
 
 class TestParticleReaderMultiSpecies:
@@ -439,7 +439,7 @@ class TestParticleReaderMultiSpecies:
 
 
 # ===========================================================================
-# 10. Restart file — species metadata
+# 10. Restart file  - species metadata
 # ===========================================================================
 
 class TestRestartFileSpecies:
@@ -495,14 +495,14 @@ class TestRestartFileSpecies:
 
 
 # ===========================================================================
-# 11. run_simulation — CPU integration tests (no GPU needed)
+# 11. run_simulation  - CPU integration tests (no GPU needed)
 # ===========================================================================
 
 class TestRunSimulationCPU:
     N_DARK = 50
     N_STAR = 30
     DT     = 1e-3
-    T_END  = 5e-3   # 5 steps — just check it runs and returns
+    T_END  = 5e-3   # 5 steps  - just check it runs and returns
 
     def test_single_species_returns_dict(self, tmp_path):
         xv = _plummer_like(self.N_DARK)
@@ -512,7 +512,6 @@ class TestRunSimulationCPU:
             time_start=0.0, time_end=self.T_END, dt=self.DT,
             G=1.0,
             architecture="cpu", method="direct",
-            kernel="plummer",
             output_dir=str(tmp_path / "out_single"),
             save_snapshots=False, verbose=False,
         )
@@ -531,7 +530,6 @@ class TestRunSimulationCPU:
             time_start=0.0, time_end=self.T_END, dt=self.DT,
             G=1.0,
             architecture="cpu", method="direct",
-            kernel="plummer",
             output_dir=str(tmp_path / "out_two"),
             save_snapshots=False, verbose=False,
         )
@@ -551,7 +549,6 @@ class TestRunSimulationCPU:
             time_start=0.0, time_end=self.T_END, dt=self.DT,
             G=1.0,
             architecture="cpu", method="direct",
-            kernel="plummer",
             output_dir=str(tmp_path / "out_three"),
             save_snapshots=False, verbose=False,
         )
@@ -566,7 +563,6 @@ class TestRunSimulationCPU:
             time_start=0.0, time_end=self.T_END, dt=self.DT,
             G=1.0,
             architecture="cpu", method="direct",
-            kernel="plummer",
             output_dir=str(out),
             save_snapshots=True, snapshots=2, verbose=False,
         )
@@ -585,7 +581,6 @@ class TestRunSimulationCPU:
             time_start=0.0, time_end=self.T_END, dt=self.DT,
             G=1.0,
             architecture="cpu", method="direct",
-            kernel="plummer",
             output_dir=str(out),
             save_snapshots=True, snapshots=2, verbose=False,
         )
@@ -603,7 +598,6 @@ class TestRunSimulationCPU:
             time_start=0.0, time_end=self.T_END, dt=self.DT,
             G=1.0,
             architecture="cpu", method="tree",
-            kernel=1,
             output_dir=str(tmp_path / "out_tree"),
             save_snapshots=False, verbose=False,
         )
@@ -611,7 +605,7 @@ class TestRunSimulationCPU:
 
 
 # ===========================================================================
-# 12. run_simulation — validation / error paths
+# 12. run_simulation  - validation / error paths
 # ===========================================================================
 
 class TestRunSimulationValidation:
@@ -629,13 +623,6 @@ class TestRunSimulationValidation:
             nb.run_simulation(xv, sp, 0.0, 0.01, 0.001,
                               method="fmm")
 
-    def test_gpu_tree_not_implemented(self):
-        xv = _random_xv(10)
-        sp = [Species.dark(10, 1.0)]
-        with pytest.raises(NotImplementedError):
-            nb.run_simulation(xv, sp, 0.0, 0.01, 0.001,
-                              architecture="gpu", method="tree")
-
     def test_species_n_mismatch_raises(self):
         xv = _random_xv(10)
         sp = [Species.dark(8, 1.0)]   # only 8 but xv has 10
@@ -644,7 +631,7 @@ class TestRunSimulationValidation:
                               architecture="cpu")
 
     def test_wrong_phase_space_shape_raises(self):
-        xv = _random_xv(10)[:, :5]   # (10, 5) — wrong
+        xv = _random_xv(10)[:, :5]   # (10, 5)  - wrong
         sp = [Species.dark(10, 1.0)]
         with pytest.raises(ValueError, match="shape"):
             nb.run_simulation(xv, sp, 0.0, 0.01, 0.001,
@@ -656,7 +643,7 @@ class TestRunSimulationValidation:
         xv = np.zeros((N, 6))
         sp = [Species.dark(N, 1.0, 0.1)]
         with pytest.warns(PerformanceWarning):
-            # Raises ImportError or actually runs — we only care about warning
+            # Raises ImportError or actually runs  - we only care about warning
             try:
                 nb.run_simulation(xv, sp, 0.0, 1e-10, 1e-10,
                                   architecture="cpu", method="direct",
@@ -666,7 +653,7 @@ class TestRunSimulationValidation:
 
 
 # ===========================================================================
-# 13. Backward compat — old run_nbody_cpu / run_nbody_gpu work unchanged
+# 13. Backward compat  - old run_nbody_cpu / run_nbody_gpu work unchanged
 # ===========================================================================
 
 class TestOldAPIBackwardCompat:
@@ -718,3 +705,95 @@ class TestOldAPIBackwardCompat:
             save_snapshots=False, verbose=False,
         )
         assert final.shape == (N, 6)
+
+
+# ===========================================================================
+# 14. debug_energy -- dispatcher coverage for all CPU paths
+# ===========================================================================
+
+class TestDebugEnergy:
+    """
+    Verify that debug_energy=True works without errors on all dispatcher paths
+    that are available without a GPU (CPU direct and CPU tree).
+    The test only checks that the run completes and returns correct shapes --
+    energy correctness is covered by test_physics.py.
+    """
+
+    N    = 20
+    DT   = 1e-3
+    T    = 2e-3   # 2 steps
+
+    def test_debug_energy_cpu_direct(self, tmp_path, capsys):
+        xv = _plummer_like(self.N)
+        dm = Species.dark(self.N, mass=1.0, softening=0.05)
+        result = nb.run_simulation(
+            xv, [dm],
+            time_start=0.0, time_end=self.T, dt=self.DT,
+            G=1.0, architecture="cpu", method="direct",
+            output_dir=str(tmp_path / "de_cpu_direct"),
+            save_snapshots=False, verbose=True,
+            debug_energy=True,
+        )
+        assert result["dark"].shape == (self.N, 6)
+        captured = capsys.readouterr()
+        assert "Energy" in captured.out or "dE" in captured.out, (
+            "debug_energy=True should print energy info"
+        )
+
+    @pytest.mark.skipif(not PYFALCON_AVAILABLE, reason="pyfalcon not installed")
+    def test_debug_energy_cpu_tree(self, tmp_path, capsys):
+        xv = _plummer_like(self.N)
+        dm = Species.dark(self.N, mass=1.0, softening=0.05)
+        result = nb.run_simulation(
+            xv, [dm],
+            time_start=0.0, time_end=self.T, dt=self.DT,
+            G=1.0, architecture="cpu", method="tree",
+            output_dir=str(tmp_path / "de_cpu_tree"),
+            save_snapshots=False, verbose=True,
+            debug_energy=True,
+        )
+        assert result["dark"].shape == (self.N, 6)
+        captured = capsys.readouterr()
+        assert "Energy" in captured.out or "dE" in captured.out
+
+    def test_debug_energy_false_no_output(self, tmp_path, capsys):
+        """debug_energy=False (default) must not print energy lines."""
+        xv = _plummer_like(self.N)
+        dm = Species.dark(self.N, mass=1.0, softening=0.05)
+        nb.run_simulation(
+            xv, [dm],
+            time_start=0.0, time_end=self.T, dt=self.DT,
+            G=1.0, architecture="cpu", method="direct",
+            output_dir=str(tmp_path / "de_off"),
+            save_snapshots=False, verbose=False,
+            debug_energy=False,
+        )
+        captured = capsys.readouterr()
+        assert "dE/E" not in captured.out
+
+    def test_unexpected_kwarg_cpu_raises(self):
+        """run_simulation must raise TypeError on unknown kwargs for CPU path."""
+        xv = _plummer_like(self.N)
+        dm = Species.dark(self.N, mass=1.0, softening=0.05)
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            nb.run_simulation(
+                xv, [dm],
+                time_start=0.0, time_end=self.T, dt=self.DT,
+                G=1.0, architecture="cpu", method="direct",
+                save_snapshots=False, verbose=False,
+                totally_unknown_kwarg=42,
+            )
+
+    @pytest.mark.skipif(not CUPY_AVAILABLE, reason="CuPy not installed")
+    def test_unexpected_kwarg_gpu_direct_raises(self):
+        """run_simulation must raise TypeError on unknown kwargs for GPU direct path."""
+        xv = _plummer_like(self.N)
+        dm = Species.dark(self.N, mass=1.0, softening=0.05)
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            nb.run_simulation(
+                xv, [dm],
+                time_start=0.0, time_end=self.T, dt=self.DT,
+                G=1.0, architecture="gpu", method="direct",
+                save_snapshots=False, verbose=False,
+                totally_unknown_kwarg=42,
+            )

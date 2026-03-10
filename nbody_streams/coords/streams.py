@@ -85,7 +85,7 @@ def generate_stream_coords(
             else:
                 import warnings
                 warnings.warn(
-                    f"Single progenitor provided for {S} streams — "
+                    f"Single progenitor provided for {S} streams - "
                     f"broadcasting to all streams.",
                     UserWarning, stacklevel=2,
                 )
@@ -149,7 +149,7 @@ def generate_stream_coords(
 
 
 # =====================================================================
-# Observed (sky) stream coordinates — requires Agama
+# Observed (sky) stream coordinates - requires Agama
 # =====================================================================
 def get_observed_stream_coords(
     xv: np.ndarray,
@@ -182,7 +182,7 @@ def get_observed_stream_coords(
     fit_kwargs : dict or None, optional
         Extra kwargs for the optimiser.
     galcen_distance : float, default 8.122
-        Sun–Galactic-centre distance in kpc.
+        Sun-Galactic-centre distance in kpc.
     galcen_v_sun : tuple, default (12.9, 245.6, 7.78)
         Solar motion (U, V, W) in km/s.
     z_sun : float, default 0.0208

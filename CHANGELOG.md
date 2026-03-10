@@ -7,6 +7,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-03-07
+
+### Added
+
+- **SPH surface-density renderer** -- new `nbody_streams/viz/sph_kernels.py` module.
+  - `render_surface_density(x, y, mass, ...)` -- unified entry point with automatic GPU
+    (Numba CUDA + CuPy KDTree) -> CPU (Numba `prange` + SciPy KDTree) fallback.
+    Exposed at `nbody_streams.viz.render_surface_density`.
+  - `get_smoothing_lengths(pos, k_neighbors, ...)` -- per-particle smoothing lengths
+    via k-NN; GPU-accelerated with CuPy KDTree and transparent CPU fallback.
+    Exposed at `nbody_streams.viz.get_smoothing_lengths`.
+  - `render_cpu` / `render_gpu` -- low-level Numba-parallel / CUDA splatting kernels
+    (direct use optional; `render_surface_density` is the recommended entry point).
+  - 2-D cubic-spline SPH kernel (40 / (7*pi*h^2) normalisation) on both CPU and GPU.
+  - `verbose=False` on all public SPH functions; GPU fallback events raise
+    `RuntimeWarning` regardless of verbosity.
+- **`examples/density_methods_comparison.ipynb`** -- notebook comparing `'histogram'`,
+  `'gauss_smooth'`, and `'sph'` rendering on the included example dark-matter stream
+  data (`nbody_streams/data/example_nbody_dm_stream.npz`).
+
+### Changed
+
+- **`plot_density` refactored** -- cosmological and Gizmo-style dependencies removed;
+  API is now purely nbody_streams-native.
+  - Removed parameters: `part`, `host_props`, `spec_ind`, `cosmo_box`.
+  - `pos=(N,3)` and `mass=(N,)` are now explicit keyword arguments.
+  - New `snap` parameter accepts a `ParticleReader` snapshot directly; positions and
+    masses are extracted from `snap[spec]`.
+  - `no_bins` renamed to `resolution` (pixels per axis).
+  - New `gridsize` parameter (total size in data coordinates; grid spans
+    `[-gridsize/2, gridsize/2]`) replaces the old `grid_len`.  Default ``200.0`` kpc.
+  - `gauss_convol: bool` replaced by `method: str` with three choices:
+    - `'sph'` *(new default)* -- physics-motivated SPH kernel splatting.
+    - `'gauss_smooth'` -- 2-D histogram + Gaussian filter (`smooth_sigma` pixels).
+    - `'histogram'` -- raw 2-D mass histogram divided by pixel area.
+  - `arch`, `k_neighbors`, `chunk_size` moved to `**kwargs` (advanced options, still
+    documented; `smooth_sigma` remains an explicit parameter).
+  - `return_dens=True` now returns the method-specific density before log10 is applied.
+  - Scale bar: `scale_size` is directly in kpc data units; cosmo correction removed.
+- **`sph_kernels.py` API aligned** with `plot_density`:
+  - `res` renamed to `resolution`; `grid_len` replaced by `gridsize` (total size in
+    data coordinates; grid spans `[-gridsize/2, gridsize/2]`).  Default ``200.0``.
+  - `k` (public) renamed to `k_neighbors` in `get_smoothing_lengths` and
+    `render_surface_density`.
+  - All public functions have `verbose: bool = False`.
+  - GPU fallback and OOM events now raise `RuntimeWarning` (were silent prints).
+  - All non-ASCII characters removed from source.
+- `nbody_streams.viz` now exports `render_surface_density` and `get_smoothing_lengths`
+  alongside the existing plot functions.
+- Version bumped to **2.1.0**.
+
+### Removed
+
+- `plot_density`: `part`, `host_props`, `spec_ind`, `cosmo_box`, `gauss_convol`,
+  `no_bins`, `grid_len` parameters (replaced by `gridsize`, `resolution`, `method`).
+
+## [2.0.0] - 2026-02-28
+
+### Added
+
+- **GPU Barnes-Hut tree-code** — new `nbody_streams.tree_gpu` subpackage.
+  - C++/CUDA shared library (`libtreeGPU.so`) implementing a GPU Barnes-Hut tree
+    with monopole + quadrupole moments, per-particle softening (max convention),
+    and auto-detected GPU architecture.  Build with `make -j$(nproc)` inside
+    `nbody_streams/tree_gpu/`.
+  - `tree_gravity_gpu(pos, mass, eps, G, theta, ...)` — one-shot force + potential
+    computation; accepts scalar or per-particle softening.
+  - `TreeGPU(N, eps, theta)` — pre-allocated tree handle for time-stepping loops
+    (saves ~27 ms of GPU malloc/free overhead per step).
+  - `cuda_alive()` — lightweight CUDA context health check via `cudaGetLastError()`;
+    zero GPU overhead, no synchronisation.
+  - `run_nbody_gpu_tree(phase_space, masses, ...)` — KDK leapfrog integrator using
+    the GPU tree code; same call signature as `run_nbody_gpu`.
+    - `_StepWatchdog` background thread: fires `KeyboardInterrupt` in the main
+      thread if any integration step exceeds `step_timeout_s` seconds, protecting
+      against deadlocked CUDA kernels.
+    - Restart/snapshot I/O is fully compatible with the existing nbody_streams
+      HDF5 format.
+    - Supports `external_potential` (Agama) and multi-species via `species=` kwarg.
+  - `nbody_streams/tree_gpu/tests/` — self-contained test suite (accuracy, API
+    timing, comprehensive validation, cross-comparison with direct-sum).
+- `run_simulation(..., architecture='gpu', method='tree')` now dispatches to
+  `run_nbody_gpu_tree` (previously raised `NotImplementedError`).
+- `examples/mw_stability.ipynb` — end-to-end Milky Way stability test (2M
+  particles, 5 Gyr, GPU tree, multi-species IC from Agama).
+- `examples/plummer_stability.ipynb` — Plummer sphere energy conservation test.
+- `setup.cfg`: added `gpu` extra (`cupy-cuda12x`); `tree_gpu` package data
+  (`*.cu`, `*.h`, `Makefile`, `libtreeGPU.so`).
+
+### Changed
+
+- `sim.py`: `architecture='gpu', method='tree'` route now works (dispatches to
+  `run_nbody_gpu_tree`).  `ImportError` is raised if `libtreeGPU.so` is not built
+  yet, with build instructions in the message.
+- `nbody_streams/__init__.py`: tree_gpu symbols exposed at top level when the
+  shared library is built (`tree_gravity_gpu`, `TreeGPU`, `cuda_alive`,
+  `run_nbody_gpu_tree`, `_TREE_GPU_AVAILABLE`).
+- README: GPU tree section (build, API, watchdog); updated package table and
+  "Under the hood" implementation table.
+
 ## [1.3.0] - 2026-02-24
 
 ### Added
@@ -137,6 +237,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History
 
+- **2.0.0** (2026-02-28): GPU Barnes-Hut tree-code (`nbody_streams.tree_gpu`), `run_nbody_gpu_tree`, watchdog, `run_simulation` gpu+tree path
 - **1.3.0** (2026-02-24): Multi-species simulation support, `run_simulation` API, ParticleReader rewrite, `make_plummer_sphere` overhaul
 - **1.2.0** (2026-02-14): Fast stream-generation methods (particle spray, restricted N-body)
 - **1.1.0** (2026-02-08): Float4 vectorization and major performance improvements
@@ -145,6 +246,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## Upgrade Notes
+
+### From 1.3.0 to 2.0.0
+
+**No breaking changes — fully backwards compatible!**
+
+**What you get:**
+- `architecture='gpu', method='tree'` in `run_simulation` now works (previously raised `NotImplementedError`).
+- Build `libtreeGPU.so` once to unlock the GPU tree backend:
+  `cd nbody_streams/tree_gpu && make -j$(nproc)`
+- `tree_gravity_gpu`, `TreeGPU`, `cuda_alive`, and `run_nbody_gpu_tree` available at the top level when the library is built.
+- `_TREE_GPU_AVAILABLE` flag in `nbody_streams` indicates whether the library is loaded.
+- Old `run_nbody_gpu` / `run_nbody_cpu` / `run_simulation` calls work unchanged.
 
 ### From 1.2.0 to 1.3.0
 

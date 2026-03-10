@@ -1,4 +1,4 @@
-"""nbody_streams.fast_sims — fast stream simulation methods.
+"""nbody_streams.fast_sims - fast stream simulation methods.
 
 Lightweight alternatives to full N-body integration for generating
 stellar streams: particle spray, restricted N-body, and related
