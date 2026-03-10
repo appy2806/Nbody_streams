@@ -131,6 +131,13 @@ def test_accuracy():
         error_report("acceleration |a|", acc_ref, acc_tree)
         error_report("potential phi",    phi_ref, phi_tree)
 
+    # Sanity: no NaN and forces point inward
+    assert not bool(cp.any(cp.isnan(acc_tree))), "NaN in tree acceleration"
+    assert not bool(cp.any(cp.isnan(phi_tree))), "NaN in tree potential"
+    r_hat = pos / cp.linalg.norm(pos, axis=1, keepdims=True).clip(1e-10)
+    frac_inward = float((cp.sum(acc_tree * r_hat, axis=1) < 0).sum()) / n
+    assert frac_inward > 0.90, f"Too few inward forces: {frac_inward:.4f}"
+
 
 # =========================================================================
 # 2.  Performance benchmark
@@ -162,6 +169,8 @@ def test_performance():
 
         avg = np.mean(times)
         print(f"  N={n:>10,d}   avg={avg:.4f} s   ({n/avg:.2e} ptcl/s)")
+        assert avg > 0 and avg < 3600, f"Implausible timing for N={n}: {avg:.3f} s"
+        assert not bool(cp.any(cp.isnan(acc))), f"NaN in acc at N={n}"
 
 
 # =========================================================================

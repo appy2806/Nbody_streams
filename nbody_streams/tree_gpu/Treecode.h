@@ -139,9 +139,16 @@ struct Treecode
     int get_nCrit() const { return nCrit; }
     int get_nLeaf() const { return nLeaf; }
 
-  host_mem<Particle> h_ptclPos, h_ptclVel;
+  host_mem<Particle> h_ptclPos, h_ptclAux;
   std::vector<Particle> ptcl0;
-  cuda_mem<Particle> d_ptclPos, d_ptclVel, d_ptclPos_tmp, d_ptclAcc;
+  /* d_ptclAux: auxiliary sort-scratch buffer.
+   *   .x = eps_i (per-particle softening)
+   *   .y = active_flag (1.0 = active, 0.0 = inactive; default 1.0)
+   *   .z = reserved
+   *   .w = mass  (required by buildOctant leaf finalisation)
+   * Sorted alongside d_ptclPos during tree construction; .x/.y extracted
+   * into dedicated flat arrays afterwards (see d_ptclEpsTree, d_ptclActiveTree). */
+  cuda_mem<Particle> d_ptclPos, d_ptclAux, d_ptclPos_tmp, d_ptclAcc;
   cuda_mem<Box<real_t> > d_domain;
   cuda_mem<Position<real_t> > d_minmax;
   cuda_mem<int2> d_level_begIdx;
@@ -164,8 +171,21 @@ struct Treecode
    *   d_ptclEpsGrp [i] = eps for group-sorted particle i (query particles)
    * Both are populated automatically by buildTree/makeGroups.
    * Set via treeGPU_interface tree_set_pos_mass_eps_device(); the .x field of
-   * d_ptclVel carries eps through the tree sort before being extracted here. */
+   * d_ptclAux carries eps through the tree sort before being extracted here. */
   cuda_mem<float> d_ptclEpsTree, d_ptclEpsGrp;
+
+  /* per-particle active flags in two orderings (mirrors eps pipeline):
+   *   d_ptclActiveTree[i] = active flag for tree-sorted particle i
+   *   d_ptclActiveGrp [i] = active flag for group-sorted particle i
+   * Extracted from d_ptclAux.y (default 1.0 = all active).
+   * After makeGroups, used to build d_activeGroupListData (compacted active groups).
+   * When use_active is false, all groups are processed (original behaviour). */
+  cuda_mem<float>     d_ptclActiveTree, d_ptclActiveGrp;
+  cuda_mem<int>       d_groupFlag;            /* per-group active flag (0/1) */
+  cuda_mem<GroupData> d_activeGroupListData;  /* compacted active GroupData entries */
+  cuda_mem<int>       d_nActiveGroups;        /* device-side count for atomic compaction */
+  int                 nActiveGroups;          /* host copy; -1 = not yet compacted */
+  bool                use_active;             /* false = all groups active (default) */
 
   /* per-cell max softening (max(eps) over all particles in the cell).
    * Populated by computeMultipoles() alongside monopole/quadrupole data.
@@ -193,10 +213,12 @@ struct Treecode
 
   Treecode(const real_t _eps = 0.01, const real_t _theta = 0.75, const int _ncrit = 2*WARP_SIZE)
   {
-    eps2  = _eps*_eps;
-    theta = _theta;
-    nCrit = _ncrit;
-    verbose = 1;
+    eps2         = _eps*_eps;
+    theta        = _theta;
+    nCrit        = _ncrit;
+    verbose      = 1;
+    nActiveGroups = -1;
+    use_active    = false;
     d_domain.alloc(1);
     d_minmax.alloc(2048);
     d_level_begIdx.alloc(32);  /* max 32 levels */
@@ -207,15 +229,22 @@ struct Treecode
   {
     this->nPtcl = nPtcl;
     h_ptclPos.alloc(nPtcl);
-    h_ptclVel.alloc(nPtcl);
+    h_ptclAux.alloc(nPtcl);
     d_ptclPos.alloc(nPtcl);
-    d_ptclVel.alloc(nPtcl);
+    d_ptclAux.alloc(nPtcl);
     d_ptclPos_tmp.alloc(nPtcl);
     d_ptclAcc.alloc(nPtcl);
 
     /* per-particle softening (float, 4N bytes each) */
     d_ptclEpsTree.alloc(nPtcl);
     d_ptclEpsGrp .alloc(nPtcl);
+
+    /* per-particle active flags (float, 4N bytes each) and compaction buffers */
+    d_ptclActiveTree    .alloc(nPtcl);
+    d_ptclActiveGrp     .alloc(nPtcl);
+    d_groupFlag         .alloc(nPtcl);   /* upper bound: at most nPtcl groups */
+    d_activeGroupListData.alloc(nPtcl);  /* upper bound: at most nPtcl groups */
+    d_nActiveGroups     .alloc(1);
 
     /* allocate stack memory */
     node_max = nPtcl/5;

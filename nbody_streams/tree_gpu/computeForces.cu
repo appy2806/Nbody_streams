@@ -643,6 +643,52 @@ namespace computeForces
     }
 }
 
+/* ---------- Active-group compaction (block-timestep support) ----------
+ * k_mark_group_active: writes a 0/1 flag per group based on whether the
+ *   first particle in that group is active (d_ptclActiveGrp).
+ * k_compact_groups: atomically gathers active GroupData entries into a
+ *   contiguous output array.  Order is not preserved (atomic), but the
+ *   treewalk uses its own atomicAdd counter so order doesn't matter.
+ * Both kernels are called inside computeForces when use_active is true.
+ * --------------------------------------------------------------------- */
+namespace activeCompact {
+  __device__ int g_nActive;   /* reset to 0 before compaction */
+
+  /* A group is active if ANY of its particles is active.
+   * Scans up to ncrit (≤64) particles per group — cheap and guarantees
+   * that all originally-active particles receive a force update,
+   * even when the active mask has no spatial coherence. */
+  static __global__ void k_mark_group_active(
+      const int nGroups,
+      const GroupData * __restrict__ groupList,
+      const float * __restrict__ d_activeGrp,
+      int * __restrict__ groupFlag)
+  {
+    int g = blockIdx.x * blockDim.x + threadIdx.x;
+    if (g >= nGroups) return;
+    const int pbeg = groupList[g].pbeg();
+    const int np   = groupList[g].np();
+    int any = 0;
+    for (int j = 0; j < np && !any; j++)
+      any = (d_activeGrp[pbeg + j] > 0.5f) ? 1 : 0;
+    groupFlag[g] = any;
+  }
+
+  static __global__ void k_compact_groups(
+      const int nGroups,
+      const GroupData * __restrict__ groupList,
+      const int * __restrict__ groupFlag,
+      GroupData * __restrict__ out)
+  {
+    int g = blockIdx.x * blockDim.x + threadIdx.x;
+    if (g >= nGroups) return;
+    if (groupFlag[g]) {
+      int idx = atomicAdd(&g_nActive, 1);
+      out[idx] = groupList[g];
+    }
+  }
+} /* namespace activeCompact */
+
   template<typename real_t>
 double4 Treecode<real_t>::computeForces(const bool INTCOUNT)
 {
@@ -670,13 +716,60 @@ double4 Treecode<real_t>::computeForces(const bool INTCOUNT)
     CUDA_SAFE_CALL(cudaMemcpyToSymbol(computeForces::grav_potential, &fzero, sizeof(double)));
   }
 
+  /* --- Active-group compaction (block-timestep path) ---
+   * When use_active is true, compact d_groupList into d_activeGroupListData
+   * (only groups whose first particle is active).  Pass the compacted list
+   * and its count to treewalk so inactive particles are skipped entirely.
+   * When use_active is false, pass the full list (original behaviour).
+   *
+   * d_ptclAcc zero-init: treewalk only writes slots belonging to active groups;
+   * inactive particle slots are never touched.  Zero-fill ensures callers get
+   * (0,0,0,0) for inactive particles rather than uninitialized GPU memory,
+   * which may contain NaN bit patterns from a previous allocation. */
+  const GroupData * active_list_ptr = d_groupList.ptr;
+  int               active_n        = nGroups;
+  if (use_active)
+  {
+    const int nb = (nGroups + 255) / 256;
+
+    /* Zero d_ptclAcc before the treewalk.  The treewalk only writes slots
+     * belonging to active groups; inactive particle slots are never touched.
+     * Without this, those slots contain uninitialized GPU memory (potentially
+     * NaN bit patterns), which k_extract_unsorted would scatter into the output.
+     * cudaMemset is on stream 0 and is serialized before the kernels below. */
+    CUDA_SAFE_CALL(cudaMemset(d_ptclAcc.ptr, 0, (size_t)nPtcl * sizeof(real4_t)));
+
+    /* Mark each group active/inactive by scanning all particles in the group.
+     * Stream-0 ordering: memset completes before this kernel launches. */
+    activeCompact::k_mark_group_active<<<nb, 256>>>(
+        nGroups, d_groupList.ptr, d_ptclActiveGrp.ptr, d_groupFlag.ptr);
+
+    /* Reset the atomic counter then compact.
+     * cudaMemcpyToSymbol (host→device, stream 0) is a synchronous host call:
+     * it blocks until k_mark_group_active completes (stream-0 serialization),
+     * guaranteeing d_groupFlag is fully written before k_compact_groups reads it. */
+    CUDA_SAFE_CALL(cudaMemcpyToSymbol(activeCompact::g_nActive, &value, sizeof(int)));
+    activeCompact::k_compact_groups<<<nb, 256>>>(
+        nGroups, d_groupList.ptr, d_groupFlag.ptr, d_activeGroupListData.ptr);
+
+    /* Drain the GPU so the host read of g_nActive sees the final value. */
+    cudaDeviceSynchronize();
+    CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&nActiveGroups, activeCompact::g_nActive, sizeof(int)));
+
+    active_list_ptr = d_activeGroupListData.ptr;
+    active_n        = nActiveGroups;
+    if (verbose)
+      fprintf(stderr, " active groups: %d / %d (%.1f%%)\n",
+              nActiveGroups, nGroups, 100.0*nActiveGroups/nGroups);
+  }
+
   if (INTCOUNT)
   {
     CUDA_SAFE_CALL(cudaFuncSetCacheConfig(&computeForces::treewalk<NTHREAD2,true,1>, cudaFuncCachePreferL1));
     CUDA_SAFE_CALL(cudaFuncSetCacheConfig(&computeForces::treewalk<NTHREAD2,true,2>, cudaFuncCachePreferL1));
     if (nCrit <= WARP_SIZE)
       computeForces::treewalk<NTHREAD2,true,1><<<nblock,NTHREAD>>>(
-          nGroups, d_groupList, starting_level, d_level_begIdx,
+          active_n, active_list_ptr, starting_level, d_level_begIdx,
           d_ptclPos_tmp, d_ptclAcc,
           d_gmem_pool,
           (const uint4*)d_cellDataList.ptr, d_cellSize.ptr, d_cellMonopole.ptr,
@@ -686,7 +779,7 @@ double4 Treecode<real_t>::computeForces(const bool INTCOUNT)
           d_ptclEpsTree.ptr, d_ptclEpsGrp.ptr);
     else if (nCrit <= 2*WARP_SIZE)
       computeForces::treewalk<NTHREAD2,true,2><<<nblock,NTHREAD>>>(
-          nGroups, d_groupList, starting_level, d_level_begIdx,
+          active_n, active_list_ptr, starting_level, d_level_begIdx,
           d_ptclPos_tmp, d_ptclAcc,
           d_gmem_pool,
           (const uint4*)d_cellDataList.ptr, d_cellSize.ptr, d_cellMonopole.ptr,
@@ -703,7 +796,7 @@ double4 Treecode<real_t>::computeForces(const bool INTCOUNT)
     CUDA_SAFE_CALL(cudaFuncSetCacheConfig(&computeForces::treewalk<NTHREAD2,false,2>, cudaFuncCachePreferL1));
     if (nCrit <= WARP_SIZE)
       computeForces::treewalk<NTHREAD2,false,1><<<nblock,NTHREAD>>>(
-          nGroups, d_groupList, starting_level, d_level_begIdx,
+          active_n, active_list_ptr, starting_level, d_level_begIdx,
           d_ptclPos_tmp, d_ptclAcc,
           d_gmem_pool,
           (const uint4*)d_cellDataList.ptr, d_cellSize.ptr, d_cellMonopole.ptr,
@@ -713,7 +806,7 @@ double4 Treecode<real_t>::computeForces(const bool INTCOUNT)
           d_ptclEpsTree.ptr, d_ptclEpsGrp.ptr);
     else if (nCrit <= 2*WARP_SIZE)
       computeForces::treewalk<NTHREAD2,false,2><<<nblock,NTHREAD>>>(
-          nGroups, d_groupList, starting_level, d_level_begIdx,
+          active_n, active_list_ptr, starting_level, d_level_begIdx,
           d_ptclPos_tmp, d_ptclAcc,
           d_gmem_pool,
           (const uint4*)d_cellDataList.ptr, d_cellSize.ptr, d_cellMonopole.ptr,
