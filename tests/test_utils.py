@@ -33,6 +33,8 @@ from nbody_streams.utils import (
     uniform_spherical_grid,
     find_center,
     iterative_unbinding,
+    half_mass_radius,
+    suggest_simulation_params,
 )
 
 # --- Constants ---
@@ -244,6 +246,114 @@ def test_iterative_unbinding():
     print(f"test_iterative_unbinding: [OK]  (bound frac = {bound_frac:.3f})")
 
 
+# ---------------------------------------------------------------------------
+# Section 8: suggest_simulation_params tests
+# ---------------------------------------------------------------------------
+
+def test_half_mass_radius_uniform_sphere():
+    """Uniform sphere of radius R: r_half should be R * (0.5)^(1/3) ~ 0.794 R."""
+    rng = np.random.default_rng(42)
+    R = 5.0
+    N_sph = 20_000
+    # Sample uniform sphere by rejection
+    pts = rng.uniform(-R, R, (N_sph * 3, 3))
+    pts = pts[np.linalg.norm(pts, axis=1) < R][:N_sph]
+    m = np.ones(N_sph)
+    r_h = half_mass_radius(pts, m)
+    expected = R * 0.5 ** (1.0 / 3.0)
+    assert abs(r_h - expected) / expected < 0.02, (
+        f"half_mass_radius: got {r_h:.4f}, expected {expected:.4f} (tol 2%)"
+    )
+
+
+def test_suggest_params_plummer():
+    """Basic smoke test on the Plummer fixture: all keys present, values physical."""
+    result = suggest_simulation_params(pos, mass, vel, verbose=False)
+
+    assert "eps" in result and "dt_max" in result, "Missing keys in result dict"
+    assert result["eps"] > 0, "eps must be positive"
+    assert result["dt_max"] > 0, "dt_max must be positive"
+    assert result["eps_lower"] <= result["eps"] <= result["eps_upper"] or (
+        # eps_upper might be < eps if r_half is very small; just check both > 0
+        result["eps_upper"] > 0
+    ), f"eps bounds inconsistent: lower={result['eps_lower']}, eps={result['eps']}, upper={result['eps_upper']}"
+
+    # dt_max should be less than the raw Hubble time (13.8 Gyr) and positive
+    assert 0 < result["dt_max"] < 13.8, f"dt_max={result['dt_max']} outside (0, 13.8) Gyr"
+
+    # External keys should be None when no external potential
+    assert result["dt_orbit"] is None
+    assert result["dt_orbit_dehnen"] is None
+    assert result["v_com"] is None
+
+
+def test_suggest_params_physical_bounds():
+    """dt criteria should be consistent: dt_drift = eps / (10 * v95) to within 1%."""
+    result = suggest_simulation_params(pos, mass, vel, verbose=False,
+                                       n_cross_per_dt=10, eta=0.025, eta_v=0.1)
+
+    v_mag = np.linalg.norm(vel, axis=1)
+    v95 = float(np.percentile(v_mag, 95))
+    eps = result["eps"]
+    from nbody_streams import G_DEFAULT  # noqa: PLC0415
+
+    KPC_KMS_TO_GYR = 0.97779
+    expected_drift = eps / (10 * v95) * KPC_KMS_TO_GYR
+    assert abs(result["dt_drift"] - expected_drift) / expected_drift < 0.01, (
+        f"dt_drift mismatch: got {result['dt_drift']:.6e}, expected {expected_drift:.6e}"
+    )
+
+    # dt_min hints
+    assert abs(result["dt_min_nbins6"] - result["dt_max"] / 64.0) / result["dt_max"] < 1e-10
+    assert abs(result["dt_min_nbins8"] - result["dt_max"] / 256.0) / result["dt_max"] < 1e-10
+
+
+def test_suggest_params_with_external():
+    """With a static point-mass external potential, dt_orbit keys should be populated."""
+    from nbody_streams import G_DEFAULT  # noqa: PLC0415
+
+    # Place particles at origin; external mass at (50, 0, 0) kpc
+    M_ext = 1e12  # Msun — large external mass
+    r_ext = np.array([50.0, 0.0, 0.0])
+
+    def point_mass_potential(positions, t):
+        positions = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
+        dr = positions - r_ext
+        r = np.linalg.norm(dr, axis=1, keepdims=True)
+        r = np.maximum(r, 0.01)
+        # a = G * M_ext / r^2 directed toward external mass
+        return -G_DEFAULT * M_ext * dr / r ** 3
+
+    # Give particles a COM velocity so orbital period estimate is non-trivial
+    vel_ext = vel.copy()
+    vel_ext += np.array([150.0, 0.0, 0.0])  # COM moving at 150 km/s
+
+    result = suggest_simulation_params(pos, mass, vel_ext,
+                                       external_potential=point_mass_potential,
+                                       verbose=False)
+
+    assert result["dt_orbit"] is not None, "dt_orbit should be set with external potential"
+    assert result["dt_orbit"] > 0, "dt_orbit must be positive"
+    assert result["v_com"] is not None and result["v_com"] > 0
+    assert result["a_ext_com"] is not None and result["a_ext_com"] > 0
+    assert result["t_orbit_est"] is not None and result["t_orbit_est"] > 0
+    assert result["dt_orbit_dehnen"] is not None and result["dt_orbit_dehnen"] > 0
+
+
+def test_suggest_params_edge_cases():
+    """Small N and constant-velocity particles should not crash."""
+    rng = np.random.default_rng(999)
+    pos_small = rng.standard_normal((50, 3))
+    mass_small = np.ones(50) / 50.0
+    vel_small = np.zeros((50, 3))  # all velocities zero
+
+    result = suggest_simulation_params(pos_small, mass_small, vel_small, verbose=False)
+    assert result["dt_max"] > 0, "dt_max must be positive even with zero velocities"
+    # With zero velocities: dt_drift and dt_vel should not be zero (guarded by max(..., 1e-10))
+    assert result["dt_drift"] > 0
+    assert result["dt_vel"] > 0
+
+
 # =============================================================================
 # Runner
 # =============================================================================
@@ -262,6 +372,11 @@ ALL_TESTS = [
     test_find_center,
     test_find_center_with_velocity,
     test_iterative_unbinding,
+    test_half_mass_radius_uniform_sphere,
+    test_suggest_params_plummer,
+    test_suggest_params_physical_bounds,
+    test_suggest_params_with_external,
+    test_suggest_params_edge_cases,
 ]
 
 

@@ -23,6 +23,9 @@ from .main import (
     # Boundness
     compute_iterative_boundness,
     iterative_unbinding,
+    # Simulation parameter suggestions
+    half_mass_radius,
+    suggest_simulation_params,
 )
 
 __all__ = [
@@ -42,4 +45,6 @@ __all__ = [
     "find_center_position",
     "compute_iterative_boundness",
     "iterative_unbinding",
+    "half_mass_radius",
+    "suggest_simulation_params",
 ]
