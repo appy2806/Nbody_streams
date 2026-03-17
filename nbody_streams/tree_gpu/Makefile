@@ -57,6 +57,35 @@ $(info ===========================)
 $(info )
 
 # ---------------------------------------------------------------------------
+# Host compiler selection
+# ---------------------------------------------------------------------------
+# NVCC + GCC 11 has a parser bug: GCC 11's stl_algo.h implements std::sample
+# with array-subscript statements of the form "[var++] = value;" at the start
+# of a statement.  NVCC's EDG frontend misparses these as lambda introducers,
+# producing "expected a ']'" errors in buildTree.cu / makeGroups.cu (which
+# pull in <algorithm> via Thrust).  GCC 12, 13, and 10 are NOT affected.
+# Workaround: when the default g++ is GCC 11, redirect nvcc's host compiler
+# (-ccbin) to the best available alternative.
+_GCC_MAJOR := $(shell $(CXX) -dumpversion | cut -d. -f1)
+ifeq ($(_GCC_MAJOR),11)
+  _CXX_ALT := $(shell \
+    command -v g++-13 2>/dev/null || \
+    command -v g++-12 2>/dev/null || \
+    command -v g++-10 2>/dev/null)
+  ifneq ($(_CXX_ALT),)
+    _CCBIN := -ccbin $(_CXX_ALT)
+    $(info Host compiler : $(_CXX_ALT) (GCC 11 workaround — see Makefile comment))
+  else
+    _CCBIN :=
+    $(warning *** GCC 11 detected and no compatible alternative found (tried g++-13/12/10).)
+    $(warning *** Build will likely fail with stl_algo.h parse errors.)
+    $(warning *** Install gcc-12 or gcc-13 (e.g. sudo apt install g++-13) to fix this.)
+  endif
+else
+  _CCBIN :=
+endif
+
+# ---------------------------------------------------------------------------
 # Compile flags
 # ---------------------------------------------------------------------------
 CPP_STD  ?= -std=c++17
@@ -65,8 +94,10 @@ CXXFLAGS ?= $(OFLAGS) $(CPP_STD) -fPIC -Wall -Wstrict-aliasing=2
 
 NVCCFLAGS ?= -Xptxas=-v \
              $(GENCODE_FLAGS) \
+             $(_CCBIN) \
              -Xcompiler -fPIC \
              --expt-relaxed-constexpr \
+             --expt-extended-lambda \
              $(CPP_STD) \
              -Wno-deprecated-declarations
 
