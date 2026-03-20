@@ -343,6 +343,7 @@ def _create_perturber_potential(
     pot_host,
     time_total: float,
     time_end: float,
+    trunc_nfw: bool = True,
     verbose: bool = False,
 ) -> Any:
     """Build a moving NFW perturber potential on a self-consistent orbit.
@@ -359,6 +360,8 @@ def _create_perturber_potential(
         Host potential for the perturber orbit.
     time_total, time_end : float
         Simulation time span and end epoch (Gyr).
+    trunc_nfw : bool
+        Whether to use Agama style truncated at 10 rs NFW profile.
     verbose : bool
         Print status messages.
 
@@ -408,9 +411,20 @@ def _create_perturber_potential(
         trajsize=0,
     ))
 
+    if trunc_nfw:
+        return agama.Potential(
+            type='spheroid', # double power law-like model.
+            mass=add_perturber['mass']/0.715, # NFW mass in Agama is mass within ~ 5.3 rs, while spheroid takes total mass. Rough conversion factor.
+            scaleRadius=add_perturber['scaleRadius'],
+            outerCutOffRadius=10*add_perturber['scaleRadius'], # cut off radius. 
+            gamma=1, beta=3, # NFW profile power values.
+            cutoffStrength= 4, # steeper cut off.
+            center=traj_perturber, # traj of the perturber. 
+        )
+
     return agama.Potential(
-        type='nfw',
-        mass=add_perturber['mass'],
+        type='nfw', # nfw model.
+        mass=add_perturber['mass'], # mass within ~ 5.3 rs
         scaleRadius=add_perturber['scaleRadius'],
-        center=traj_perturber,
+        center=traj_perturber, # traj of the perturber.
     )

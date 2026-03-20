@@ -508,7 +508,7 @@ def create_particle_spray_stream(
     # --- Perturber (optional) ---
     if add_perturber['mass'] > 0:
         pot_perturber_moving = _create_perturber_potential(
-            add_perturber, pot_host, time_total, time_end, verbose=verbose,
+            add_perturber, pot_host, time_total, time_end, trunc_nfw=True, verbose=verbose, # hard coded for trunc nfw. 
         )
         pot_total = agama.Potential(pot_host, pot_sat_moving, pot_perturber_moving)
     else:
