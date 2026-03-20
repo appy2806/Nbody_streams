@@ -101,11 +101,18 @@ KERNEL_MAP = {
 
  
 # Define this once at the top of your function or module
-_PRECISION_MAP = {
-    'float64': (cp.float64, np.float64),
-    'float32': (cp.float32, np.float32),
-    'float32_kahan': (cp.float32, np.float32)  # Same storage as float32!
-}
+if CUPY_AVAILABLE:
+    _PRECISION_MAP = {
+        'float64': (cp.float64, np.float64),
+        'float32': (cp.float32, np.float32),
+        'float32_kahan': (cp.float32, np.float32),  # Same storage as float32!
+    }
+else:
+    _PRECISION_MAP = {
+        'float64': (None, np.float64),
+        'float32': (None, np.float32),
+        'float32_kahan': (None, np.float32),
+    }
 
 # ============================================================================
 # NUMBA CPU VERSION (Parallelized fallback)

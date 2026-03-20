@@ -80,11 +80,18 @@ G_DEFAULT = 4.300917270069976e-06 # double precision value for accuracy, but we 
 KERNEL_TYPES = Literal['newtonian', 'plummer', 'dehnen_k1', 'dehnen_k2', 'spline']
  
 # Define this once at the top of your function or module
-_PRECISION_MAP = {
-    'float64': (cp.float64, np.float64),
-    'float32': (cp.float32, np.float32),
-    'float32_kahan': (cp.float32, np.float32)  # Same storage as float32!
-}
+if CUPY_AVAILABLE:
+    _PRECISION_MAP = {
+        'float64': (cp.float64, np.float64),
+        'float32': (cp.float32, np.float32),
+        'float32_kahan': (cp.float32, np.float32),  # Same storage as float32!
+    }
+else:
+    _PRECISION_MAP = {
+        'float64': (None, np.float64),
+        'float32': (None, np.float32),
+        'float32_kahan': (None, np.float32),
+    }
 NBODY_UNITS = {
     'kpc': 1.0, # length unit
     'Msun': 1.0, # mass unit
