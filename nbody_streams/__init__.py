@@ -36,6 +36,11 @@ from . import utils
 from . import coords
 from . import fast_sims
 from . import viz
+from ._chandrasekhar import (
+    compute_sigma_r,
+    chandrasekhar_friction,
+    make_df_force_extra,
+)
 
 # GPU tree-code (optional - requires libtreeGPU.so; built separately with make)
 try:
@@ -76,6 +81,10 @@ __all__ = [
     "compute_nbody_potential_gpu",
     "compute_nbody_potential_cpu",
     "get_gpu_info",
+    # Dynamical friction
+    "compute_sigma_r",
+    "chandrasekhar_friction",
+    "make_df_force_extra",
     # Subpackages
     "utils",
     "coords",

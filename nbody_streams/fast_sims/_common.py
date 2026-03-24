@@ -62,18 +62,12 @@ def _compute_vel_disp_from_Potential(
 
     except Exception:
         warnings.warn(
-            "Could not compute velocity dispersion from potential; "
-            "falling back to precomputed MW profile.",
+            "Could not compute velocity dispersion from quasispherical DF; "
+            "falling back to Jeans equation.",
             RuntimeWarning,
         )
-        grid_sig_init = np.array([
-            158.34386609, 200.12076947, 208.35638186, 207.53478107,
-            197.97276146, 195.18822847, 188.6893688,  183.74527079,
-            187.35960162, 193.26190609, 173.27866017, 143.68049751,
-            132.84412575, 121.76024275, 106.50314755, 104.28241804,
-        ])
-        logspl_init = agama.Spline(np.log(grid_r), np.log(grid_sig_init))
-        return lambda r: np.exp(logspl_init(np.log(r)))
+        from nbody_streams._chandrasekhar import _jeans_sigma_r
+        return _jeans_sigma_r(pot_for_dynFric_sigma, t_eval=0.0, grid_r=grid_r)
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ from .species import (
     _emit_performance_warnings,
 )
 from .run import run_nbody_gpu, run_nbody_cpu, G_DEFAULT
+from ._chandrasekhar import make_df_force_extra
 
 try:
     from .tree_gpu.run_gpu_tree import run_nbody_gpu_tree
@@ -244,11 +245,11 @@ def run_simulation(
 
     _validate_species(phase_space, species)
 
-    if dynamical_friction:
-        raise NotImplementedError(
-            "dynamical_friction=True is not yet implemented in run_simulation. "
-            "Use the low-level run_nbody_* functions with force_extra to apply "
-            "a Chandrasekhar friction closure manually in the meantime."
+    if dynamical_friction and external_potential is None:
+        raise ValueError(
+            "dynamical_friction=True requires external_potential to be set. "
+            "The Chandrasekhar DF formula needs host density and sigma(r) from "
+            "the external potential."
         )
 
     N_total = phase_space.shape[0]
@@ -273,6 +274,44 @@ def run_simulation(
     precision = kwargs.pop("precision", "float32_kahan")
 
     # ------------------------------------------------------------------
+    # Dynamical friction: build force_extra closure if requested.
+    # DF kwargs are consumed here so they don't reach the backends.
+    # ------------------------------------------------------------------
+    _force_extra = kwargs.pop("force_extra", None)
+    if dynamical_friction:
+        df_M_sat = kwargs.pop("df_M_sat", float(mass_arr.sum()))
+        df_coulomb_mode = kwargs.pop("df_coulomb_mode", "variable")
+        df_fixed_ln_lambda = kwargs.pop("df_fixed_ln_lambda", 3.0)
+        df_core_gamma = kwargs.pop("df_core_gamma", 0.0)
+        df_r_core = kwargs.pop("df_r_core", 1.0)
+        df_update_interval = kwargs.pop("df_update_interval", 10)
+        df_shrink_n_iter = kwargs.pop("df_shrink_n_iter", 5)
+        df_shrink_frac = kwargs.pop("df_shrink_frac", 0.5)
+        df_sigma_grid_r = kwargs.pop("df_sigma_grid_r", None)
+        _df_closure = make_df_force_extra(
+            pot=external_potential,
+            M_sat=df_M_sat,
+            t_start=time_start,
+            t_end=time_end,
+            coulomb_mode=df_coulomb_mode,
+            fixed_ln_lambda=df_fixed_ln_lambda,
+            core_gamma=df_core_gamma,
+            r_core=df_r_core,
+            update_interval=df_update_interval,
+            shrink_n_iter=df_shrink_n_iter,
+            shrink_frac=df_shrink_frac,
+            sigma_grid_r=df_sigma_grid_r,
+        )
+        if _force_extra is not None:
+            # Compose: existing force_extra + DF
+            _existing = _force_extra
+
+            def _force_extra(pos, vel, masses, t):
+                return _existing(pos, vel, masses, t) + _df_closure(pos, vel, masses, t)
+        else:
+            _force_extra = _df_closure
+
+    # ------------------------------------------------------------------
     # Dispatch
     # ------------------------------------------------------------------
     if architecture == "gpu" and method == "tree":
@@ -290,6 +329,7 @@ def run_simulation(
             theta=theta,
             external_potential=external_potential,
             external_update_interval=external_update_interval,
+            force_extra=_force_extra,
             output_dir=output_dir,
             save_snapshots=save_snapshots,
             snapshots=snapshots,
@@ -320,6 +360,7 @@ def run_simulation(
             kernel="spline",
             external_potential=external_potential,
             external_update_interval=external_update_interval,
+            force_extra=_force_extra,
             output_dir=output_dir,
             save_snapshots=save_snapshots,
             snapshots=snapshots,
@@ -352,6 +393,7 @@ def run_simulation(
             kernel=cpu_kernel,
             nthreads=nthreads,
             external_potential=external_potential,
+            force_extra=_force_extra,
             output_dir=output_dir,
             save_snapshots=save_snapshots,
             snapshots=snapshots,
