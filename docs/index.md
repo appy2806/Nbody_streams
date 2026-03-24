@@ -15,7 +15,7 @@ Source code: https://github.com/appy2806/Nbody_streams
 | `nbody_streams.fields` | [fields.md](fields.md) | Force/potential kernels: GPU and CPU backends |
 | `nbody_streams.run` | [run.md](run.md) | Low-level KDK leapfrog integrators |
 | `nbody_streams.tree_gpu` | [tree_gpu.md](tree_gpu.md) | GPU Barnes-Hut tree code |
-| `nbody_streams.io` | [io.md](io.md) | HDF5 snapshot I/O, `ParticleReader` |
+| `nbody_streams.nbody_io` | [io.md](io.md) | HDF5 snapshot I/O, `ParticleReader` |
 | `nbody_streams.fast_sims` | [fast_sims.md](fast_sims.md) | Particle spray and restricted N-body stream generation |
 | `nbody_streams.viz` | [viz.md](viz.md) | Density maps, SPH renderer, sky plots |
 | `nbody_streams.utils` | [utils.md](utils.md) | Profile fitting, shape, centre finding, unbinding |
