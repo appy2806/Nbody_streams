@@ -264,6 +264,21 @@ def run_simulation(
     # ------------------------------------------------------------------
     _emit_performance_warnings(N_total, architecture, method)
 
+    # Warn if satellite is massive enough that DF should be enabled
+    if external_potential is not None and not dynamical_friction:
+        M_total_sat = float(mass_arr.sum())
+        if M_total_sat > 1e10:
+            import warnings as _warnings
+            _warnings.warn(
+                f"Total satellite mass is {M_total_sat:.2e} M_sun and an external "
+                f"potential is set, but dynamical_friction=False.  At this mass "
+                f"scale the host-satellite dynamical friction timescale is short "
+                f"(<~1 Gyr).  Consider setting dynamical_friction=True — note this "
+                f"will add a small CPU-side overhead (~1%%) per step.",
+                PerformanceWarning,
+                stacklevel=2,
+            )
+
     # ------------------------------------------------------------------
     # Pull advanced options from kwargs with backend-appropriate defaults.
     # These span multiple backends so we handle them explicitly.
