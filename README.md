@@ -54,6 +54,7 @@ cd ../..
 | `nbody_streams.io` | `ParticleReader` for HDF5 snapshots, save/load helpers |
 | `nbody_streams.utils` | Profile fitting (Dehnen, Plummer, double-power-law), iterative shape measurement, energy-based unbinding |
 | `nbody_streams.fast_sims` | Fast stream generation: particle spray and restricted N-body (requires AGAMA) |
+| `nbody_streams.agama_helper` | Fit, store, modify, and load Agama Multipole/CylSpline BFE potentials; HDF5 coefficient archives; time-evolving potentials; FIRE helpers |
 | `nbody_streams.coords` | Coordinate transforms, vector field transforms, stream coordinate generation |
 | `nbody_streams.viz` | SPH/histogram surface density (`plot_density`), Mollweide projections, stream sky and evolution plots; `render_surface_density`, `get_smoothing_lengths` |
 
@@ -487,6 +488,56 @@ result = run_restricted_nbody(
     trajsize_each_step=5,
 )
 ```
+
+### AGAMA potential helper (`agama_helper`)
+
+> Requires [AGAMA](https://github.com/GalacticDynamics-Oxford/Agama).
+> See [`docs/agama_helper.md`](docs/agama_helper.md) for the full reference.
+
+```python
+from nbody_streams import agama_helper as ah
+
+# --- Read coefficient dataclasses (file, HDF5, or raw string — same call) ---
+mc = ah.read_coefs("potential/090.dark.none_8.coef_mult")    # Multipole
+cc = ah.read_coefs("MW_cylsp.h5", group_name="snap_090")     # CylSpline from HDF5
+
+# Inspect
+print(mc.lmax, mc.l_values)        # e.g.  8  [0, 2, 4, 6, 8]
+print(mc.total_power(2))           # quadrupole power
+
+# Filter harmonics (int = all m for that l; tuple = specific (l,m))
+mc_axi = mc.zeroed([0, 2, 4])             # keep l=0,2,4; all m
+mc_sel = mc.zeroed([(0,0), (2,0)])        # keep specific (l,m) pairs
+
+# --- Load Agama potential (from any source) ---
+pot = ah.load_agama_potential("potential/090.dark.none_8.coef_mult")
+pot = ah.load_agama_potential("MW_mult.h5", group_name="snap_090")
+pot = ah.load_agama_potential(mc_axi)                  # directly from dataclass
+pot = ah.load_agama_potential("MW_mult.h5",
+                               group_name="snap_090",
+                               keep_lm_mult=[0, 2])    # in-memory filtering
+
+# --- Time-evolving potential ---
+# From HDF5 (times embedded at write time)
+pot_ev = ah.load_agama_evolving_potential("MW_mult.h5")
+
+# From a native Agama .ini file
+pot_ev = ah.load_agama_evolving_potential("potential/MW_mult.ini")
+
+# With per-snapshot filtering
+pot_ev = ah.load_agama_evolving_potential("MW_mult.h5", keep_lm_mult=[0, 2])
+
+# --- Pack text coefficient files into HDF5 ---
+import numpy as np
+ah.write_snapshot_coefs_to_h5(
+    snapshot_ids=range(90, 101),
+    coef_file_patterns=["potential/{snap:03d}.dark.none_8.coef_mult"],
+    h5_output_paths=["MW_mult.h5"],
+    times=np.linspace(6.0, 14.0, 11),    # embed times for load_agama_evolving_potential
+)
+```
+
+---
 
 ### Analysis utilities (`utils`)
 

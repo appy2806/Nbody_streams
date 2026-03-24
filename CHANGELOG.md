@@ -7,6 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-03-24
+
+### Added
+
+- **`nbody_streams.agama_helper` submodule** — secondary utilities for fitting,
+  storing, modifying, and loading Agama expansion-based potentials (Multipole
+  and CylSpline BFEs).  Sets `agama.setUnits(mass=1, length=1, velocity=1)` at
+  import time (graceful no-op when agama is not installed).
+
+  **Coefficient dataclasses** (`MultipoleCoefs`, `CylSplineCoefs`):
+  - Structured in-memory representation of Agama coefficient tables.
+  - `MultipoleCoefs` — R-grid, (l,m) labels, Φ and ∂Φ/∂r tables.
+    Analysis: `radial_power(l)`, `total_power(l)`.
+    `zeroed(keep_lm)` accepts int l (keep all m for that l) or (l,m) tuples; mixed forms supported.
+  - `CylSplineCoefs` — per-m 2-D spline tables.
+    `zeroed(keep_m, include_negative=True)`.
+  - Both: `.to_coef_string()` for lossless round-trip back to Agama text format.
+  - `generate_lmax_pairs(lmax, mmax)` utility.
+
+  **Unified reading API** (`read_*` → coef data):
+  - `read_coefs(source, group_name="snap_000")` — single entry point; auto-detects
+    Multipole vs CylSpline; transparently accepts a plain-text `.coef_mult` /
+    `.coef_cylsp` file, an HDF5 archive, or a raw coefficient string.
+  - `read_coef_string(source, group_name)` — return the raw UTF-8 text only.
+
+  **HDF5 I/O** (`write_*`):
+  - `write_coef_to_h5(h5_path, coef_string, group_name, ...)` — store one snapshot
+    in an HDF5 group with optional metadata attributes.
+  - `write_snapshot_coefs_to_h5(snapshot_ids, patterns, h5_paths, times=None, ...)`
+    — batch-pack many snapshots; optionally embeds simulation times in the archive
+    (`"times"` dataset) so `load_agama_evolving_potential` can be called without
+    explicit times.
+
+  **Agama potential loading** (`load_*` → `agama.Potential`):
+  - `load_agama_potential(source, ...)` — single-snapshot loader; accepts a file,
+    HDF5 archive, raw string, or a `MultipoleCoefs` / `CylSplineCoefs` dataclass
+    directly.  `keep_lm_mult` / `keep_m_cylspl` for in-memory harmonic filtering;
+    raises `TypeError` with a clear message on type mismatch or if an Evolving config
+    is passed by mistake.
+  - `load_agama_evolving_potential(source, times=None, ...)` — time-varying potential
+    from an **HDF5 archive** or a native Agama **Evolving `.ini` file**; times may be
+    embedded in the archive or parsed from the `.ini`; `keep_lm_mult` / `keep_m_cylspl`
+    applied to every snapshot in memory.
+  - `create_evolving_ini(times, coef_paths, output_path)` — write an Agama Evolving
+    `.ini` config from explicit file paths.
+
+  **`center` parameter** (all load functions) now handles:
+  - Length-3 sequence `[x, y, z]` — static centre passed directly.
+  - (N, 4) array `[time, x, y, z]` — time-varying; materialised to a temp file.
+  - (N, 7) array `[time, x, y, z, vx, vy, vz]` — time-varying with velocities.
+  - File path (str or Path) — passed through to Agama as-is.
+  All temporary files are cleaned up in `finally` blocks even on failure.
+
+  **FIRE-simulation helpers** (isolated in `_fire.py`):
+  - `read_snapshot_times(sim_dir)` — reads `snapshot_times.txt` with robust
+    header-driven + statistical column detection; pandas is a lazy optional
+    dependency (raises `ImportError` with install hint if absent).
+  - `create_fire_evolving_ini(sim_dir, model_pattern, output_filename, snap_range)`.
+  - `load_fire_pot(sim_dir, nsnap, lmax=4, keep_lm_mult=None, keep_m_cylspl=None,
+    include_negative_m=True, ...)` — renamed params from previous internal versions.
+
+  **Potential fitting** (`_fit.py`):
+  - `create_snapshot_dict(pos_dark, mass_dark, pos_star, mass_star, ...)`.
+  - `fit_potential(snap, nsnap, sym, lmax, rmax_sel, save_dir, ...)`.
+
+- **`docs/agama_helper.md`** — detailed reference documentation for the
+  `agama_helper` submodule (Sphinx/MyST-compatible structure for future
+  readthedocs integration).
+- **`docs/index.md`** — top-level docs index.
+
+### Changed
+
+- `setup.cfg` and `nbody_streams/__version__.py` bumped from **2.1.0** → **2.2.0**.
+  (`__version__.py` was also corrected from the stale `2.0.0` value.)
+
+### Upgrade Notes
+
+No breaking changes.  The `agama_helper` submodule is independent of all existing
+simulation machinery.  Required dependencies (`numpy`, `h5py`) are already in the
+package; `agama` is an optional extra; `pandas` is only needed for
+`read_snapshot_times`.
+
 ## [2.1.0] - 2026-03-07
 
 ### Added
@@ -237,6 +319,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History
 
+- **2.2.0** (2026-03-24): agama_helper submodule (Multipole/CylSpline BFE fitting, HDF5 I/O, in-memory filtering, evolving potentials)
 - **2.0.0** (2026-02-28): GPU Barnes-Hut tree-code (`nbody_streams.tree_gpu`), `run_nbody_gpu_tree`, watchdog, `run_simulation` gpu+tree path
 - **1.3.0** (2026-02-24): Multi-species simulation support, `run_simulation` API, ParticleReader rewrite, `make_plummer_sphere` overhaul
 - **1.2.0** (2026-02-14): Fast stream-generation methods (particle spray, restricted N-body)
@@ -304,8 +387,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Future Roadmap
 
-### Planned for 1.4.0
-- [ ] GPU+Tree solver (`feat-cuda_kernel` + GPU tree code)
+### Planned
+
+- [ ] `feat-cuda_kernel`: RawKernel → RawModule, `kernels.cu`, CUDA 13 double4 workaround
 - [ ] Adaptive time-stepping
 - [ ] Additional integrators (RK4, Hermite)
-- [ ] GPU-accelerated analysis tools
+- [ ] `agama_helper`: CylSpline analysis methods (power spectra analogous to `radial_power`)
+- [ ] `agama_helper`: `_xmc.py` for XMC simulation potential conventions
+- [ ] Full Sphinx / readthedocs documentation
