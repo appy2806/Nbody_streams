@@ -40,6 +40,7 @@ def run_simulation(
     architecture: Literal["cpu", "gpu"] = "gpu",
     method: Literal["direct", "tree"] = "direct",
     external_potential=None,
+    dynamical_friction: bool = False,
     output_dir: str = "./output",
     save_snapshots: bool = True,
     snapshots: int = 100,
@@ -87,6 +88,14 @@ def run_simulation(
         Default: ``'direct'``.
     external_potential : agama.Potential or None, optional
         Time-varying external potential (requires Agama).  Default: ``None``.
+    dynamical_friction : bool, optional
+        Apply Chandrasekhar dynamical friction to the satellite CoM motion.
+        Requires ``external_potential`` to be set (density and σ(r) are read
+        from the host potential via Agama).  Default: ``False``.
+
+        .. note:: Not yet implemented.  Will raise ``NotImplementedError``
+            if set to ``True``.  Tracked for a future release.
+
     output_dir : str, optional
         Directory for snapshot and restart files.  Default: ``'./output'``.
     save_snapshots : bool, optional
@@ -234,6 +243,13 @@ def run_simulation(
         )
 
     _validate_species(phase_space, species)
+
+    if dynamical_friction:
+        raise NotImplementedError(
+            "dynamical_friction=True is not yet implemented in run_simulation. "
+            "Use the low-level run_nbody_* functions with force_extra to apply "
+            "a Chandrasekhar friction closure manually in the meantime."
+        )
 
     N_total = phase_space.shape[0]
 
