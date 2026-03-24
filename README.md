@@ -677,6 +677,40 @@ plot_stream_evolution(result['prog_xv'], times=result['times'], part_xv=result['
 
 ---
 
+## Caveats and known limitations
+
+### Dynamical friction with external potentials
+
+When `external_potential` is supplied to any `run_*` function or
+`run_simulation`, the host is modelled as a **smooth, fixed background field**.
+There is no back-reaction on the host and no granularity-driven scattering, so
+**host-satellite dynamical friction (DF) is implicitly zero**.
+
+**When this is safe to ignore:**
+
+The Chandrasekhar inspiral timescale at orbital radius r scales as
+
+```
+t_df  ~  1.17 × (M_host / M_sat) × (r / V_c) / ln(Λ)
+```
+
+| M_sat (Msun) | Example | t_df at 50 kpc in MW halo | Safe to ignore? |
+|---|---|---|---|
+| < 1e8 | Globular cluster | > 2000 Gyr | Yes, always |
+| 1e8 – 1e9 | Ultra-faint dwarf | 200 – 2000 Gyr | Yes |
+| 1e9 – 1e10 | SMC-class | 20 – 200 Gyr | Marginal over few-Gyr runs |
+| > 1e10 | LMC-class | < 20 Gyr | No — DF is important |
+
+For stream progenitors with M_tot < ~1e9 Msun, or for simulations shorter
+than a few Gyr, neglecting DF introduces negligible orbit evolution error.
+
+**For LMC-class satellites** DF should be included explicitly.  A
+Chandrasekhar + BFE-density prescription (computing local ρ from ∇²Φ of the
+Agama potential) is planned via a `force_extra` hook in the `run_*` API — see
+the roadmap in `docs/roadmap.md` (forthcoming).
+
+---
+
 ## Performance
 
 GPU benchmarks (N = 10,240 particles, RTX 3080, `--use_fast_math` + arch-tuned):

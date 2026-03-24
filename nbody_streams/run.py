@@ -388,6 +388,17 @@ def run_nbody_gpu(
         'dehnen_k2', 'spline'. Default: 'spline'.
     external_potential : agama.Potential | None, optional
         External time-dependent potential. Default: None.
+
+        .. note:: **Dynamical friction is not included.**
+            The external potential is treated as a smooth, fixed background
+            field evaluated at each particle position.  There is no back-reaction
+            on the host and no granularity-driven scattering, so host-satellite
+            dynamical friction is implicitly zero.  This is a safe approximation
+            for satellite total masses M_sat < ~1e9 Msun at galactocentric
+            distances > 10 kpc (t_df >> t_Hubble).  For M_sat ~ 1e10 Msun
+            (LMC-class), consider adding a Chandrasekhar friction term via
+            ``force_extra`` (not yet implemented; tracked in the roadmap).
+
     external_update_interval : int, optional
         Update external forces every N steps (reduces Agama overhead).
         Default: 1 (update every step). Try 5-10 for slowly-varying potentials.
@@ -811,6 +822,14 @@ def run_nbody_cpu(
         Number of threads for parallelization (only for method='direct', default: None = auto).
     external_potential : agama.Potential | None, optional
         External time-dependent potential (default: None).
+
+        .. note:: **Dynamical friction is not included.**
+            The host is modelled as a smooth background field; there is no
+            back-reaction or granularity-driven scattering.  Host-satellite
+            dynamical friction is therefore implicitly zero.  Safe for
+            M_sat < ~1e9 Msun at r > 10 kpc.  For LMC-class objects
+            (M_sat > 1e10 Msun), friction should be added explicitly.
+
     output_dir : str, optional
         Directory for output files (default: "./").
     save_snapshots : bool, optional

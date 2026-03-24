@@ -203,6 +203,13 @@ def run_nbody_gpu_tree(
     external_potential : agama.Potential, optional
         External time-varying potential (Agama).  Evaluated once per timestep
         (or every ``external_update_interval`` steps) and added to tree forces.
+
+        .. note:: **Dynamical friction is not included.**
+            The host is treated as a smooth field with no back-reaction.
+            Safe for M_sat < ~1e9 Msun at r > 10 kpc (t_df >> t_Hubble).
+            For LMC-class objects (M_sat > 1e10 Msun), friction is important
+            and should be added explicitly.
+
     external_update_interval : int, optional
         Evaluate external potential every N steps.  Default 1.
     output_dir : str, optional
