@@ -54,6 +54,8 @@ except ImportError:
 try:
     import agama
     AGAMA_AVAILABLE = True
+    # Default units set to Msol, kpc, km/s. Time is in kpc/(kms/s)
+    agama.setUnits(mass=1, length=1, velocity=1) 
 except ImportError:
     AGAMA_AVAILABLE = False
 

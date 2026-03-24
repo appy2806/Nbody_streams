@@ -40,6 +40,10 @@ __pycache__/
 # Claude plans
 .claude/
 
+# AGAMA helpers – local test data only, never commit
+nbody_streams/AGAMA_helpers/example_potentials/
+nbody_streams/agama_helper/example_potentials/
+
 # Compiled C/CUDA build artifacts
 *.o
 *.so
