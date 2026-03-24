@@ -299,3 +299,252 @@ in float64.
 ```python
 from nbody_streams.tree_gpu import G_DEFAULT  # 4.300917e-6 kpc (km/s)^2 / Msun
 ```
+
+---
+
+## Implementation internals
+
+This section documents the CUDA C++ internals for contributors and users who
+want to understand the accuracy/performance trade-offs or port the code.
+
+### Data structures
+
+**`Particle4<float>`** (`Particle4.h`)
+
+The fundamental particle type is an AoS (Array-of-Structures) `float4`:
+
+```
+packed_data = { x, y, z, mass/idx }
+```
+
+The `.w` field is dual-purpose: during the tree walk it holds the particle
+mass.  During tree construction the lower 28 bits encode the sorted particle
+index and the lowest 4 bits encode the octant, using `__float_as_int` /
+`__int_as_float` bit-casting.  This limits particle count to 2^28 ≈ 268M.
+
+**`CellData`** (`Treecode.h`)
+
+Each tree cell is packed into a `uint4` (128 bits):
+
+```
+packed_data.x  bits[31:27] = tree level (5 bits)
+               bits[26:0]  = parent cell index
+packed_data.y  bits[31:29] = n_children - 1 (3 bits, 0=leaf)
+               bits[28:0]  = first child index (or 0xFFFFFFFF for leaf)
+packed_data.z  = particle begin index (pbeg)
+packed_data.w  = particle end index (pend)
+```
+
+`isLeaf()` returns true when `.y == 0xFFFFFFFF`.
+
+**`Quadrupole<T>`** (`Treecode.h`)
+
+The traceless quadrupole tensor is stored in 6 independent components packed
+as `float4 + float2`:
+
+```
+q0 = { Qxx, Qyy, Qzz, Qxy }
+q1 = { Qxz, Qyz }
+```
+
+`Qzz` is stored explicitly (the tensor is not assumed traceless in storage,
+but the physics kernel enforces trace-free accumulation in `computeMultipoles`).
+
+**`GroupData`**
+
+Groups are `int2{pbeg, np}` — a contiguous block of particles sorted for
+coalesced global-memory access during the tree walk.
+
+---
+
+### The four-phase pipeline
+
+Each call to `tree_gravity_gpu` (or each step of `run_nbody_gpu_tree`)
+executes four CUDA kernels in sequence:
+
+#### Phase 1 — `buildTree`
+
+1. Bounding-box reduction over all particle positions (warp-level `fminf`/`fmaxf`, then inter-warp shared-memory reduction).
+2. Morton key assignment — each particle's (x,y,z) is mapped to a 30-bit Morton Z-order key relative to the bounding box.
+3. Radix sort of particles by Morton key (Thrust `device_sort`).
+4. Octree construction: **host-driven iterative build** (replaced CDP1 recursive kernel launches for CUDA 12 compatibility).  A `PendingWork` queue on the host drives per-level CUDA kernel launches; each kernel processes one octant level in parallel.  The work queue has a compile-time depth of `BUILD_MAX_WORK = 262144` (safe for N ≤ 4M balanced trees; increase and recompile for highly clustered configurations).
+5. A permutation array `d_origIdx[tree_idx] = original_user_idx` is built so output forces can be returned in user order.
+
+#### Phase 2 — `computeMultipoles`
+
+Bottom-up cell moment accumulation using warp-level shuffle reductions
+(`shfl_xor`):
+
+- **Monopole**: total mass and centre-of-mass position accumulated in
+  double precision per warp, then reduced to float and stored as `(cx, cy, cz, mass)` in `d_cellMonopole`.
+- **Quadrupole**: 6 independent components of `Q_ij = Σ_k m_k (r_ki r_kj - δ_ij r_k²/3)` accumulated in double per warp, stored as `float4 + float2` in `d_cellQuad0/1`.
+- **Per-cell max softening**: `d_cellEpsMax[cell] = max(eps_k)` over all particles in the cell, propagated bottom-up alongside the moments.  Used in the force kernel for the cell-approximation softening.
+
+#### Phase 3 — `makeGroups`
+
+Particles are re-sorted into *interaction groups* by splitting the tree at
+`level_split` (default 5).  Each group is a contiguous block of ≤ `ncrit`
+particles from the same sub-tree, which gives coalesced global-memory reads
+in the force kernel.  The sorted-group index array `d_ptclEpsGrp` is
+populated here from `d_ptclEpsTree` via the group permutation.
+
+#### Phase 4 — `computeForces`
+
+Each interaction group walks the tree in parallel.  The walk uses a
+per-warp ring-buffer (size `CELL_LIST_MEM_PER_WARP = 4096 × 32`) to hold
+the pending cell list, avoiding global atomics.
+
+**Opening criterion** — improved Barnes-Hut (`split_node_grav_impbh`):
+
+```
+dr = max(0, |r_group_center - r_cell_center| - r_group_half_size)
+split if  |dr|² < |cellSize.w|
+```
+
+This is the *min-distance* criterion: a cell is only approximated if the
+closest point of the interaction group's bounding box is far enough from the
+cell centre.  It is more conservative (and more accurate) than the
+classic single-particle criterion `d < θ × l`.
+
+**Interaction types** (once a cell passes the opening criterion):
+
+| Condition | Kernel | Cost |
+|-----------|--------|------|
+| Leaf cell (`isLeaf`) | Direct pair-wise with Plummer softening | O(nleaf) FMAs per group particle |
+| Internal cell, `#QUADRUPOLE` defined | Monopole + quadrupole approximation | 1 interaction per cell |
+| Internal cell, monopole only | Monopole approximation | 1 interaction per cell |
+
+`#QUADRUPOLE` is enabled by default (see `Treecode.h` line 15).
+
+**Flush-to-zero**: `computeForces.o` is compiled with `-ftz=true` to flush
+denormal floats to zero in force accumulation.  This improves throughput on
+subnormals at the cost of ~1 ULP accuracy for very small separations (covered
+by softening in practice).
+
+---
+
+### Softening convention
+
+Both direct pair-particle and cell-approximation interactions use the same
+**max convention**:
+
+```
+eps²_ij = max(eps²_i,  eps²_j)          # direct
+eps²_ij = max(eps²_i,  eps²_cell_max)   # cell approx
+```
+
+where `eps_cell_max` is the maximum softening of any particle in the cell
+(stored in `d_cellEpsMax`).  This matches the convention used by the
+nbody_streams direct-sum kernels (`fields.py`) and is standard practice for
+multi-species N-body (prevents over-softening of heavy dark-matter particles
+onto light stellar particles).
+
+---
+
+### Per-particle softening pipeline
+
+Per-particle softening is threaded through the entire tree sort without extra
+arrays:
+
+```
+user eps[i]
+  → k_load_pos_mass_eps: ptclVel[i].x = eps[i]
+  → buildTree (Morton sort): d_ptclEpsTree[tree_order_i] extracted
+  → makeGroups (group sort): d_ptclEpsGrp[group_order_i] extracted
+  → computeForces: reads d_ptclEpsGrp (query eps_i), d_ptclEpsTree (source eps_j)
+```
+
+The uniform-softening path (`tree_gravity_gpu(eps=scalar)`) uses the same
+pipeline; `k_load_pos_mass` broadcasts the scalar into every `ptclVel.x`.
+
+---
+
+### GPU memory layout (per-step allocations)
+
+`TreeGPU.alloc(N)` makes a single bulk allocation; there are no per-step
+`cudaMalloc` / `cudaFree` calls.  The main allocations:
+
+| Buffer | Size | Purpose |
+|--------|------|---------|
+| `d_ptclPos`, `d_ptclAcc` | N × 16 bytes (float4) | Particle positions, accelerations |
+| `d_ptclEpsTree`, `d_ptclEpsGrp` | N × 4 bytes each | Softening in two sort orders |
+| `d_stack_memory_pool` | `max(N/5, 65536) × 96 × 4` bytes | Build-tree stack (≈ 24 MB for N=1M) |
+| `d_cellDataList` | N × 16 bytes | Cell metadata |
+| `d_cellMonopole`, `d_cellQuad0/1` | N × 16 + 8 bytes | Monopole + quadrupole moments |
+| `d_cellEpsMax` | N × 4 bytes | Per-cell max softening |
+| Build scratch (`d_build_workQueue`) | `262144 × 64` bytes ≈ 16 MB | Host-driven build queue |
+
+Total VRAM for N = 1M particles: approximately **700 MB** before quadrupole
+storage.  `TreeGPU` checks that 80% of free VRAM is available before allocating.
+
+---
+
+### Build system details
+
+The Makefile (`nbody_streams/tree_gpu/Makefile`) handles three non-trivial
+concerns:
+
+**GPU architecture detection** — in priority order:
+1. `nvidia-smi --query-gpu=compute_cap` (bare-metal, clusters)
+2. `python3 -c "import cupy; ..."` (WSL2, no `nvidia-smi` in PATH)
+3. Hard-coded `sm_80` (Ampere) as last resort
+
+All detected architectures get individual `-gencode=arch=compute_XX,code=sm_XX`
+flags plus a PTX blob for forward compatibility with future hardware.
+
+**GCC 11 workaround** — NVCC's EDG frontend misparses a `std::sample`
+pattern in GCC 11's `stl_algo.h` as a lambda introducer, producing
+`"expected a ']'"` errors in `buildTree.cu` and `makeGroups.cu`.  The
+Makefile detects GCC 11 as the system `g++` and automatically redirects
+`-ccbin` to `g++-12` or `g++-13` if available:
+
+```
+Host compiler : g++-13 (GCC 11 workaround — see Makefile comment)
+```
+
+If no alternative is found, a warning is printed and the build proceeds
+(and will fail).  Fix: `sudo apt install g++-13`.
+
+**Optional flags**:
+
+```bash
+make FAST_MATH=1      # adds -use_fast_math (rsqrtf, etc.)
+make VERBOSE=1        # echo full compile commands
+make clean            # remove .o files
+make clean_all        # remove .o files + libtreeGPU.so
+```
+
+`FAST_MATH` is **on by default** (see Makefile line 10).  Disable for
+higher floating-point accuracy at ~5-10% throughput cost.
+
+---
+
+### ctypes interface (`_force.py`)
+
+The Python layer calls `libtreeGPU.so` via `ctypes`.  Exported C symbols:
+
+| Symbol | Signature | Notes |
+|--------|-----------|-------|
+| `tree_new` | `(eps, theta) → Tree*` | Allocate Treecode struct |
+| `tree_delete` | `(Tree*)` | Free struct + GPU buffers |
+| `tree_alloc` | `(Tree*, n)` | `cudaMalloc` all buffers |
+| `tree_set_pos_mass_eps_device` | `(Tree*, n, x, y, z, mass, eps)` | Load per-particle eps |
+| `tree_set_pos_mass_device` | `(Tree*, n, x, y, z, mass)` | Uniform-eps path |
+| `tree_build` | `(Tree*, nleaf)` | Run buildTree |
+| `tree_multipoles` | `(Tree*)` | Run computeMultipoles |
+| `tree_groups` | `(Tree*, level_split, ncrit)` | Run makeGroups |
+| `tree_forces` | `(Tree*)` | Run computeForces |
+| `tree_get_acc_pot_device` | `(Tree*, ax, ay, az, pot)` | Copy results to output arrays |
+
+All pointer arguments are raw CUDA device pointers obtained from CuPy
+via `arr.data.ptr`.  The Python wrapper (`tree_gravity_gpu`) handles
+argument marshalling and the two-sort permutation to restore user order.
+
+---
+
+### Known limitations
+
+- **Single GPU only** — the ctypes interface always operates on device 0.  Multi-GPU support would require per-device `Tree*` instances and explicit `cudaSetDevice` calls in the C interface.
+- **float32 positions** — precision loss accumulates for simulations spanning dynamic ranges > ~10^6 (e.g. a cluster embedded in a cosmological box).  Consider recentring particles at each snapshot output for long-duration runs.
+- **Fixed timestep only** — `run_nbody_gpu_tree` uses a global fixed dt (KDK leapfrog).  Individual/block timesteps are not implemented.
+- **No periodic boundary conditions** — the bounding box is recomputed from actual particle positions each step.
