@@ -346,6 +346,7 @@ def run_nbody_gpu(
     kernel: Literal['newtonian', 'plummer', 'dehnen_k1', 'dehnen_k2', 'spline'] = 'spline',
     external_potential: 'agama.Potential | None' = None,
     external_update_interval: int = 1,
+    force_extra: 'Callable | None' = None,
     output_dir: str = "./output",
     save_snapshots: bool = True,
     snapshots: int = 10,
@@ -402,6 +403,18 @@ def run_nbody_gpu(
     external_update_interval : int, optional
         Update external forces every N steps (reduces Agama overhead).
         Default: 1 (update every step). Try 5-10 for slowly-varying potentials.
+    force_extra : callable or None, optional
+        Extra acceleration term added after gravity + external_potential at
+        every step.  Signature::
+
+            force_extra(pos, vel, masses, time) -> array_like, shape (N, 3)
+
+        On the GPU path ``pos`` and ``vel`` are **CuPy** arrays (float64,
+        device memory); the return value is converted to CuPy via
+        ``cp.asarray``, so returning a NumPy array is also accepted (triggers
+        a host→device copy).  The user is responsible for choosing the right
+        compute path; no automatic CPU/GPU transfer is performed.  Default:
+        None.
     output_dir : str, optional
         Output directory. Default: './output'.
     save_snapshots : bool, optional
@@ -681,6 +694,13 @@ def run_nbody_gpu(
             current_step, cached_external_acc
         )
 
+        # Extra non-conservative forces (e.g. dynamical friction).
+        # pos_gpu and vel_gpu are CuPy arrays; return may be CuPy or NumPy.
+        if force_extra is not None:
+            acc_gpu = acc_gpu + cp.asarray(
+                force_extra(pos_gpu, vel_gpu, masses, time)
+            )
+
         # Kick (half-step)
         vel_gpu += acc_gpu * (dt_gpu / 2)
 
@@ -777,6 +797,7 @@ def run_nbody_cpu(
     kernel: int | str = 1,
     nthreads: int | None = None,
     external_potential: agama.Potential | None = None,
+    force_extra: 'Callable | None' = None,
     output_dir: str = "./",
     save_snapshots: bool = True,
     snapshots: int = 1,
@@ -830,6 +851,13 @@ def run_nbody_cpu(
             M_sat < ~1e9 Msun at r > 10 kpc.  For LMC-class objects
             (M_sat > 1e10 Msun), friction should be added explicitly.
 
+    force_extra : callable or None, optional
+        Extra acceleration term added after gravity + external_potential at
+        every step.  Signature::
+
+            force_extra(pos, vel, masses, time) -> array_like, shape (N, 3)
+
+        On the CPU path ``pos`` and ``vel`` are NumPy arrays.  Default: None.
     output_dir : str, optional
         Directory for output files (default: "./").
     save_snapshots : bool, optional
@@ -1116,6 +1144,13 @@ def run_nbody_cpu(
                 phi_cpu = compute_nbody_potential_cpu(
                     xv[:, :3], masses, softening, G, kernel, nthreads
                 )
+
+        # Extra non-conservative forces (e.g. dynamical friction).
+        # pos and vel are NumPy arrays on the CPU path.
+        if force_extra is not None:
+            acc_cpu = acc_cpu + np.asarray(
+                force_extra(xv[:, :3], xv[:, 3:6], masses, time)
+            )
 
         # Kick (half-step)
         xv[:, 3:6] += acc_cpu * (dt / 2)

@@ -156,6 +156,7 @@ def run_nbody_gpu_tree(
     # External potential
     external_potential=None,
     external_update_interval: int = 1,
+    force_extra=None,
     # I/O
     output_dir: str = "./output",
     save_snapshots: bool = True,
@@ -411,6 +412,8 @@ def run_nbody_gpu_tree(
     _acc_ext = _ext_acc(pos, t_now)
     if _acc_ext is not None:
         acc = acc + _acc_ext
+    if force_extra is not None:
+        acc = acc + cp.asarray(force_extra(pos, vel, masses, t_now), dtype=cp.float32)
 
     # Energy reference (only computed if debug_energy, but always store E_ref)
     E_ref = 0.0
@@ -462,6 +465,13 @@ def run_nbody_gpu_tree(
                 _acc_ext = _ext_acc(pos, t_now)
             if _acc_ext is not None:
                 acc = acc + _acc_ext
+
+            # Extra non-conservative forces (e.g. dynamical friction).
+            # pos and vel are CuPy float32 arrays on the tree-GPU path.
+            if force_extra is not None:
+                acc = acc + cp.asarray(
+                    force_extra(pos, vel, masses, t_now), dtype=cp.float32
+                )
 
             with watchdog:
                 vel = vel + (0.5 * dt) * acc
