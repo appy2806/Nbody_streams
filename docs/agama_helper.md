@@ -527,7 +527,7 @@ print("l=2 power:", mc.total_power(2))
 
 # 3. Load static potential (axisymmetric approximation)
 pot_axi = ah.load_agama_potential("MW_dark.h5", group_name="snap_595",
-                                   keep_lm_mult=[0, 2, 4])
+                                   keep_lm_mult=[(0,0), (2,0), (4,0)])
 
 # 4. Load full time-evolving potential
 pot_ev = ah.load_agama_evolving_potential("MW_dark.h5")
