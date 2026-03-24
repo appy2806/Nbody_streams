@@ -685,15 +685,53 @@ plot_stream_evolution(result['prog_xv'], times=result['times'], part_xv=result['
 
 When `external_potential` is supplied to any `run_*` function or
 `run_simulation`, the host is modelled as a **smooth, fixed background field**.
-There is no back-reaction on the host and no granularity-driven scattering, so
-**host-satellite dynamical friction (DF) is implicitly zero**.
+There is no back-reaction on the host and no granularity-driven scattering.
+For low-mass satellites this is an excellent approximation; for LMC-class
+objects it is not.
 
-**When this is safe to ignore:**
+**Chandrasekhar DF is now implemented** via the `dynamical_friction=True` flag
+in `run_simulation`.
+
+```python
+import agama
+agama.setUnits(mass=1, length=1, velocity=1)
+pot = agama.Potential(type='NFW', mass=1e12, scaleRadius=15.0,
+                      outerCutoffRadius=300.0)
+
+result = run_simulation(
+    xv, [dm],
+    time_start=0.0, time_end=5.0, dt=1e-3,
+    architecture='gpu', method='direct',
+    external_potential=pot,
+    dynamical_friction=True,
+    df_M_sat=5e9,
+    df_coulomb_mode='variable',
+)
+```
+
+See [`docs/dynamical_friction.md`](docs/dynamical_friction.md) for the full
+reference including all `df_*` kwargs, the Coulomb logarithm modes, and
+core-stalling suppression.
+
+**For advanced users** the internal closure is available directly:
+
+```python
+from nbody_streams._chandrasekhar import make_df_force_extra
+
+df_fn = make_df_force_extra(pot, M_sat=5e9, t_start=0.0, t_end=5.0)
+final = run_nbody_gpu(xv, masses, ..., force_extra=df_fn)
+```
+
+**The `agama_helper` subpackage** is accessible as `nb.agama_helper` (or
+`from nbody_streams import agama_helper`).  See
+[`docs/agama_helper.md`](docs/agama_helper.md) for the full reference.
+
+**When DF is safe to ignore:**
 
 The Chandrasekhar inspiral timescale at orbital radius r scales as
 
 ```
-t_df  ~  1.17 × (M_host / M_sat) × (r / V_c) / ln(Λ)
+t_df  ~  1.17 * (M_host / M_sat) * (r / V_c) / ln(Lambda)
 ```
 
 | M_sat (Msun) | Example | t_df at 50 kpc in MW halo | Safe to ignore? |
@@ -705,12 +743,9 @@ t_df  ~  1.17 × (M_host / M_sat) × (r / V_c) / ln(Λ)
 
 For stream progenitors with M_tot < ~1e9 Msun, or for simulations shorter
 than a few Gyr, neglecting DF introduces negligible orbit evolution error.
-
-**For LMC-class satellites** DF should be included explicitly.  All `run_*`
-integrators now accept a `force_extra=callable` hook (added in v2.2.0) that
-can supply any non-conservative force, including a Chandrasekhar closure.  A
-built-in `dynamical_friction=True` flag in `run_simulation` is planned for a
-future release (`feat-dynamicFric`).
+`run_simulation` emits a `PerformanceWarning` when the total satellite mass
+exceeds `1e10 M_sun` and `external_potential` is set but `dynamical_friction`
+is `False`.
 
 ---
 

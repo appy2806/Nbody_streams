@@ -5,7 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] — feat-dynamicFric
+
+### Added
+
+- **Chandrasekhar dynamical friction** — `dynamical_friction=True` in
+  `run_simulation` applies BT2008 eq. 8.13 DF to the satellite CoM.
+  Requires `external_potential`; raises `ValueError` otherwise.
+- **`nbody_streams/_chandrasekhar.py`** — internal module (not part of the
+  public API):
+  - `compute_sigma_r(pot, t_eval, grid_r)` — quasispherical DF → Jeans
+    fallback velocity-dispersion profile.
+  - `_jeans_sigma_r()` — Jeans-equation sigma(r) numerical integration
+    (private helper).
+  - `_shrinking_sphere_com()` — iterative shrinking-sphere CoM estimator
+    (private).
+  - `chandrasekhar_friction()` — BT2008 eq. 8.13 core formula.
+  - `make_df_force_extra(pot, M_sat, ...)` — factory returning a
+    `force_extra` closure with predictor-corrector CoM tracking.
+    Advanced users: `from nbody_streams._chandrasekhar import make_df_force_extra`.
+- **`force_extra` hook** in `run_nbody_gpu`, `run_nbody_cpu`, and
+  `run_nbody_gpu_tree` — `callable(pos, vel, masses, t) -> (N, 3)`;
+  on GPU paths `pos`/`vel` are CuPy arrays.
+- **PerformanceWarning** emitted when total satellite mass exceeds
+  `1e10 M_sun` and `external_potential` is set but `dynamical_friction=False`.
+- **`nbody_streams.agama_helper`** properly exported as a subpackage in
+  `nbody_streams/__init__.py`; accessible as `nb.agama_helper`.
+- **`docs/dynamical_friction.md`** — new reference page covering the
+  Chandrasekhar formula, Coulomb logarithm modes, core-stalling suppression,
+  sigma(r) computation, CoM detection, all `df_*` kwargs, timescale table,
+  and caveats.
+
+### Changed
+
+- `fast_sims/_common.py`: replaced hardcoded MW sigma fallback with the
+  Jeans-equation integrator from `_chandrasekhar`.
+- `docs/main.md`: `dynamical_friction` parameter row updated (removed
+  "Not yet implemented"); new "Dynamical friction kwargs" subsection added;
+  `PerformanceWarning` table updated with the mass-threshold row.
+- `README.md`: "Caveats and known limitations" section updated with working
+  `dynamical_friction=True` example, `agama_helper` note, and
+  `make_df_force_extra` advanced-user note.
+
+### Fixed
+
+- `dynamical_friction=True` in `run_simulation` no longer raises
+  `NotImplementedError`.
 
 ## [2.2.0] - 2026-03-24
 

@@ -21,6 +21,7 @@ Source code: https://github.com/appy2806/Nbody_streams
 | `nbody_streams.utils` | [utils.md](utils.md) | Profile fitting, shape, centre finding, unbinding |
 | `nbody_streams.coords` | [coords.md](coords.md) | Coordinate and vector field transforms |
 | `nbody_streams.agama_helper` | [agama_helper.md](agama_helper.md) | Fit, store, modify, and load Agama BFE potentials |
+| Dynamical friction | [dynamical_friction.md](dynamical_friction.md) | Chandrasekhar DF: theory, usage, df_* kwargs, caveats |
 
 ## Building docs (future)
 
