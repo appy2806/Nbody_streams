@@ -63,8 +63,9 @@ GPU-accelerated N-body simulation using KDK (kick-drift-kick) leapfrog integrati
 | `G` | `float` | `4.300917e-6` | Gravitational constant |
 | `precision` | `str` | `'float32_kahan'` | Force computation precision (`'float32'`, `'float64'`, `'float32_kahan'`) |
 | `kernel` | `str` | `'spline'` | Softening kernel: `'newtonian'`, `'plummer'`, `'dehnen_k1'`, `'dehnen_k2'`, `'spline'` |
-| `external_potential` | `agama.Potential` or `None` | `None` | Time-varying external potential |
+| `external_potential` | `agama.Potential` or `None` | `None` | Time-varying external potential. **Note:** host-satellite dynamical friction is not included — see `force_extra` |
 | `external_update_interval` | `int` | `1` | Recompute external forces every N steps. Use `5–10` for slowly-varying potentials |
+| `force_extra` | `callable` or `None` | `None` | Extra acceleration added after gravity + external at every step. Signature: `force_extra(pos, vel, masses, t) -> (N,3)`. On GPU paths `pos`/`vel` are **CuPy** arrays; user is responsible for hardware path |
 | `output_dir` | `str` | `'./output'` | Output directory for snapshots and restart files |
 | `save_snapshots` | `bool` | `True` | Write HDF5 snapshots to disk |
 | `snapshots` | `int` | `10` | Number of evenly-spaced output snapshots |
@@ -205,7 +206,8 @@ CPU-based N-body simulation using KDK leapfrog.  Gravity solver is either Numba 
 | `theta` | `float` | `0.6` | Opening angle for tree method |
 | `kernel` | `int` or `str` | `1` | Softening kernel. For `method='tree'`: integer (`0`=Plummer, `1`=dehnen_k1, `2`=dehnen_k2). For `method='direct'`: string (`'newtonian'`, `'plummer'`, `'spline'`, `'dehnen_k1'`, `'dehnen_k2'`) |
 | `nthreads` | `int` or `None` | `None` | Numba thread count for direct method. `None` = auto |
-| `external_potential` | `agama.Potential` or `None` | `None` | Optional external time-varying potential |
+| `external_potential` | `agama.Potential` or `None` | `None` | Optional external time-varying potential. Dynamical friction is not included |
+| `force_extra` | `callable` or `None` | `None` | Extra acceleration after gravity + external. Signature: `force_extra(pos, vel, masses, t) -> (N,3)`. `pos`/`vel` are NumPy arrays on CPU path |
 | `output_dir` | `str` | `'./'` | Output directory |
 | `save_snapshots` | `bool` | `True` | Write HDF5 snapshots |
 | `snapshots` | `int` | `1` | Number of evenly-spaced output snapshots |

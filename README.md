@@ -350,6 +350,8 @@ run_nbody_gpu(
     kernel='dehnen_k2',      # 'newtonian' | 'plummer' | 'dehnen_k1' | 'dehnen_k2' | 'spline'
     external_potential=pot,
     external_update_interval=5,  # cache ext. forces for 5 steps
+    force_extra=None,            # optional: callable(pos, vel, masses, t) -> (N,3)
+                                 # e.g. a Chandrasekhar DF closure — user handles GPU/CPU
     debug_energy=True,       # print Q and dE/E at each output interval
     snapshots=10,
     output_dir='./output',
@@ -704,10 +706,11 @@ t_df  ~  1.17 × (M_host / M_sat) × (r / V_c) / ln(Λ)
 For stream progenitors with M_tot < ~1e9 Msun, or for simulations shorter
 than a few Gyr, neglecting DF introduces negligible orbit evolution error.
 
-**For LMC-class satellites** DF should be included explicitly.  A
-Chandrasekhar + BFE-density prescription (computing local ρ from ∇²Φ of the
-Agama potential) is planned via a `force_extra` hook in the `run_*` API — see
-the roadmap in `docs/roadmap.md` (forthcoming).
+**For LMC-class satellites** DF should be included explicitly.  All `run_*`
+integrators now accept a `force_extra=callable` hook (added in v2.2.0) that
+can supply any non-conservative force, including a Chandrasekhar closure.  A
+built-in `dynamical_friction=True` flag in `run_simulation` is planned for a
+future release (`feat-dynamicFric`).
 
 ---
 

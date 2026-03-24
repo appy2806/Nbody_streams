@@ -115,7 +115,8 @@ result = run_simulation(
 | `G` | `float` | `4.300917e-6` | Gravitational constant |
 | `architecture` | `'cpu'` or `'gpu'` | `'gpu'` | Compute backend |
 | `method` | `'direct'` or `'tree'` | `'direct'` | Gravity solver |
-| `external_potential` | `agama.Potential` or `None` | `None` | Optional external time-varying potential (Agama) |
+| `external_potential` | `agama.Potential` or `None` | `None` | Optional external time-varying potential (Agama). Host-satellite dynamical friction is not included — the host is treated as a smooth field |
+| `dynamical_friction` | `bool` | `False` | Apply Chandrasekhar DF to satellite CoM. Requires `external_potential`. **Not yet implemented** — raises `NotImplementedError`. Planned for `feat-dynamicFric` |
 | `output_dir` | `str` | `'./output'` | Directory for snapshot and restart files |
 | `save_snapshots` | `bool` | `True` | Write HDF5 snapshots to disk |
 | `snapshots` | `int` | `100` | Number of evenly-spaced output snapshots |
