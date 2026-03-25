@@ -13,6 +13,7 @@ every timestep via the `force_extra` hook in the low-level integrators.
 
 - [When to use DF](#when-to-use-df)
 - [Physics and formulae](#physics-and-formulae)
+- [Two code paths](#two-code-paths)
 - [sigma(r) computation](#sigmar-computation)
 - [Centre-of-mass detection](#centre-of-mass-detection)
 - [Usage via run_simulation](#usage-via-run_simulation)
@@ -95,27 +96,93 @@ radius in kpc; estimated from the potential if `None`).  Set
 
 ---
 
+## Two code paths
+
+`make_df_force_extra` produces a closure with two distinct code paths
+depending on whether the integrator can supply gravitational potentials per
+particle (`phi`).
+
+### Phi path — tree integrators (GPU tree / CPU tree)
+
+When `run_nbody_gpu_tree` or the CPU tree path (`run_nbody_cpu` with
+`method='tree'`) calls `force_extra`, they automatically pass the per-particle
+gravitational potential as `phi=phi`.  The closure detects this keyword and
+activates the phi path:
+
+- **Bound-centre detection**: `_bound_center_phi()` — an iterative
+  energy-based estimator.  A particle is considered bound if
+  `phi_self + 0.5 * |v - v_com|^2 < 0`.  Only bound particles are used to
+  compute the satellite CoM.
+
+- **Dynamic satellite mass**: `M_bound = sum(masses[bound_mask])`.  As the
+  satellite loses particles through tidal stripping the DF force automatically
+  weakens — no manual update required.
+
+- **DF applied only to bound particles**: the acceleration correction is
+  deposited only on particles inside the bound core.  Stripped tidal-tail
+  debris is unaffected.
+
+> **When is the phi path used automatically?**  Any call to
+> `run_simulation(..., method='tree')` (both `architecture='cpu'` and
+> `architecture='gpu'`) will use this path without any extra configuration.
+
+### Fallback path — direct integrators (no phi)
+
+When `phi` is not supplied (GPU direct / CPU direct integrators), the closure
+falls back to:
+
+- **Shrinking-sphere CoM**: `_shrinking_sphere_com()` — iterative radius
+  shrinkage around the density peak.
+
+- **Fixed satellite mass**: `M_sat` set at factory time via `df_M_sat`.  Mass
+  loss due to tidal stripping is **not** automatically tracked.  For runs with
+  significant stripping, pass a time-varying `force_extra` wrapper or reduce
+  `df_M_sat` manually.
+
+- **Radial cutoff**: DF is applied only to particles within
+  `apply_radius_factor * a_sat` of the CoM (where `a_sat` is the Plummer
+  scale radius).  This prevents stripped debris from receiving spurious DF
+  deceleration.
+
+---
+
 ## sigma(r) computation
 
 The velocity dispersion profile `sigma(r)` is needed to evaluate `X` at each
-step.  `_chandrasekhar.compute_sigma_r` builds it in two stages:
+step.  The method used is controlled by the `sigma_method` parameter
+(passed as `df_sigma_method` through `run_simulation`):
 
-1. **Quasispherical DF**: if the potential supports it, the isotropic
-   distribution function `f(E)` is computed and integrated to give `sigma^2(r)`
-   via the standard Jeans integral.
+### `'jeans'` (default)
 
-2. **Jeans-equation fallback**: if the DF route fails (non-spherical potential,
-   numerical issues), `_jeans_sigma_r` integrates the spherically-averaged
-   Jeans equation outward from a boundary condition at large r:
+Integrates the spherically-averaged isotropic Jeans equation evaluated once at
+the midpoint of the integration interval:
 
-   ```
-   d(rho * sigma^2) / dr + rho * d Phi / dr = 0
-   ```
+```
+d(rho * sigma^2) / dr + rho * d Phi / dr = 0
+```
 
-   where `rho(r)` is estimated from the potential via Poisson's equation.
+where `rho(r)` is estimated from the potential via Poisson's equation.  Works
+for any Agama potential, including non-spherical ones.  The profile is computed
+once and cached for the entire run.
 
-The result is cached for the entire run.  A custom grid can be supplied via
-`df_sigma_grid_r`.
+### `'local_circular'`
+
+Estimates the local 1D velocity dispersion from the circular-velocity relation:
+
+```
+sigma(r, t) = sqrt(r * |g_r(r, t)| / 2)
+```
+
+Re-evaluated per step, so it captures time evolution of the potential.  Most
+accurate for quasi-circular orbits in time-varying potentials.
+
+### `'quasispherical'`
+
+Uses Agama DF moments to compute `sigma^2(r)` directly for spherical,
+time-independent potentials.  Automatically falls back to `'jeans'` if the
+potential is non-spherical or if the computation fails.
+
+A custom radial grid can be supplied via `df_sigma_grid_r`.
 
 ---
 
@@ -125,8 +192,19 @@ The DF force depends on the instantaneous satellite CoM position and velocity.
 For a live N-body satellite the CoM drifts as particles are stripped, so a
 naive mean is biased by unbound tidal tails.
 
-`_chandrasekhar._shrinking_sphere_com` implements an iterative shrinking-sphere
-estimator:
+Two estimators are used depending on the [code path](#two-code-paths):
+
+### Phi path: `_bound_center_phi` (tree integrators)
+
+Uses the per-particle gravitational potential `phi` supplied by the integrator.
+Particles with `phi_self + 0.5 * |v - v_com|^2 < 0` are considered bound.
+The CoM is computed from bound particles only, and the satellite mass used in
+the Chandrasekhar formula is updated dynamically as `M_bound = sum(masses[bound_mask])`.
+This naturally accounts for tidal stripping without any manual intervention.
+
+### Fallback path: `_shrinking_sphere_com` (direct integrators)
+
+Implements an iterative shrinking-sphere estimator:
 
 1. Start with all particles within a sphere of radius `r_0` (set to the
    half-mass radius).
@@ -135,8 +213,11 @@ estimator:
    new centre.
 4. Repeat for `df_shrink_n_iter` (default `10`) iterations.
 
-`make_df_force_extra` wraps this in a predictor-corrector scheme: the CoM
-velocity used in the Chandrasekhar formula is the half-step (drift-midpoint)
+The satellite mass is fixed at the factory-time value (`df_M_sat`); tidal
+stripping is not automatically tracked.
+
+In both cases, `make_df_force_extra` uses a predictor-corrector scheme: the
+CoM velocity used in the Chandrasekhar formula is the half-step (drift-midpoint)
 estimate, which reduces the phase error from O(dt) to O(dt^2).
 
 ---
@@ -222,14 +303,16 @@ array is a NumPy array transferred back to GPU by the integrator.
 
 | kwarg | Type | Default | Description |
 |---|---|---|---|
-| `df_M_sat` | `float` | `None` | Total satellite mass [M_sun]. If `None`, summed from `species` masses |
+| `df_M_sat` | `float` | `None` | Total satellite mass [M_sun]. If `None`, summed from `species` masses. Only used on the fallback (direct) path; on tree paths `M_bound` is computed dynamically |
 | `df_coulomb_mode` | `str` | `'variable'` | `'variable'` — ln(Λ) from enclosed mass; `'fixed'` — use `df_fixed_ln_lambda` |
 | `df_fixed_ln_lambda` | `float` | `3.0` | Fixed Coulomb logarithm (only when `df_coulomb_mode='fixed'`) |
 | `df_core_gamma` | `float` | `1.0` | Core-stalling suppression exponent γ. Set to `0.0` to disable |
 | `df_r_core` | `float` | `None` | Core radius [kpc] for stalling suppression. If `None`, estimated from the potential |
 | `df_update_interval` | `int` | `1` | Recompute DF force every N steps |
-| `df_shrink_n_iter` | `int` | `10` | Number of shrinking-sphere iterations for CoM estimator |
-| `df_shrink_frac` | `float` | `0.7` | Sphere-radius shrink factor per iteration |
+| `df_shrink_n_iter` | `int` | `10` | Number of shrinking-sphere iterations for CoM estimator (fallback path only) |
+| `df_shrink_frac` | `float` | `0.7` | Sphere-radius shrink factor per iteration (fallback path only) |
+| `df_apply_radius_factor` | `float` | `2.0` | Radial cutoff for DF application: only particles within `factor * a_sat` of the CoM receive DF. Prevents stripped debris from being decelerated. Fallback path only |
+| `df_sigma_method` | `str` | `'jeans'` | Velocity dispersion method: `'jeans'` (isotropic Jeans equation, any potential), `'local_circular'` (σ from g_r, time-varying), `'quasispherical'` (Agama DF moments, spherical potentials only; falls back to Jeans) |
 | `df_sigma_grid_r` | `ndarray` or `None` | `None` | Custom radial grid [kpc] for sigma(r) evaluation. `None` = default log-spaced grid |
 
 ---
@@ -256,10 +339,11 @@ Reference timescales for a circular orbit at 50 kpc in a Milky-Way-like halo
   homogeneous background.  Granularity effects (resonant heating, stochastic
   scattering) are not modelled.
 
-- **No tidal stripping feedback**: `df_M_sat` is a fixed input.  As the
-  satellite loses mass through tidal stripping, the true DF force weakens; this
-  is not automatically accounted for.  For runs where mass loss is significant,
-  update `df_M_sat` manually or use a time-varying wrapper around `force_extra`.
+- **Tidal stripping feedback (path-dependent)**: on tree paths (`method='tree'`)
+  the satellite mass is updated dynamically each step as `M_bound = sum(masses[bound_mask])`,
+  so tidal stripping is naturally accounted for.  On direct paths the mass is
+  fixed at `df_M_sat`; for runs where mass loss is significant, supply a
+  time-varying wrapper around `force_extra` or use a tree integrator.
 
 - **sigma evaluated at midpoint**: the dispersion `sigma(r)` is sampled at the
   CoM radius at the half-step (predictor CoM).  This is second-order accurate in

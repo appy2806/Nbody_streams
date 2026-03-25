@@ -24,7 +24,9 @@ agama.setUnits(mass=1, length=1, velocity=1)
 from scipy import special
 
 from nbody_streams._chandrasekhar import (
+    _bound_center_phi,
     _jeans_sigma_r,
+    _sigma_local_circular,
     _shrinking_sphere_com,
     _to_numpy,
     chandrasekhar_friction,
@@ -141,7 +143,7 @@ class TestComputeSigmaR:
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            sigma_func = compute_sigma_r(pot, t_eval=0.0)
+            sigma_func = compute_sigma_r(pot, t_eval=0.0, method="quasispherical")
 
         assert any("Jeans" in str(w.message) for w in caught), \
             "Expected Jeans fallback warning"
@@ -604,3 +606,178 @@ class TestCommonJeansFallback:
         sig_plummer = sigma_f(2.0)
         # Jeans sigma for 1e10 Msun Plummer at 2 kpc ~ 50-150 km/s
         assert 10.0 < float(sig_plummer) < 400.0
+
+
+# ---------------------------------------------------------------------------
+# 8. _sigma_local_circular
+# ---------------------------------------------------------------------------
+
+class TestSigmaLocalCircular:
+
+    def test_positive_and_finite(self):
+        """sigma_local_circular should return positive finite values."""
+        pot = _nfw_potential()
+        for r in [1.0, 5.0, 20.0, 50.0]:
+            sig = _sigma_local_circular(pot, r, t=0.0)
+            assert sig > 0, f"sigma <= 0 at r={r}"
+            assert np.isfinite(sig), f"sigma not finite at r={r}"
+
+    def test_sis_circular_approx(self):
+        """For SIS with v_c = v0, sigma_circular = v0 / sqrt(2)."""
+        sigma0 = 200.0
+        pot = _isothermal_potential(sigma0)
+        # In SIS: |g_r| = v_c^2 / r = 2*sigma0^2 / r
+        # sigma_circular = sqrt(r * |g_r| / 2) = sqrt(sigma0^2) = sigma0
+        r = 10.0
+        sig = _sigma_local_circular(pot, r, t=0.0)
+        # Allow ~5% tolerance for numerical radial component extraction
+        np.testing.assert_allclose(sig, sigma0, rtol=0.05)
+
+    def test_make_df_local_circular_method(self):
+        """make_df_force_extra with sigma_method='local_circular' should work."""
+        pot = _nfw_potential()
+        fn = make_df_force_extra(
+            pot, M_sat=1e9, t_start=0.0, t_end=5.0,
+            sigma_method="local_circular",
+        )
+        rng = np.random.default_rng(42)
+        N = 50
+        pos = rng.normal(0, 0.3, (N, 3)) + np.array([15.0, 0.0, 0.0])
+        vel = rng.normal(0, 5, (N, 3)) + np.array([0.0, 200.0, 0.0])
+        masses = np.ones(N) * 1e5
+        out = fn(pos, vel, masses, 0.0)
+        assert out.shape == (N, 3)
+        assert np.all(np.isfinite(out))
+
+    def test_invalid_sigma_method_raises(self):
+        pot = _nfw_potential()
+        with pytest.raises(ValueError, match="sigma_method"):
+            make_df_force_extra(pot, M_sat=1e9, t_start=0.0, t_end=5.0,
+                                sigma_method="bogus")
+
+
+# ---------------------------------------------------------------------------
+# 9. _bound_center_phi
+# ---------------------------------------------------------------------------
+
+class TestBoundCenterPhi:
+
+    def _make_bound_cluster(self, N=200, r0=10.0, v_bulk=200.0, seed=7):
+        """Return a cluster at r0 on the x-axis with a bulk y-velocity."""
+        rng = np.random.default_rng(seed)
+        pos = rng.normal(0, 0.5, (N, 3)) + np.array([r0, 0.0, 0.0])
+        vel = rng.normal(0, 20, (N, 3)) + np.array([0.0, v_bulk, 0.0])
+        masses = np.ones(N) * 1e5
+        return pos, vel, masses
+
+    def _make_phi(self, pos, masses):
+        """Simple pairwise Plummer phi (exact for small N test)."""
+        N = len(pos)
+        phi = np.zeros(N)
+        eps = 0.1
+        for i in range(N):
+            dr = pos - pos[i]
+            r2 = np.sum(dr ** 2, axis=1) + eps ** 2
+            r2[i] = np.inf
+            phi[i] = -agama.G * np.sum(masses / np.sqrt(r2))
+        return phi
+
+    def test_returns_correct_shapes(self):
+        pos, vel, masses = self._make_bound_cluster(N=50)
+        phi = self._make_phi(pos, masses)
+        r_com, v_com, bound = _bound_center_phi(
+            pos, vel, masses, phi,
+            np.array([10.0, 0.0, 0.0]),
+            np.array([0.0, 200.0, 0.0]),
+            dt=0.01,
+        )
+        assert r_com.shape == (3,)
+        assert v_com.shape == (3,)
+        assert bound.shape == (len(pos),)
+        assert bound.dtype == bool
+
+    def test_centre_close_to_cluster(self):
+        """Returned CoM should be close to the cluster centre."""
+        r0 = 10.0
+        pos, vel, masses = self._make_bound_cluster(N=200, r0=r0)
+        phi = self._make_phi(pos, masses)
+        r_com, v_com, bound = _bound_center_phi(
+            pos, vel, masses, phi,
+            np.array([r0, 0.0, 0.0]),
+            np.array([0.0, 200.0, 0.0]),
+            dt=0.0,
+        )
+        # CoM x should be within 1 kpc of r0
+        assert abs(r_com[0] - r0) < 1.0, f"r_com[0]={r_com[0]:.2f} far from r0={r0}"
+
+    def test_at_least_some_particles_bound(self):
+        """For a self-gravitating cluster with low velocity dispersion, bound
+        particles should be identified.  Uses a small velocity spread so that
+        the self-gravity dominates the kinetic energy.
+        """
+        rng = np.random.default_rng(7)
+        r0 = 10.0
+        N = 200
+        # Low velocity dispersion so particles are clearly bound
+        pos = rng.normal(0, 0.5, (N, 3)) + np.array([r0, 0.0, 0.0])
+        vel = rng.normal(0, 3.0, (N, 3)) + np.array([0.0, 200.0, 0.0])
+        masses = np.ones(N) * 1e5
+        phi = self._make_phi(pos, masses)
+        _, _, bound = _bound_center_phi(
+            pos, vel, masses, phi,
+            np.array([r0, 0.0, 0.0]),
+            np.array([0.0, 200.0, 0.0]),
+            dt=0.0,
+        )
+        assert bound.sum() >= 1, \
+            f"Expected at least one bound particle, got {bound.sum()}"
+
+    def test_phi_path_in_closure(self):
+        """make_df_force_extra closure should accept and use phi kwarg."""
+        pot = _nfw_potential()
+        fn = make_df_force_extra(pot, M_sat=1e9, t_start=0.0, t_end=5.0)
+        N = 100
+        rng = np.random.default_rng(13)
+        pos = rng.normal(0, 0.3, (N, 3)) + np.array([15.0, 0.0, 0.0])
+        vel = rng.normal(0, 5, (N, 3)) + np.array([0.0, 200.0, 0.0])
+        masses = np.ones(N) * 1e5
+
+        # Simple phi: uniform negative value (all particles bound)
+        phi = np.full(N, -5000.0)
+
+        out = fn(pos, vel, masses, 0.0, phi=phi)
+        assert out.shape == (N, 3)
+        assert np.all(np.isfinite(out))
+        # With bulk motion, bound particles should feel DF
+        assert np.any(out != 0.0), "Expected non-zero DF for bound particles"
+
+    def test_phi_path_unbound_particles_zero(self):
+        """Unbound particles (phi + 0.5 v_rel^2 >= 0) should get zero DF."""
+        pot = _nfw_potential()
+        fn = make_df_force_extra(pot, M_sat=1e9, t_start=0.0, t_end=5.0)
+        N = 100
+        rng = np.random.default_rng(14)
+        pos = rng.normal(0, 0.3, (N, 3)) + np.array([15.0, 0.0, 0.0])
+        # Half very fast (clearly unbound relative to any CoM)
+        vel = rng.normal(0, 5, (N, 3)) + np.array([0.0, 200.0, 0.0])
+        masses = np.ones(N) * 1e5
+
+        # phi: first 50 deeply bound, last 50 unbound (phi + 0.5 v_rel^2 >> 0)
+        phi = np.zeros(N)
+        phi[:50] = -1e6   # deeply bound
+        phi[50:] = 1e6    # very unbound (positive phi; unphysical but clear)
+
+        out = fn(pos, vel, masses, 0.0, phi=phi)
+        # Unbound particles (indices 50:) should have zero DF
+        assert np.all(out[50:] == 0.0), "Unbound particles must receive zero DF"
+        # Bound particles (indices :50) should feel DF
+        assert np.any(out[:50] != 0.0), "Bound particles must receive DF"
+
+    def test_compute_sigma_r_defaults_to_jeans(self):
+        """compute_sigma_r default method should be 'jeans' (no quasispherical)."""
+        pot = _nfw_potential()
+        # Should succeed without trying quasispherical DF
+        sigma_f = compute_sigma_r(pot, t_eval=0.0)
+        sig = sigma_f(np.array([5.0, 20.0]))
+        assert np.all(sig > 0)
+        assert np.all(np.isfinite(sig))

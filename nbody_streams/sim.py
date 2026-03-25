@@ -134,6 +134,36 @@ def run_simulation(
           ``'float32'``, ``'float64'``, ``'float32_kahan'``.  Ignored for
           tree backends (which are always float32 internally).
 
+        Dynamical-friction options (only used when ``dynamical_friction=True``):
+
+        * ``df_M_sat`` (float) -- Satellite mass [M_sun].  Default: total
+          mass of all species.  On tree paths, used as the initial value; the
+          effective mass is updated dynamically to the bound-particle mass.
+        * ``df_coulomb_mode`` (str, default ``'variable'``) -- Coulomb
+          logarithm mode: ``'variable'`` (``ln(r v^2 / G M_sat)``) or
+          ``'fixed'``.
+        * ``df_fixed_ln_lambda`` (float, default 3.0) -- Fixed ln(Λ) when
+          ``df_coulomb_mode='fixed'``.
+        * ``df_core_gamma`` (float, default 0.0) -- Core-stalling suppression
+          index (0 = off; ~1–2 for constant-density cores).
+        * ``df_r_core`` (float, default 1.0) -- Core radius [kpc].
+        * ``df_update_interval`` (int, default 10) -- Correct CoM every N
+          steps.
+        * ``df_sigma_method`` (str, default ``'jeans'``) -- Velocity
+          dispersion algorithm: ``'jeans'`` (Jeans equation, recommended for
+          time-evolving potentials), ``'local_circular'`` (``sqrt(r|g_r|/2)``,
+          cheap and time-evolving), or ``'quasispherical'`` (Agama DF moments,
+          best for spherical static potentials).
+        * ``df_apply_radius_factor`` (float or None, default 2.0) -- Fallback-
+          path (direct integrators) only: apply DF within this many core
+          radii.  On tree paths, the phi-energy criterion is used instead.
+        * ``df_shrink_n_iter`` (int, default 5) -- Shrinking-sphere iterations
+          (fallback path).
+        * ``df_shrink_frac`` (float, default 0.5) -- Shrinking-sphere radius
+          reduction (fallback path).
+        * ``df_sigma_grid_r`` (ndarray or None) -- Custom radial grid for
+          Jeans/quasispherical sigma(r).
+
         GPU tree only (``architecture='gpu', method='tree'``):
 
         * ``nleaf`` (int, default 64) -- Minimum leaf node size.
@@ -290,20 +320,22 @@ def run_simulation(
 
     # ------------------------------------------------------------------
     # Dynamical friction: build force_extra closure if requested.
-    # DF kwargs are consumed here so they don't reach the backends.
+    # ALL df_* kwargs are consumed unconditionally so they never leak to
+    # backends regardless of whether dynamical_friction is True or False.
     # ------------------------------------------------------------------
     _force_extra = kwargs.pop("force_extra", None)
+    df_M_sat = kwargs.pop("df_M_sat", float(mass_arr.sum()))
+    df_coulomb_mode = kwargs.pop("df_coulomb_mode", "variable")
+    df_fixed_ln_lambda = kwargs.pop("df_fixed_ln_lambda", 3.0)
+    df_core_gamma = kwargs.pop("df_core_gamma", 0.0)
+    df_r_core = kwargs.pop("df_r_core", 1.0)
+    df_update_interval = kwargs.pop("df_update_interval", 10)
+    df_shrink_n_iter = kwargs.pop("df_shrink_n_iter", 5)
+    df_shrink_frac = kwargs.pop("df_shrink_frac", 0.5)
+    df_sigma_grid_r = kwargs.pop("df_sigma_grid_r", None)
+    df_apply_radius_factor = kwargs.pop("df_apply_radius_factor", 2.0)
+    df_sigma_method = kwargs.pop("df_sigma_method", "jeans")
     if dynamical_friction:
-        df_M_sat = kwargs.pop("df_M_sat", float(mass_arr.sum()))
-        df_coulomb_mode = kwargs.pop("df_coulomb_mode", "variable")
-        df_fixed_ln_lambda = kwargs.pop("df_fixed_ln_lambda", 3.0)
-        df_core_gamma = kwargs.pop("df_core_gamma", 0.0)
-        df_r_core = kwargs.pop("df_r_core", 1.0)
-        df_update_interval = kwargs.pop("df_update_interval", 10)
-        df_shrink_n_iter = kwargs.pop("df_shrink_n_iter", 5)
-        df_shrink_frac = kwargs.pop("df_shrink_frac", 0.5)
-        df_sigma_grid_r = kwargs.pop("df_sigma_grid_r", None)
-        df_apply_radius_factor = kwargs.pop("df_apply_radius_factor", 2.0)
         _df_closure = make_df_force_extra(
             pot=external_potential,
             M_sat=df_M_sat,
@@ -318,13 +350,15 @@ def run_simulation(
             shrink_frac=df_shrink_frac,
             sigma_grid_r=df_sigma_grid_r,
             apply_radius_factor=df_apply_radius_factor,
+            sigma_method=df_sigma_method,
         )
         if _force_extra is not None:
-            # Compose: existing force_extra + DF
+            # Compose: existing force_extra + DF.
+            # Forward **kw (including phi= from tree integrators) to both closures.
             _existing = _force_extra
 
-            def _force_extra(pos, vel, masses, t):
-                return _existing(pos, vel, masses, t) + _df_closure(pos, vel, masses, t)
+            def _force_extra(pos, vel, masses, t, **kw):
+                return _existing(pos, vel, masses, t, **kw) + _df_closure(pos, vel, masses, t, **kw)
         else:
             _force_extra = _df_closure
 
