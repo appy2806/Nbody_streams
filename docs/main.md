@@ -115,8 +115,8 @@ result = run_simulation(
 | `G` | `float` | `4.300917e-6` | Gravitational constant |
 | `architecture` | `'cpu'` or `'gpu'` | `'gpu'` | Compute backend |
 | `method` | `'direct'` or `'tree'` | `'direct'` | Gravity solver |
-| `external_potential` | `agama.Potential` or `None` | `None` | Optional external time-varying potential (Agama). Host-satellite dynamical friction is not included — the host is treated as a smooth field |
-| `dynamical_friction` | `bool` | `False` | Apply Chandrasekhar DF to satellite CoM. Requires `external_potential`. **Not yet implemented** — raises `NotImplementedError`. Planned for `feat-dynamicFric` |
+| `external_potential` | `agama.Potential` or `None` | `None` | Optional external time-varying potential (Agama). The host is treated as a smooth field; granularity-driven scattering is absent unless `dynamical_friction=True` |
+| `dynamical_friction` | `bool` | `False` | Apply Chandrasekhar DF to the satellite centre of mass. Requires `external_potential` (raises `ValueError` otherwise). When enabled, builds a DF closure via `_chandrasekhar.make_df_force_extra` and passes it as `force_extra`. Tunable via the `df_*` kwargs below |
 | `output_dir` | `str` | `'./output'` | Directory for snapshot and restart files |
 | `save_snapshots` | `bool` | `True` | Write HDF5 snapshots to disk |
 | `snapshots` | `int` | `100` | Number of evenly-spaced output snapshots |
@@ -140,6 +140,22 @@ result = run_simulation(
 | `ncrit` | gpu tree | `64` | Group criticality threshold |
 | `level_split` | gpu tree | `5` | Tree level for spatial grouping |
 | `step_timeout_s` | gpu tree | `60.0` | Per-step watchdog timeout (seconds) before raising `RuntimeError` |
+
+### Dynamical friction kwargs
+
+These are only active when `dynamical_friction=True`.
+
+| kwarg | Type | Default | Description |
+|---|---|---|---|
+| `df_M_sat` | `float` | `None` | Total satellite mass [M_sun]. If `None`, summed from `species` masses |
+| `df_coulomb_mode` | `str` | `'variable'` | Coulomb log mode: `'variable'` uses local density to compute ln(Λ); `'fixed'` uses `df_fixed_ln_lambda` |
+| `df_fixed_ln_lambda` | `float` | `3.0` | Fixed Coulomb logarithm. Only used when `df_coulomb_mode='fixed'` |
+| `df_core_gamma` | `float` | `1.0` | Core-stalling suppression exponent γ (BT2008 eq. 8.13 variant). Set to `0.0` to disable stalling |
+| `df_r_core` | `float` | `None` | Core radius [kpc] for stalling suppression. If `None`, estimated from the potential |
+| `df_update_interval` | `int` | `1` | Recompute the DF force every N steps. Useful for slowly-evolving orbits |
+| `df_shrink_n_iter` | `int` | `10` | Number of shrinking-sphere CoM iterations per step |
+| `df_shrink_frac` | `float` | `0.7` | Shrinking factor for CoM estimator sphere radius per iteration |
+| `df_sigma_grid_r` | `ndarray` or `None` | `None` | Custom radial grid for σ(r) evaluation. If `None`, a default log-spaced grid is used |
 
 ### Returns
 
@@ -239,6 +255,27 @@ result = run_simulation(
 )
 ```
 
+### Example: with Chandrasekhar dynamical friction
+
+```python
+import agama
+agama.setUnits(mass=1, length=1, velocity=1)
+pot = agama.Potential(type='NFW', mass=1e12, scaleRadius=15.0,
+                      outerCutoffRadius=300.0)
+
+result = run_simulation(
+    xv, [dm],
+    time_start=0.0, time_end=5.0, dt=1e-3,
+    architecture='gpu', method='direct',
+    external_potential=pot,
+    dynamical_friction=True,
+    df_M_sat=5e9,
+    df_coulomb_mode='variable',
+)
+```
+
+See [docs/dynamical_friction.md](dynamical_friction.md) for a full reference including the low-level `force_extra` interface.
+
 ---
 
 ## make_plummer_sphere
@@ -314,6 +351,7 @@ xv, masses = make_plummer_sphere(10_000, M_total=5e5, a=0.005, seed=42)
 | CPU direct, N > 20 000 | Slow O(N^2); suggest `method='tree'` or `architecture='gpu'` |
 | GPU direct, N > 500 000 | May be slow; suggest `method='tree'` |
 | Any method, N > 2 000 000 and `method != 'tree'` | Direct summation at this scale is very slow |
+| Total satellite mass > 1e10 M_sun with `external_potential` set and `dynamical_friction=False` | Dynamical friction may be significant at this mass scale — consider setting `dynamical_friction=True` |
 
 To suppress:
 
@@ -350,6 +388,6 @@ from nbody_streams import (
     # GPU tree code (when libtreeGPU.so is built)
     tree_gravity_gpu, TreeGPU, cuda_alive, run_nbody_gpu_tree,
     # Subpackages
-    utils, coords, fast_sims, viz,
+    utils, coords, fast_sims, viz, agama_helper,
 )
 ```

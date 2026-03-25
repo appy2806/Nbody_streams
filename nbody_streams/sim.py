@@ -22,6 +22,7 @@ from .species import (
     _emit_performance_warnings,
 )
 from .run import run_nbody_gpu, run_nbody_cpu, G_DEFAULT
+from ._chandrasekhar import make_df_force_extra
 
 try:
     from .tree_gpu.run_gpu_tree import run_nbody_gpu_tree
@@ -132,6 +133,36 @@ def run_simulation(
           precision for GPU direct force computation.  One of
           ``'float32'``, ``'float64'``, ``'float32_kahan'``.  Ignored for
           tree backends (which are always float32 internally).
+
+        Dynamical-friction options (only used when ``dynamical_friction=True``):
+
+        * ``df_M_sat`` (float) -- Satellite mass [M_sun].  Default: total
+          mass of all species.  On tree paths, used as the initial value; the
+          effective mass is updated dynamically to the bound-particle mass.
+        * ``df_coulomb_mode`` (str, default ``'variable'``) -- Coulomb
+          logarithm mode: ``'variable'`` (``ln(r v^2 / G M_sat)``) or
+          ``'fixed'``.
+        * ``df_fixed_ln_lambda`` (float, default 3.0) -- Fixed ln(Λ) when
+          ``df_coulomb_mode='fixed'``.
+        * ``df_core_gamma`` (float, default 0.0) -- Core-stalling suppression
+          index (0 = off; ~1–2 for constant-density cores).
+        * ``df_r_core`` (float, default 1.0) -- Core radius [kpc].
+        * ``df_update_interval`` (int, default 10) -- Correct CoM every N
+          steps.
+        * ``df_sigma_method`` (str, default ``'jeans'``) -- Velocity
+          dispersion algorithm: ``'jeans'`` (Jeans equation, recommended for
+          time-evolving potentials), ``'local_circular'`` (``sqrt(r|g_r|/2)``,
+          cheap and time-evolving), or ``'quasispherical'`` (Agama DF moments,
+          best for spherical static potentials).
+        * ``df_apply_radius_factor`` (float or None, default 2.0) -- Fallback-
+          path (direct integrators) only: apply DF within this many core
+          radii.  On tree paths, the phi-energy criterion is used instead.
+        * ``df_shrink_n_iter`` (int, default 5) -- Shrinking-sphere iterations
+          (fallback path).
+        * ``df_shrink_frac`` (float, default 0.5) -- Shrinking-sphere radius
+          reduction (fallback path).
+        * ``df_sigma_grid_r`` (ndarray or None) -- Custom radial grid for
+          Jeans/quasispherical sigma(r).
 
         GPU tree only (``architecture='gpu', method='tree'``):
 
@@ -244,11 +275,11 @@ def run_simulation(
 
     _validate_species(phase_space, species)
 
-    if dynamical_friction:
-        raise NotImplementedError(
-            "dynamical_friction=True is not yet implemented in run_simulation. "
-            "Use the low-level run_nbody_* functions with force_extra to apply "
-            "a Chandrasekhar friction closure manually in the meantime."
+    if dynamical_friction and external_potential is None:
+        raise ValueError(
+            "dynamical_friction=True requires external_potential to be set. "
+            "The Chandrasekhar DF formula needs host density and sigma(r) from "
+            "the external potential."
         )
 
     N_total = phase_space.shape[0]
@@ -263,6 +294,21 @@ def run_simulation(
     # ------------------------------------------------------------------
     _emit_performance_warnings(N_total, architecture, method)
 
+    # Warn if satellite is massive enough that DF should be enabled
+    if external_potential is not None and not dynamical_friction:
+        M_total_sat = float(mass_arr.sum())
+        if M_total_sat > 1e10:
+            import warnings as _warnings
+            _warnings.warn(
+                f"Total satellite mass is {M_total_sat:.2e} M_sun and an external "
+                f"potential is set, but dynamical_friction=False.  At this mass "
+                f"scale the host-satellite dynamical friction timescale is short "
+                f"(<~1 Gyr).  Consider setting dynamical_friction=True — note this "
+                f"will add a small CPU-side overhead (~1%%) per step.",
+                PerformanceWarning,
+                stacklevel=2,
+            )
+
     # ------------------------------------------------------------------
     # Pull advanced options from kwargs with backend-appropriate defaults.
     # These span multiple backends so we handle them explicitly.
@@ -271,6 +317,50 @@ def run_simulation(
     nthreads = kwargs.pop("nthreads", None)
     external_update_interval = kwargs.pop("external_update_interval", 1)
     precision = kwargs.pop("precision", "float32_kahan")
+
+    # ------------------------------------------------------------------
+    # Dynamical friction: build force_extra closure if requested.
+    # ALL df_* kwargs are consumed unconditionally so they never leak to
+    # backends regardless of whether dynamical_friction is True or False.
+    # ------------------------------------------------------------------
+    _force_extra = kwargs.pop("force_extra", None)
+    df_M_sat = kwargs.pop("df_M_sat", float(mass_arr.sum()))
+    df_coulomb_mode = kwargs.pop("df_coulomb_mode", "variable")
+    df_fixed_ln_lambda = kwargs.pop("df_fixed_ln_lambda", 3.0)
+    df_core_gamma = kwargs.pop("df_core_gamma", 0.0)
+    df_r_core = kwargs.pop("df_r_core", 1.0)
+    df_update_interval = kwargs.pop("df_update_interval", 10)
+    df_shrink_n_iter = kwargs.pop("df_shrink_n_iter", 5)
+    df_shrink_frac = kwargs.pop("df_shrink_frac", 0.5)
+    df_sigma_grid_r = kwargs.pop("df_sigma_grid_r", None)
+    df_apply_radius_factor = kwargs.pop("df_apply_radius_factor", 2.0)
+    df_sigma_method = kwargs.pop("df_sigma_method", "jeans")
+    if dynamical_friction:
+        _df_closure = make_df_force_extra(
+            pot=external_potential,
+            M_sat=df_M_sat,
+            t_start=time_start,
+            t_end=time_end,
+            coulomb_mode=df_coulomb_mode,
+            fixed_ln_lambda=df_fixed_ln_lambda,
+            core_gamma=df_core_gamma,
+            r_core=df_r_core,
+            update_interval=df_update_interval,
+            shrink_n_iter=df_shrink_n_iter,
+            shrink_frac=df_shrink_frac,
+            sigma_grid_r=df_sigma_grid_r,
+            apply_radius_factor=df_apply_radius_factor,
+            sigma_method=df_sigma_method,
+        )
+        if _force_extra is not None:
+            # Compose: existing force_extra + DF.
+            # Forward **kw (including phi= from tree integrators) to both closures.
+            _existing = _force_extra
+
+            def _force_extra(pos, vel, masses, t, **kw):
+                return _existing(pos, vel, masses, t, **kw) + _df_closure(pos, vel, masses, t, **kw)
+        else:
+            _force_extra = _df_closure
 
     # ------------------------------------------------------------------
     # Dispatch
@@ -290,6 +380,7 @@ def run_simulation(
             theta=theta,
             external_potential=external_potential,
             external_update_interval=external_update_interval,
+            force_extra=_force_extra,
             output_dir=output_dir,
             save_snapshots=save_snapshots,
             snapshots=snapshots,
@@ -320,6 +411,7 @@ def run_simulation(
             kernel="spline",
             external_potential=external_potential,
             external_update_interval=external_update_interval,
+            force_extra=_force_extra,
             output_dir=output_dir,
             save_snapshots=save_snapshots,
             snapshots=snapshots,
@@ -352,6 +444,7 @@ def run_simulation(
             kernel=cpu_kernel,
             nthreads=nthreads,
             external_potential=external_potential,
+            force_extra=_force_extra,
             output_dir=output_dir,
             save_snapshots=save_snapshots,
             snapshots=snapshots,

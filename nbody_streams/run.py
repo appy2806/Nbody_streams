@@ -1147,9 +1147,10 @@ def run_nbody_cpu(
 
         # Extra non-conservative forces (e.g. dynamical friction).
         # pos and vel are NumPy arrays on the CPU path.
+        # phi_cpu is available for free on the tree path; None on direct path.
         if force_extra is not None:
             acc_cpu = acc_cpu + np.asarray(
-                force_extra(xv[:, :3], xv[:, 3:6], masses, time)
+                force_extra(xv[:, :3], xv[:, 3:6], masses, time, phi=phi_cpu)
             )
 
         # Kick (half-step)

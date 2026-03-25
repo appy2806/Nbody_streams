@@ -413,7 +413,9 @@ def run_nbody_gpu_tree(
     if _acc_ext is not None:
         acc = acc + _acc_ext
     if force_extra is not None:
-        acc = acc + cp.asarray(force_extra(pos, vel, masses, t_now), dtype=cp.float32)
+        acc = acc + cp.asarray(
+            force_extra(pos, vel, masses, t_now, phi=phi), dtype=cp.float32
+        )
 
     # Energy reference (only computed if debug_energy, but always store E_ref)
     E_ref = 0.0
@@ -468,9 +470,10 @@ def run_nbody_gpu_tree(
 
             # Extra non-conservative forces (e.g. dynamical friction).
             # pos and vel are CuPy float32 arrays on the tree-GPU path.
+            # phi is passed for free from the tree force evaluation.
             if force_extra is not None:
                 acc = acc + cp.asarray(
-                    force_extra(pos, vel, masses, t_now), dtype=cp.float32
+                    force_extra(pos, vel, masses, t_now, phi=phi), dtype=cp.float32
                 )
 
             with watchdog:
