@@ -184,12 +184,12 @@ class TestShrinkingSphereCom:
         """CoM should converge close to the true cloud centre."""
         true_centre = np.array([5.0, -3.0, 2.0])
         pos, vel, masses = self._make_plummer_cloud(N=1000, centre=true_centre)
-        r_com, v_com = _shrinking_sphere_com(pos, vel, masses)
+        r_com, v_com, r_sphere = _shrinking_sphere_com(pos, vel, masses)
         np.testing.assert_allclose(r_com, true_centre, atol=0.3)
 
     def test_velocity_com_shape(self):
         pos, vel, masses = self._make_plummer_cloud()
-        r_com, v_com = _shrinking_sphere_com(pos, vel, masses)
+        r_com, v_com, r_sphere = _shrinking_sphere_com(pos, vel, masses)
         assert r_com.shape == (3,)
         assert v_com.shape == (3,)
 
@@ -199,7 +199,7 @@ class TestShrinkingSphereCom:
         p = np.full((N, 3), [1.0, 2.0, 3.0])
         v = np.full((N, 3), [10.0, 0.0, -5.0])
         m = np.ones(N)
-        r_com, v_com = _shrinking_sphere_com(p, v, m, n_iter=1)
+        r_com, v_com, r_sphere = _shrinking_sphere_com(p, v, m, n_iter=1)
         np.testing.assert_allclose(r_com, [1.0, 2.0, 3.0], atol=1e-10)
         np.testing.assert_allclose(v_com, [10.0, 0.0, -5.0], atol=1e-10)
 
@@ -216,10 +216,23 @@ class TestShrinkingSphereCom:
         pos = np.vstack([p_dense, p_bg])
         vel = np.vstack([v_dense, v_bg])
         masses = np.ones(1000) / 1000.0
-        r_com, _ = _shrinking_sphere_com(pos, vel, masses, n_iter=8, frac=0.5)
+        r_com, _, r_sphere = _shrinking_sphere_com(pos, vel, masses, n_iter=8, frac=0.5)
         # Should converge to the dense clump near [0, 0, 0]
         assert np.linalg.norm(r_com) < 2.0, (
             f"Expected CoM near dense clump, got r_com={r_com}"
+        )
+
+    def test_r_sphere_positive_and_bounded(self):
+        """r_sphere must be positive and smaller than the full cloud extent."""
+        true_centre = np.array([0.0, 0.0, 0.0])
+        pos, vel, masses = self._make_plummer_cloud(N=500, centre=true_centre)
+        r_com, v_com, r_sphere = _shrinking_sphere_com(pos, vel, masses)
+        assert r_sphere > 0, "r_sphere must be positive"
+        # Full cloud extent: max distance from origin; r_sphere should be smaller
+        full_extent = float(np.linalg.norm(pos, axis=1).max())
+        assert r_sphere < full_extent, (
+            f"r_sphere ({r_sphere:.2f}) should be smaller than full cloud extent "
+            f"({full_extent:.2f}) after shrinking"
         )
 
 
@@ -358,9 +371,12 @@ class TestMakeDfForceExtra:
         assert out.shape == (80, 3)
 
     def test_all_particles_same_acceleration(self):
-        """DF is a rigid-body force — all particles get the same acceleration."""
+        """DF is a rigid-body force — all particles within the core get the same
+        acceleration.  Use apply_radius_factor=None to disable masking and test
+        the pure rigid-body (broadcast) path."""
         pot = _nfw_potential()
-        fn = make_df_force_extra(pot, M_sat=1e9, t_start=0.0, t_end=5.0)
+        fn = make_df_force_extra(pot, M_sat=1e9, t_start=0.0, t_end=5.0,
+                                 apply_radius_factor=None)
         pos, vel, masses = self._simple_particles(N=50)
         out = fn(pos, vel, masses, 0.0)
         # All rows must be equal to the first row
@@ -432,6 +448,50 @@ class TestMakeDfForceExtra:
         monkeypatch.setattr(mod, "_AGAMA_OK", False)
         with pytest.raises(ImportError):
             make_df_force_extra(None, M_sat=1e9, t_start=0.0, t_end=1.0)
+
+    def test_apply_radius_factor_masks_outer_particles(self):
+        """Particles outside apply_radius_factor * r_sphere should get zero acceleration.
+
+        Use a 80/20 split (80 core : 20 far) with equal per-particle mass so
+        the initial mass-weighted centroid is pulled close to the dense core
+        (not stranded at the midpoint between two equal-mass clusters, which
+        would cause the shrinking sphere to keep all particles).
+        """
+        pot = _nfw_potential()
+        fn = make_df_force_extra(pot, M_sat=1e9, t_start=0.0, t_end=5.0,
+                                 apply_radius_factor=1.0)
+        rng = np.random.default_rng(99)
+        # Dense core: 80 particles near (10, 0, 0), tiny spread (sigma=0.1)
+        pos_core = rng.normal(0, 0.1, (80, 3)) + np.array([10.0, 0.0, 0.0])
+        vel_core = rng.normal(0, 10, (80, 3)) + np.array([0.0, 100.0, 0.0])
+        # Stripped debris: 20 particles 100 kpc away in y
+        pos_far = rng.normal(0, 2.0, (20, 3)) + np.array([10.0, 100.0, 0.0])
+        vel_far = rng.normal(0, 100, (20, 3))
+        pos = np.vstack([pos_core, pos_far])
+        vel = np.vstack([vel_core, vel_far])
+        masses = np.ones(100) * 1e5
+        out = fn(pos, vel, masses, 0.0)
+        # Far/stripped particles should have zero acceleration
+        assert np.all(out[80:] == 0.0), "Far/stripped particles should not feel DF"
+        # Core particles should feel DF
+        assert np.any(out[:80] != 0.0), "Core particles should feel DF"
+
+    def test_apply_radius_factor_none_broadcasts_all(self):
+        """With apply_radius_factor=None, all particles feel DF (old behaviour)."""
+        pot = _nfw_potential()
+        fn = make_df_force_extra(pot, M_sat=1e9, t_start=0.0, t_end=5.0,
+                                 apply_radius_factor=None)
+        N = 60
+        rng = np.random.default_rng(77)
+        pos = rng.normal(0, 0.3, (N, 3)) + np.array([15.0, 0.0, 0.0])
+        vel = rng.normal(0, 5, (N, 3)) + np.array([0.0, 150.0, 0.0])
+        masses = np.ones(N) * 1e5
+        out = fn(pos, vel, masses, 0.0)
+        # All rows should be non-zero (bulk motion → DF non-zero)
+        assert np.any(out != 0.0), "Expected non-zero DF with bulk motion"
+        # All rows equal (broadcast)
+        for i in range(1, N):
+            np.testing.assert_array_equal(out[i], out[0])
 
 
 # ---------------------------------------------------------------------------

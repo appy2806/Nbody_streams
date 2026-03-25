@@ -303,6 +303,7 @@ def run_simulation(
         df_shrink_n_iter = kwargs.pop("df_shrink_n_iter", 5)
         df_shrink_frac = kwargs.pop("df_shrink_frac", 0.5)
         df_sigma_grid_r = kwargs.pop("df_sigma_grid_r", None)
+        df_apply_radius_factor = kwargs.pop("df_apply_radius_factor", 2.0)
         _df_closure = make_df_force_extra(
             pot=external_potential,
             M_sat=df_M_sat,
@@ -316,6 +317,7 @@ def run_simulation(
             shrink_n_iter=df_shrink_n_iter,
             shrink_frac=df_shrink_frac,
             sigma_grid_r=df_sigma_grid_r,
+            apply_radius_factor=df_apply_radius_factor,
         )
         if _force_extra is not None:
             # Compose: existing force_extra + DF

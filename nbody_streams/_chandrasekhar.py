@@ -224,7 +224,7 @@ def _shrinking_sphere_com(
     n_iter: int = 5,
     frac: float = 0.5,
     min_particles: int = 16,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, float]:
     """Iterative shrinking-sphere centre-of-mass estimator.
 
     At each iteration the sphere is centred on the current mass-weighted
@@ -249,6 +249,10 @@ def _shrinking_sphere_com(
     -------
     r_com : ndarray, shape ``(3,)``
     v_com : ndarray, shape ``(3,)``
+    r_sphere : float
+        Maximum distance of the surviving (innermost) particles from the
+        final CoM.  This is the effective radius of the identified satellite
+        core and is used by ``make_df_force_extra`` to mask stripped particles.
     """
     idx = np.arange(len(pos))
 
@@ -272,7 +276,10 @@ def _shrinking_sphere_com(
     r_com = m @ pos[idx] / m_sum
     v_com = m @ vel[idx] / m_sum
 
-    return r_com, v_com
+    # Radius of the surviving core: max distance of surviving particles from CoM
+    r_sphere = float(np.linalg.norm(pos[idx] - r_com, axis=1).max())
+
+    return r_com, v_com, r_sphere
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +389,7 @@ def make_df_force_extra(
     shrink_n_iter: int = 5,
     shrink_frac: float = 0.5,
     sigma_grid_r: np.ndarray | None = None,
+    apply_radius_factor: float | None = 2.0,
 ) -> Callable:
     """Build a ``force_extra`` closure that applies Chandrasekhar dynamical
     friction to the satellite particles.
@@ -440,6 +448,14 @@ def make_df_force_extra(
         Radius reduction per shrinking-sphere iteration.  Default 0.5.
     sigma_grid_r : ndarray, optional
         Custom radial grid for sigma(r) computation.
+    apply_radius_factor : float or None, optional
+        If not ``None``, the DF acceleration is applied only to particles
+        within ``apply_radius_factor * r_sphere`` of the satellite CoM,
+        where ``r_sphere`` is the maximum distance of the innermost
+        (shrinking-sphere) particles from the CoM.  Particles outside this
+        radius are stripped debris and receive zero DF acceleration.
+        Default 2.0.  Pass ``None`` to revert to the old behaviour
+        (apply DF to all particles regardless of location).
 
     Returns
     -------
@@ -486,6 +502,7 @@ def make_df_force_extra(
         "r_com": np.zeros(3),
         "v_com": np.zeros(3),
         "a_df": np.zeros(3),
+        "r_sphere": np.inf,  # initially apply DF to all particles
     }
 
     def _force_extra(
@@ -504,13 +521,14 @@ def make_df_force_extra(
         # ---- CoM update ------------------------------------------------
         if not _state["initialized"] or (step % update_interval == 0):
             # Corrector: shrinking sphere
-            r_com, v_com = _shrinking_sphere_com(
+            r_com, v_com, r_sphere = _shrinking_sphere_com(
                 pos_np, vel_np, m_np,
                 n_iter=shrink_n_iter,
                 frac=shrink_frac,
             )
             _state["r_com"] = r_com
             _state["v_com"] = v_com
+            _state["r_sphere"] = r_sphere
             _state["initialized"] = True
         else:
             # Predictor: kinematic extrapolation using cached DF accel
@@ -537,7 +555,16 @@ def make_df_force_extra(
         _state["t_prev"] = t
         _state["step"] = step + 1
 
-        # Apply uniform DF acceleration to all particles
+        # Apply DF acceleration only to bound core particles
+        if apply_radius_factor is not None and np.isfinite(_state["r_sphere"]):
+            cutoff = apply_radius_factor * _state["r_sphere"]
+            dist_from_com = np.linalg.norm(pos_np - _state["r_com"], axis=1)  # (N,)
+            mask = dist_from_com <= cutoff  # (N,) bool
+            a_out = np.zeros_like(pos_np)
+            a_out[mask] = a_df  # only particles within cutoff feel DF
+            return a_out
+
+        # Fallback: apply uniform DF acceleration to all particles
         return np.broadcast_to(a_df, pos_np.shape).copy()
 
     return _force_extra
