@@ -309,8 +309,6 @@ def create_particle_spray_stream(
     time_end: float = 13.78,
     time_stripping: np.ndarray | None = None,
     save_rate: int = 1,
-    dynFric: bool = False,
-    pot_for_dynFric_sigma=None,
     gala_modified: bool = True,
     add_perturber: dict[str, Any] | None = None,
     create_ic_method: Callable = create_ic_particle_spray_chen2025,
@@ -351,17 +349,31 @@ def create_particle_spray_stream(
         corresponding to **uniform stripping** along the orbit.
     save_rate : int
         Number of output snapshots (1 = final only).
-    dynFric : bool
-        Enable dynamical friction on the progenitor orbit.
-    pot_for_dynFric_sigma : agama.Potential, optional
-        Potential for velocity-dispersion computation (DF friction).
     gala_modified : bool
         Use Gala-modified dispersion parameters (Fardal method).
     add_perturber : dict, optional
-        Perturber properties.  Must contain ``'mass'`` (M_sun),
-        ``'scaleRadius'`` (kpc), ``'w_subhalo_impact'`` (shape ``(6,)``),
-        ``'time_impact'`` (kpc/(km/s)~Gyr), ``'time_window'`` (kpc/(km/s)~Gyr)-> Defaults to time_impact. 
-        Optionally ``'trunc_nfw=False'``, ``'trunc_nfw=False'``. 
+        Subhalo perturber properties.  Required keys:
+
+        - ``'mass'`` : float — subhalo mass (M_sun).
+        - ``'scaleRadius'`` : float — NFW scale radius (kpc).
+        - ``'w_subhalo_impact'`` : array_like, shape ``(6,)`` — subhalo
+          phase-space ``[x, y, z, vx, vy, vz]`` at impact.
+        - ``'time_impact'`` : float — epoch of closest approach
+          (kpc/(km/s) ~Gyr, same time axis as *time_end*).
+
+        Optional keys:
+
+        - ``'time_window'`` : float — full duration of the mass-on window
+          (kpc/(km/s) ~Gyr), centred on ``time_impact``.  The subhalo mass
+          is active only in
+          ``[time_impact - time_window/2, time_impact + time_window/2]``.
+          If absent (default) the mass is on for the **entire** integration.
+        - ``'trunc_nfw'`` : bool — use a truncated NFW profile (default
+          *True*).
+
+        When this dict is provided the progenitor orbit is rewound in the
+        **combined** host + perturber potential so the perturber's gravity
+        is self-consistently included during orbit rewinding and stripping.
         Set to *None* to disable.
     create_ic_method : Callable
         IC generator function (must accept a compatible signature).
@@ -435,9 +447,24 @@ def create_particle_spray_stream(
 
     N = num_particles // 2 + 1
 
-    # --- Rewind progenitor orbit ---
+    # --- Perturber (optional) ---
+    # Build the perturber potential first so it can be included when rewinding
+    # the progenitor orbit — the subhalo's gravity is self-consistently present
+    # during orbit rewinding and particle stripping.
+    if add_perturber['mass'] > 0:
+        pot_perturber_moving = _create_perturber_potential(
+            add_perturber, pot_host, time_total, time_end,
+            t_window=add_perturber.get('time_window', None),
+            trunc_nfw=add_perturber.get('trunc_nfw', True),
+            verbose=verbose,
+        )
+        pot_host_eff = agama.Potential(pot_host, pot_perturber_moving)
+    else:
+        pot_host_eff = pot_host
+
+    # --- Rewind progenitor orbit (in host + perturber if present) ---
     time_sat, orbit_sat = agama.orbit(
-        ic=sat_cen_present, potential=pot_host,
+        ic=sat_cen_present, potential=pot_host_eff,
         time=-time_total, timestart=time_end, trajsize=N,
     )
 
@@ -454,6 +481,7 @@ def create_particle_spray_stream(
         potential=pot_sat,
         center=np.column_stack([time_sat, orbit_sat]),
     )
+    pot_total = agama.Potential(pot_host_eff, pot_sat_moving)
 
     # --- Stripping times ---
     if time_stripping is None:
@@ -507,20 +535,10 @@ def create_particle_spray_stream(
         )
         orbit_strip = orbit_interp(time_stripping)
 
-    # --- Perturber (optional) ---
-    if add_perturber['mass'] > 0:
-        trunc_nfw = add_perturber.get('trunc_nfw', True)
-        time_window = add_perturber.get('time_window', None)
-        pot_perturber_moving = _create_perturber_potential(
-            add_perturber, pot_host, time_total, time_end, trunc_nfw=trunc_nfw, time_window=time_window, verbose=verbose,  
-        )
-        pot_total = agama.Potential(pot_host, pot_sat_moving, pot_perturber_moving)
-    else:
-        pot_total = agama.Potential(pot_host, pot_sat_moving)
 
     # --- Generate initial conditions ---
     rj, vj, R = _get_jacobi_rad_vel_mtx(
-        pot_host, orbit_strip, initmass,
+        pot_host_eff, orbit_strip, initmass,
         t=time_stripping, eigenvalue_method=eigenvalue_method,
     )
 
