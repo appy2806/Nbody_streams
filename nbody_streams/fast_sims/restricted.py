@@ -101,10 +101,27 @@ def run_restricted_nbody(
         Number of interpolated output snapshots (1 = final only).
     trajsize_each_step : int
         Trajectory points saved per integration step.
+
     add_perturber : dict, optional
-        Perturber properties.  Must contain ``'mass'`` (M_sun),
-        ``'scaleRadius'`` (kpc), ``'w_subhalo_impact'`` (shape ``(6,)``),
-        and ``'time_impact'`` (Gyr).  Set to *None* to disable.
+        Subhalo perturber properties.  Required keys:
+
+        - ``'mass'`` : float — subhalo mass (M_sun).
+        - ``'scaleRadius'`` : float — NFW scale radius (kpc).
+        - ``'w_subhalo_impact'`` : array_like, shape ``(6,)`` — subhalo
+          phase-space ``[x, y, z, vx, vy, vz]`` at impact.
+        - ``'time_impact'`` : float — epoch of closest approach
+          (kpc/(km/s) ~Gyr, same time axis as *time_end*).
+
+        Optional keys:
+
+        - ``'time_window'`` : float — full duration of the mass-on window
+          (kpc/(km/s) ~Gyr), centred on ``time_impact``.  The subhalo mass
+          is active only in
+          ``[time_impact - time_window/2, time_impact + time_window/2]``.
+          If absent (default) the mass is on for the **entire** integration.
+        - ``'trunc_nfw'`` : bool — use a truncated NFW profile (default
+          *True*).
+    
     verbose : bool
         Print progress messages.
     accuracy_integ : float
@@ -164,11 +181,26 @@ def run_restricted_nbody(
                 "scaleradius ignored when xv_init provided", UserWarning,
             )
 
+    # --- Perturber (optional) ---
+    # Build the perturber potential first so it can be included when rewinding
+    # the progenitor orbit — the subhalo's gravity is self-consistently present
+    # during orbit rewinding and particle stripping.
+    if add_perturber['mass'] > 0:
+        pot_perturber_moving = _create_perturber_potential(
+            add_perturber, pot_host, time_total, time_end,
+            t_window=add_perturber.get('time_window', None),
+            trunc_nfw=add_perturber.get('trunc_nfw', True),
+            verbose=verbose,
+        )
+        pot_host_eff = agama.Potential(pot_host, pot_perturber_moving)
+    else:
+        pot_host_eff = pot_host
+
     # --- Orbit integration / particle sampling ---
     if xv is None:
         # Rewind progenitor with or without dynamical friction
         time_sat, orbit_sat = _integrate_orbit_with_dynamical_friction(
-            sat_cen_present, pot_host,
+            sat_cen_present, pot_host_eff,
             initmass if dynFric else 0,
             time_total, time_end, pot_for_dynFric_sigma,
         )
@@ -195,15 +227,8 @@ def run_restricted_nbody(
             xv, sat_cen_present, masses=masses,
         )
         time_sat, orbit_sat = agama.orbit(
-            ic=prog_init, potential=pot_host,
+            ic=prog_init, potential=pot_host_eff,
             time=time_total, timestart=time_end - time_total, trajsize=0,
-        )
-
-    # --- Perturber (optional) ---
-    pot_perturber_moving = None
-    if add_perturber['mass'] > 0:
-        pot_perturber_moving = _create_perturber_potential(
-            add_perturber, pot_host, time_total, time_end, trunc_nfw=True, verbose=verbose, # hard coded for trunc nfw.
         )
 
     # --- Main integration loop ---
@@ -218,7 +243,7 @@ def run_restricted_nbody(
 
     try:
         from tqdm.auto import trange
-        loop_iter = trange(num_steps + 1, desc="Simulating Restricted N-body")
+        loop_iter = trange(num_steps + 1, desc="Simulating Restricted N-body", disable=not verbose)
     except ImportError:
         loop_iter = range(num_steps + 1)
 
@@ -242,10 +267,7 @@ def run_restricted_nbody(
             potential=pot_sat,
             center=np.column_stack([time_sat, orbit_sat]),
         )
-        if pot_perturber_moving is not None:
-            pot_total = agama.Potential(pot_host, pot_sat_moving, pot_perturber_moving)
-        else:
-            pot_total = agama.Potential(pot_host, pot_sat_moving)
+        pot_total = agama.Potential(pot_host_eff, pot_sat_moving)
 
         # Integrate particles
         traj = agama.orbit(
