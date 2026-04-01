@@ -7,12 +7,15 @@ data, and convert to sky-observable quantities (RA, Dec, v_los) via Agama.
 from __future__ import annotations
 import numpy as np
 
+_KMS_KPC_TO_MASYR = 1.0 / 4.74047   # [mas/yr] per [km/s/kpc]
+_RHO_GUARD        = 1e-6             # kpc, guards against pole singularity
 # =====================================================================
 # Stream coordinate generation
 # =====================================================================
 def generate_stream_coords(
     xv: np.ndarray,
     xv_prog: np.ndarray | list | None = None,
+    return_rotation: bool = False,
     degrees: bool = True,
     optimizer_fit: bool = False,
     fit_kwargs: dict | None = None,
@@ -34,6 +37,9 @@ def generate_stream_coords(
         Progenitor phase-space vector(s), shape (6,) or (S, 6).
         If None, the particle closest to the median position of each
         stream is used as the progenitor.
+    return_rotation : bool, default False
+        If True, also return the rotation matrices used to define the
+        stream frame.  Shape (3, 3) or  (S, 3, 3), where columns are the basis vectors.
     degrees : bool, default True
         Return angles in degrees; otherwise radians.
     optimizer_fit : bool, default False
@@ -49,6 +55,9 @@ def generate_stream_coords(
         Stream longitude.  Shape (N,) or (S, N).
     phi2 : np.ndarray
         Stream latitude.   Shape (N,) or (S, N).
+    R : np.ndarray, optional
+        Rotation matrix defining the stream frame.  Returned if *return_rotation* is True.
+        Shape (3, 3) or (S, 3, 3), where columns are the basis vectors [xhat, yhat, zhat].
     """
     xv = np.asarray(xv)
 
@@ -103,10 +112,12 @@ def generate_stream_coords(
 
     # --- Build stream basis from progenitor angular momentum ---
     # L = r x v  (angular momentum direction defines the stream pole)
-    L = np.cross(xv_prog[:, :3], xv_prog[:, 3:])                    # (S, 3)
+    r_prog = xv_prog[:, :3]
+    v_prog = xv_prog[:, 3:]
+    L = np.cross(r_prog, v_prog)                    # (S, 3)
     L /= np.linalg.norm(L, axis=1)[:, None]
 
-    xhat = xv_prog[:, :3] / np.linalg.norm(xv_prog[:, :3], axis=1)[:, None]
+    xhat = r_prog / np.linalg.norm(r_prog, axis=1)[:, None]
     zhat = L
     yhat = np.cross(zhat, xhat)
 
@@ -121,21 +132,57 @@ def generate_stream_coords(
     phi1 = np.arctan2(ys, xs)
     phi2 = np.arcsin(zs / rs)
 
-    # --- Optional in-plane rotation to minimise phi2 scatter ---
+    # --- Optional pole-tilt rotation to minimise phi2 scatter ---
     if optimizer_fit:
         from scipy.optimize import minimize
-        for s in range(S):
-            def _cost(theta, _p1=phi1[s], _p2=phi2[s]):
-                c, s_ = np.cos(theta), np.sin(theta)
-                return np.sum((s_ * _p1 + c * _p2) ** 2)
 
-            res = minimize(_cost, x0=0.0, **(fit_kwargs or {}))
-            angle = res.x.item()
-            c, s_ = np.cos(angle), np.sin(angle)
-            phi1[s], phi2[s] = (
-                c * phi1[s] - s_ * phi2[s],
-                s_ * phi1[s] + c * phi2[s],
-            )
+        for s in range(S):
+            r_prog_s = xv_prog[s, :3]
+            pos_s    = xv[s, :, :3]
+            xhat_0   = R[s, :, 0].copy()
+            yhat_0   = R[s, :, 1].copy()
+            zhat_0   = R[s, :, 2].copy()
+
+            def _build_R_s(params, _xh=xhat_0, _yh=yhat_0, _zh=zhat_0,
+                           _rp=r_prog_s):
+                alpha, beta = params
+                # Tilt zhat linearly in the (xhat, yhat) directions
+                # (exact for small angles; sufficient for stream alignment)
+                zhat_new  = _zh + alpha * _xh + beta * _yh
+                zhat_new /= np.linalg.norm(zhat_new)
+
+                # Repin xhat: project progenitor onto new equatorial plane
+                r_n      = _rp / np.linalg.norm(_rp)
+                xhat_new = r_n - np.dot(r_n, zhat_new) * zhat_new
+                norm_x   = np.linalg.norm(xhat_new)
+                if norm_x < 1e-10:
+                    # Progenitor is too close to new pole — fall back
+                    xhat_new = _xh - np.dot(_xh, zhat_new) * zhat_new
+                    norm_x   = np.linalg.norm(xhat_new)
+                xhat_new /= norm_x
+                yhat_new  = np.cross(zhat_new, xhat_new)
+
+                return np.stack([xhat_new, yhat_new, zhat_new], axis=-1)
+
+            def _cost(params, _pos=pos_s):
+                R_new   = _build_R_s(params)
+                c       = _pos @ R_new
+                r_new   = np.linalg.norm(c, axis=1)
+                phi2_new = np.arcsin(np.clip(c[:, 2] / r_new, -1.0, 1.0))
+                return np.sum(phi2_new ** 2)
+
+            res    = minimize(_cost, x0=[0.0, 0.0], **(fit_kwargs or {}))
+            R[s]   = _build_R_s(res.x)
+
+        # Recompute phi1, phi2 exactly from updated R — guaranteed consistent
+        # with to_stream_coords using the same R
+        coords = xv[:, :, :3] @ R
+        xs, ys, zs = coords[..., 0], coords[..., 1], coords[..., 2]
+        rs     = np.sqrt(xs**2 + ys**2 + zs**2)
+        phi1   = np.arctan2(ys, xs)
+        phi2   = np.arcsin(np.clip(zs / rs, -1.0, 1.0))
+
+        # R = R @ M # (S,3,3): absorb in-plane rotation into R so that returned R is consistent with final (phi1, phi2).
 
     if degrees:
         phi1 = np.degrees(phi1)
@@ -143,9 +190,149 @@ def generate_stream_coords(
 
     # Squeeze back if input was a single stream
     if was_single:
-        phi1, phi2 = phi1[0], phi2[0]
+        phi1, phi2, R = phi1[0], phi2[0], R[0]
+        
+    return (phi1, phi2, R) if return_rotation else (phi1, phi2)
 
-    return phi1, phi2
+def to_stream_coords(
+    xv: np.ndarray,
+    R: np.ndarray,
+    degrees: bool = True,
+    return_proper_motions: bool = False,
+    mas_yr: bool = True,
+) -> tuple:
+    """
+    Project galactocentric positions or phase-space vectors into a
+    pre-computed stream frame.
+
+    Parameters
+    ----------
+    xv : np.ndarray, shape (..., 3) or (..., 6)
+        Galactocentric input. Pure positions (..., 3) are accepted when
+        return_proper_motions=False; full phase-space (..., 6) is required
+        for proper motions. Any number of leading batch dimensions is
+        supported. Units: kpc for positions, km/s for velocities.
+    R : np.ndarray, shape (3, 3) or (S, 3, 3)
+        Rotation matrix from generate_stream_coords(return_rotation=True).
+        Columns are [xhat, yhat, zhat].
+        - (3, 3)    — the same frame is applied to every batch.
+        - (S, 3, 3) — per-batch frames; S must equal xv.shape[0].
+    degrees : bool, default True
+        Return phi1, phi2 in degrees; otherwise radians.
+    return_proper_motions : bool, default False
+        If True, also return mu_phi1*cos(phi2) and mu_phi2. Requires
+        6-column input.
+    mas_yr : bool, default True
+        Convert angular velocities to mas/yr (assumes kpc, km/s input).
+        Otherwise return in km/s/kpc (= rad per [kpc/km·s]).
+        NOTE: uses galactocentric r, not heliocentric distance — these are
+        NOT directly comparable to Gaia proper motions.
+
+    Returns
+    -------
+    phi1 : np.ndarray
+        Stream longitude. Same leading shape as xv.
+    phi2 : np.ndarray
+        Stream latitude. Same leading shape as xv.
+    mu_phi1_cosphi2 : np.ndarray, optional
+        d(phi1)/dt * cos(phi2). Returned only when return_proper_motions=True.
+    mu_phi2 : np.ndarray, optional
+        d(phi2)/dt. Returned only when return_proper_motions=True.
+
+    Raises
+    ------
+    ValueError
+        If R.shape is not (3,3) or (S,3,3), if S mismatches xv.shape[0],
+        or if return_proper_motions=True with position-only input.
+    """
+    xv = np.asarray(xv, dtype=float)
+    R  = np.asarray(R,  dtype=float)
+
+    def _apply_R(arr, R, batched_R):
+        """
+        Project (..., 3) array into stream frame.
+        Handles both a single (3,3) R and batched (S,3,3) R correctly.
+        """
+        if not batched_R:
+            return arr @ R                             # broadcasts over any leading dims
+        if arr.ndim == 2:                              # (S, 3) — one vector per frame
+            return (arr[:, None, :] @ R)[:, 0, :]      # -> (S, 3)
+        return arr @ R                                 # (S, N, 3) @ (S, 3, 3) → (S, N, 3)
+
+    # --- Input validation ---
+    last_dim = xv.shape[-1]
+    if last_dim not in (3, 6):
+        raise ValueError(f"Last axis of xv must be 3 or 6, got {last_dim}.")
+    if return_proper_motions and last_dim != 6:
+        raise ValueError(
+            "return_proper_motions=True requires 6-column xv, got 3. "
+            "Pass full phase-space [x, y, z, vx, vy, vz]."
+        )
+
+    # --- Resolve R shape: broadcast (3,3) or validate (S,3,3) ---
+    if R.ndim == 2:
+        if R.shape != (3, 3):
+            raise ValueError(f"R must be (3,3) or (S,3,3), got {R.shape}.")
+        batched_R = False
+
+    elif R.ndim == 3:
+        if R.shape[1:] != (3, 3):
+            raise ValueError(f"R must be (3,3) or (S,3,3), got {R.shape}.")
+        S_R = R.shape[0]
+        if xv.ndim < 1 or xv.shape[0] != S_R:
+            raise ValueError(
+                f"R has S={S_R} frames but xv.shape[0]={xv.shape[0]}. "
+                "First dimension of xv must match S."
+            )
+        batched_R = True
+
+    else:
+        raise ValueError(f"R must be 2-D (3,3) or 3-D (S,3,3), got {R.ndim}-D.")
+
+    # --- Project positions ---
+    pos = xv[..., :3]                              # (..., 3)
+
+    # (... , 3) @ (3, 3) → (..., 3), broadcasts over any leading dims
+    coords = _apply_R(pos, R, batched_R)
+
+    xs, ys, zs = coords[..., 0], coords[..., 1], coords[..., 2]
+    r   = np.sqrt(xs**2 + ys**2 + zs**2)
+    rho = np.sqrt(xs**2 + ys**2)
+
+    phi1 = np.arctan2(ys, xs)
+    phi2 = np.arcsin(np.clip(zs / np.where(r > 0, r, 1.0), -1.0, 1.0))
+
+    if degrees:
+        phi1 = np.degrees(phi1)
+        phi2 = np.degrees(phi2)
+
+    if not return_proper_motions:
+        return phi1, phi2
+
+    # --- Angular velocities in stream frame ---
+    vel = xv[..., 3:]
+    # (... , 3) @ (3, 3) → (..., 3), broadcasts over any leading dims
+    vs = _apply_R(vel, R, batched_R)
+
+    vxs, vys, vzs = vs[..., 0], vs[..., 1], vs[..., 2]
+
+    # Radial velocity component
+    vr = (xs*vxs + ys*vys + zs*vzs) / np.where(r > 0, r, 1.0)
+
+    # Guard against stream pole (phi2 → ±90°, rho → 0)
+    safe_rho_r = np.where(rho > _RHO_GUARD, rho * r, np.nan)
+
+    # d(phi1)/dt * cos(phi2) = (xs*vys - ys*vxs) / (rho * r)
+    mu_phi1_cosphi2 = (xs * vys - ys * vxs) / safe_rho_r
+
+    # d(phi2)/dt = (r*vzs - zs*vr) / (rho * r)
+    mu_phi2 = (r * vzs - zs * vr) / safe_rho_r
+
+    if mas_yr:
+        mu_phi1_cosphi2 = mu_phi1_cosphi2 * _KMS_KPC_TO_MASYR
+        mu_phi2         = mu_phi2         * _KMS_KPC_TO_MASYR
+
+    return phi1, phi2, mu_phi1_cosphi2, mu_phi2
 
 
 # =====================================================================

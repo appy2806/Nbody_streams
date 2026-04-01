@@ -3,14 +3,14 @@
 from importlib.metadata import version as _version_lookup, PackageNotFoundError
 
 # --- Versioning ---
+# __version__.py is the canonical source; importlib.metadata is only used
+# for fully-installed (non-editable) wheels where __version__.py is absent.
 try:
-    # This works if the package was installed via 'pip install .'
-    __version__ = _version_lookup("nbody_streams")
-except PackageNotFoundError:
-    # Fallback for local development
+    from .__version__ import __version__
+except ImportError:
     try:
-        from ._version import __version__
-    except ImportError:
+        __version__ = _version_lookup("nbody_streams")
+    except PackageNotFoundError:
         __version__ = "unknown"
 
 # --- Public API ---
@@ -36,6 +36,11 @@ from . import utils
 from . import coords
 from . import fast_sims
 from . import viz
+try:
+    from . import agama_helper
+    _AGAMA_HELPER_AVAILABLE = True
+except ImportError:
+    _AGAMA_HELPER_AVAILABLE = False
 
 # GPU tree-code (optional - requires libtreeGPU.so; built separately with make)
 try:
@@ -81,6 +86,7 @@ __all__ = [
     "coords",
     "fast_sims",
     "viz",
+    "agama_helper",
     # GPU tree-code (present only when libtreeGPU.so is built)
     "tree_gpu",
     "tree_gravity_gpu",

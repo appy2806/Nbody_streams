@@ -152,6 +152,7 @@ v_los_rel = coords.convert_to_vel_los(xv_stream, reference_xv=xv_prog)  # shape 
 generate_stream_coords(
     xv,
     xv_prog=None,
+    return_rotation=False,
     degrees=True,
     optimizer_fit=False,
     fit_kwargs=None,
@@ -165,20 +166,27 @@ The stream frame is defined by the angular momentum vector of the progenitor
 orbit.  Particles are projected into a rotated frame where phi1 runs along
 the stream and phi2 measures the perpendicular offset.
 
+When `optimizer_fit=True` the frame is refined by a 3-D pole tilt (tilting
+`zhat` in the `xhat`/`yhat` directions) rather than a simple in-plane
+rotation.  This correctly minimises the physical scatter in phi2 and keeps
+the returned `R` consistent with the final coordinates.
+
 **Parameters**
 
 | Name | Type | Description |
 |------|------|-------------|
 | `xv` | ndarray `(N, 6)` or `(S, N, 6)` | Galactocentric phase-space. S = number of streams / time steps, N = particles. |
 | `xv_prog` | ndarray `(6,)`, `(S, 6)`, or None | Progenitor phase-space vector(s). If None, the particle closest to the median position of each stream is used. |
+| `return_rotation` | bool | If True, also return the rotation matrix `R` that defines the stream frame. Default False. |
 | `degrees` | bool | Return angles in degrees; otherwise radians. Default True. |
-| `optimizer_fit` | bool | If True, apply a scipy.optimize rotation in the phi1-phi2 plane to minimise the spread in phi2 (aligns the stream along phi1). |
+| `optimizer_fit` | bool | If True, apply a 3-D pole-tilt optimisation to minimise the spread in phi2 (aligns the stream along phi1). |
 | `fit_kwargs` | dict or None | Extra kwargs forwarded to `scipy.optimize.minimize` when `optimizer_fit=True`. |
 
 **Returns**
 
 - `phi1` — ndarray, shape `(N,)` or `(S, N)`. Stream longitude.
 - `phi2` — ndarray, shape `(N,)` or `(S, N)`. Stream latitude.
+- `R` — ndarray, shape `(3, 3)` or `(S, 3, 3)`. Rotation matrix defining the stream frame (columns are `[xhat, yhat, zhat]`). Only returned when `return_rotation=True`. Pass this `R` to `to_stream_coords` to project new data into the same frame.
 
 **Example**
 
@@ -191,7 +199,72 @@ xv[:, :3] *= 20   # kpc
 xv[:, 3:] *= 100  # km/s
 
 xv_prog = xv[0]
-phi1, phi2 = coords.generate_stream_coords(xv, xv_prog, degrees=True)
+
+# Basic use
+phi1, phi2 = coords.generate_stream_coords(xv, xv_prog)
+
+# With optimised frame — returns R so you can reuse it
+phi1, phi2, R = coords.generate_stream_coords(
+    xv, xv_prog, return_rotation=True, optimizer_fit=True,
+)
+```
+
+---
+
+## `to_stream_coords`
+
+```python
+to_stream_coords(
+    xv,
+    R,
+    degrees=True,
+    return_proper_motions=False,
+    mas_yr=True,
+)
+```
+
+Project galactocentric positions or phase-space vectors into a pre-computed
+stream frame using a rotation matrix `R` returned by `generate_stream_coords`.
+
+This lets you apply the same frame to new data (e.g. different time snapshots,
+comparison streams, or test particles) without recomputing the frame.
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `xv` | ndarray `(..., 3)` or `(..., 6)` | Galactocentric input. Pure positions `(..., 3)` are accepted when `return_proper_motions=False`. Any number of leading batch dimensions is supported. Units: kpc for positions, km/s for velocities. |
+| `R` | ndarray `(3, 3)` or `(S, 3, 3)` | Rotation matrix from `generate_stream_coords(return_rotation=True)`. Columns are `[xhat, yhat, zhat]`. A single `(3, 3)` is broadcast over all batches; `(S, 3, 3)` applies per-batch frames (S must equal `xv.shape[0]`). |
+| `degrees` | bool | Return phi1, phi2 in degrees. Default True. |
+| `return_proper_motions` | bool | If True, also return `mu_phi1*cos(phi2)` and `mu_phi2`. Requires 6-column input. Default False. |
+| `mas_yr` | bool | Convert proper motions to mas/yr (assumes kpc, km/s input). Otherwise returns km/s/kpc. Note: uses galactocentric `r`, not heliocentric distance — not directly comparable to Gaia proper motions. Default True. |
+
+**Returns**
+
+- `phi1`, `phi2` — ndarray. Stream longitude and latitude with the same leading shape as `xv`.
+- `mu_phi1_cosphi2`, `mu_phi2` — ndarray. Proper-motion components. Only returned when `return_proper_motions=True`.
+
+**Raises**
+
+`ValueError` if R shape is invalid, S mismatches, or `return_proper_motions=True` with position-only input.
+
+**Example**
+
+```python
+from nbody_streams import coords
+
+# Generate frame from the reference stream
+phi1, phi2, R = coords.generate_stream_coords(
+    xv_ref, xv_prog, return_rotation=True, optimizer_fit=True,
+)
+
+# Apply the same frame to a second stream (e.g. different snapshot)
+phi1_new, phi2_new = coords.to_stream_coords(xv_new, R)
+
+# Also get galactocentric proper motions
+phi1, phi2, mu1, mu2 = coords.to_stream_coords(
+    xv_ref, R, return_proper_motions=True, mas_yr=True,
+)
 ```
 
 ---

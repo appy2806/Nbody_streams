@@ -62,18 +62,12 @@ def _compute_vel_disp_from_Potential(
 
     except Exception:
         warnings.warn(
-            "Could not compute velocity dispersion from potential; "
-            "falling back to precomputed MW profile.",
+            "Could not compute velocity dispersion from quasispherical DF; "
+            "falling back to Jeans equation.",
             RuntimeWarning,
         )
-        grid_sig_init = np.array([
-            158.34386609, 200.12076947, 208.35638186, 207.53478107,
-            197.97276146, 195.18822847, 188.6893688,  183.74527079,
-            187.35960162, 193.26190609, 173.27866017, 143.68049751,
-            132.84412575, 121.76024275, 106.50314755, 104.28241804,
-        ])
-        logspl_init = agama.Spline(np.log(grid_r), np.log(grid_sig_init))
-        return lambda r: np.exp(logspl_init(np.log(r)))
+        from nbody_streams._chandrasekhar import _jeans_sigma_r
+        return _jeans_sigma_r(pot_for_dynFric_sigma, t_eval=0.0, grid_r=grid_r)
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +339,43 @@ def _create_perturber_potential(
     time_end: float,
     trunc_nfw: bool = True,
     verbose: bool = False,
+    t_window: float | None = None,   # ← new param: time when mass turns on (Gyr, same axis as time_impact)
+) -> Any:
+    """
+    Build a moving NFW perturber potential on a self-consistent orbit.
+
+    The perturber is rewound from its impact phase-space to the simulation
+    start, then integrated forward to present day.
+
+    Parameters
+    ----------
+    add_perturber : dict
+        Must contain ``'mass'``, ``'scaleRadius'``, ``'w_subhalo_impact'``,
+        and ``'time_impact'``.
+    pot_host : agama.Potential
+        Host potential for the perturber orbit.
+    time_total, time_end : float
+        Simulation time span and end epoch (Gyr).
+    trunc_nfw : bool
+        Whether to use Agama style truncated at 10 rs NFW profile.
+    verbose : bool
+        Print status messages.
+
+    Returns
+    -------
+    pot_perturber_moving : agama.Potential
+        Time-dependent NFW potential centred on the perturber trajectory.
+    """
+
+
+def _create_perturber_potential(
+    add_perturber: dict,
+    pot_host,
+    time_total: float,
+    time_end: float,
+    time_window: float | None = None,   # ← new param: time when mass turns on (kpc/(km/s) ~Gyr, same axis as time_impact)
+    trunc_nfw: bool = True,
+    verbose: bool = False,
 ) -> Any:
     """Build a moving NFW perturber potential on a self-consistent orbit.
 
@@ -359,7 +390,10 @@ def _create_perturber_potential(
     pot_host : agama.Potential
         Host potential for the perturber orbit.
     time_total, time_end : float
-        Simulation time span and end epoch (Gyr).
+        Simulation time span and end epoch (kpc/(km/s) ~Gyr).
+    time_window : float, optional
+        Time when the perturber mass turns on (kpc/(km/s) ~Gyr, same axis as time_impact).
+        Defaults to *time_impact* (i.e. mass turns on at impact).
     trunc_nfw : bool
         Whether to use Agama style truncated at 10 rs NFW profile.
     verbose : bool
@@ -389,42 +423,63 @@ def _create_perturber_potential(
 
     if verbose:
         print(
-            f"Adding perturber on self-consistent orbit "
-            f"(mass={add_perturber['mass']:.2e} M_sun)."
+            f"Perturber mass={add_perturber['mass']:.2e} M_sun" 
+            f"ON from t={t_on:.3f} Gyr (impact at t={time_impact:.3f} Gyr)."
         )
 
-    # Rewind perturber from impact to simulation start
-    w_subhalo_init = agama.orbit(
-        potential=pot_host,
-        ic=w_subhalo_impact,
-        time=time_end - time_total - time_impact,
-        timestart=time_end + time_impact,
-        trajsize=1,
-    )[1][0]
+    t_on = time_window if time_window is not None else time_impact  # default: turn on at impact
 
-    # Integrate forward over the full simulation window
+    # # Rewind perturber from impact to simulation start
+    # w_subhalo_init = agama.orbit(
+    #     potential=pot_host,
+    #     ic=w_subhalo_impact,
+    #     time=time_end - time_total - time_impact,
+    #     timestart=time_end + time_impact,
+    #     trajsize=1,
+    # )[1][0]
+    # # Integrate forward over the full simulation window
+    # traj_perturber = np.column_stack(agama.orbit(
+    #     potential=pot_host,
+    #     ic=w_subhalo_init,
+    #     time=time_total,
+    #     timestart=time_end - time_total,
+    #     trajsize=0,
+    # ))
+
+    # No rewind — integrate forward from t_impact only
     traj_perturber = np.column_stack(agama.orbit(
         potential=pot_host,
-        ic=w_subhalo_init,
-        time=time_total,
-        timestart=time_end - time_total,
+        ic=w_subhalo_impact,
+        time=time_end - time_impact,        # forward from impact to end
+        timestart=time_impact,              # using your time axis
         trajsize=0,
     ))
 
-    if trunc_nfw:
-        return agama.Potential(
-            type='spheroid', # double power law-like model.
-            mass=add_perturber['mass']/0.715, # NFW mass in Agama is mass within ~ 5.3 rs, while spheroid takes total mass. Rough conversion factor.
-            scaleRadius=add_perturber['scaleRadius'],
-            outerCutOffRadius=10*add_perturber['scaleRadius'], # cut off radius. 
-            gamma=1, beta=3, # NFW profile power values.
-            cutoffStrength= 4, # steeper cut off.
-            center=traj_perturber, # traj of the perturber. 
-        )
+    # A(t) = 0 before t_on, 1 after. Sharp step via repeated knots.
+    eps = 1e-5  # time — sharp but avoids cubic spline ringing
+    scale_table = np.array([
+        [time_end - time_total,    0.0, 1.0],   # simulation start: mass off
+        [t_on - 2*eps,             0.0, 1.0],   # still off just before
+        [t_on - eps,               0.0, 1.0],   # repeated knot → zero derivative → no ringing
+        [t_on,                     1.0, 1.0],   # mass on
+        [t_on + eps,               1.0, 1.0],   # flat one section → ~zero deriv after step
+        [t_on + 2*eps,             1.0, 1.0],   # flat one section → ~zero deriv after step
+        [time_end,                 1.0, 1.0],   # stays on to end
+    ])
 
-    return agama.Potential(
-        type='nfw', # nfw model.
-        mass=add_perturber['mass'], # mass within ~ 5.3 rs
+    # nfw param dict with time-dependent scale and center. 
+    # the scale table makes the mass grow from 0 to full over the specified time window.
+    nfw_params = dict(
+        mass=add_perturber['mass'], #/0.715, # NFW mass in Agama is mass within ~ 5.3 rs, while spheroid takes total mass.
         scaleRadius=add_perturber['scaleRadius'],
-        center=traj_perturber, # traj of the perturber.
+        center=traj_perturber,
+        scale=scale_table,
     )
+
+    if trunc_nfw:
+        return agama.Potential(type='spheroid', # double power law-like model.
+            outerCutOffRadius=15*add_perturber['scaleRadius'],
+            gamma=1, beta=3, cutoffStrength=4,
+            **nfw_params)
+
+    return agama.Potential(type='nfw', **nfw_params)

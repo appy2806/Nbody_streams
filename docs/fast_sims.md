@@ -65,7 +65,7 @@ released at the tidal radius as the satellite evolves forward to `time_end`.
 | `dynFric` | bool | Enable Chandrasekhar dynamical friction on the progenitor orbit. Default False. |
 | `pot_for_dynFric_sigma` | `agama.Potential` or None | Potential for velocity-dispersion computation (DF friction). |
 | `gala_modified` | bool | Use Gala-modified dispersion parameters (Fardal method only). Default True. |
-| `add_perturber` | dict or None | Perturber properties. Required keys: `'mass'` (M_sun), `'scaleRadius'` (kpc), `'w_subhalo_impact'` (shape `(6,)`), `'time_impact'` (Gyr). The perturber is a truncated NFW on a self-consistent orbit. Set to None to disable. |
+| `add_perturber` | dict or None | Perturber properties. Required keys: `'mass'` (M_sun), `'scaleRadius'` (kpc), `'w_subhalo_impact'` (shape `(6,)`), `'time_impact'` (Gyr). Optional keys: `'time_window'` (Gyr, time when mass turns on — defaults to `time_impact`), `'trunc_nfw'` (bool, default True). Set to None to disable. |
 | `create_ic_method` | Callable | IC generator function. Defaults to `create_ic_particle_spray_chen2025`. Can be replaced with `create_ic_particle_spray_fardal2015`. |
 | `verbose` | bool | Print progress messages. Default False. |
 | `accuracy_integ` | float | Orbit integrator accuracy. Default 1e-7. |
@@ -268,19 +268,34 @@ final_pos = result["part_xv"][:, -1, :3]
 ## Perturber potential
 
 Both `create_particle_spray_stream` and `run_restricted_nbody` accept an
-`add_perturber` dict.  The perturber is placed on a self-consistent orbit
-in `pot_host`: it is rewound from its impact phase-space to the simulation
-start and integrated forward.  By default a truncated NFW profile is used
-(spheroid with outer cutoff at 10 scale radii).
+`add_perturber` dict.  The perturber orbit is integrated **forward** from
+`time_impact` to `time_end` in `pot_host` (no rewind needed).  By default
+a truncated NFW profile is used (spheroid with outer cutoff at 15 scale radii).
+
+The perturber mass is **switched on** at `time_window` (if provided) or at
+`time_impact` by default.  The activation uses a sharp step via repeated
+spline knots so there is no cubic-spline ringing before turn-on.  This lets
+you model a perturber that is on its orbit before the impact but whose
+gravitational influence is only felt from a specified time onward.
 
 Required dict keys:
 
 ```python
 add_perturber = {
-    "mass": 1e9,              # M_sun
-    "scaleRadius": 1.0,       # kpc
-    "w_subhalo_impact": [...], # shape (6,) phase-space at impact
-    "time_impact": 11.5,       # Gyr (epoch of closest approach)
+    "mass": 1e9,               # M_sun
+    "scaleRadius": 1.0,        # kpc
+    "w_subhalo_impact": [...],  # shape (6,) phase-space at impact
+    "time_impact": 11.5,        # Gyr (epoch of closest approach)
+}
+```
+
+Optional dict keys:
+
+```python
+add_perturber = {
+    ...
+    "time_window": 10.0,   # Gyr — mass turns on at this time (default: time_impact)
+    "trunc_nfw": True,     # use truncated NFW profile (default True)
 }
 ```
 
