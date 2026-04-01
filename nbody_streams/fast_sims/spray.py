@@ -341,9 +341,9 @@ def create_particle_spray_stream(
     prog_pot_kind : ``'King'``, ``'Plummer'``, or ``'Plummer_withRcut'``
         Progenitor potential profile.
     time_total : float
-        Look-back time to rewind the orbit (Gyr, >= 0).
+        Look-back time to rewind the orbit (kpc/(km/s)~Gyr, >= 0).
     time_end : float
-        Present-day epoch (Gyr).
+        Present-day epoch (kpc/(km/s)~Gyr).
     time_stripping : np.ndarray, shape ``(N,)``, optional
         Custom particle-release times, where ``N = num_particles // 2 + 1``.
         Values must lie in ``[time_end - time_total, time_end]``.
@@ -360,7 +360,9 @@ def create_particle_spray_stream(
     add_perturber : dict, optional
         Perturber properties.  Must contain ``'mass'`` (M_sun),
         ``'scaleRadius'`` (kpc), ``'w_subhalo_impact'`` (shape ``(6,)``),
-        and ``'time_impact'`` (Gyr).  Set to *None* to disable.
+        ``'time_impact'`` (kpc/(km/s)~Gyr), ``'time_window'`` (kpc/(km/s)~Gyr)-> Defaults to time_impact. 
+        Optionally ``'trunc_nfw=False'``, ``'trunc_nfw=False'``. 
+        Set to *None* to disable.
     create_ic_method : Callable
         IC generator function (must accept a compatible signature).
     verbose : bool
@@ -507,8 +509,10 @@ def create_particle_spray_stream(
 
     # --- Perturber (optional) ---
     if add_perturber['mass'] > 0:
+        trunc_nfw = add_perturber.get('trunc_nfw', True)
+        time_window = add_perturber.get('time_window', None)
         pot_perturber_moving = _create_perturber_potential(
-            add_perturber, pot_host, time_total, time_end, trunc_nfw=True, verbose=verbose, # hard coded for trunc nfw. 
+            add_perturber, pot_host, time_total, time_end, trunc_nfw=trunc_nfw, time_window=time_window, verbose=verbose,  
         )
         pot_total = agama.Potential(pot_host, pot_sat_moving, pot_perturber_moving)
     else:
