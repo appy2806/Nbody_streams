@@ -116,9 +116,11 @@ def run_restricted_nbody(
 
         - ``'time_window'`` : float — full duration of the mass-on window
           (kpc/(km/s) ~Gyr), centred on ``time_impact``.  The subhalo mass
-          is active only in
-          ``[time_impact - time_window/2, time_impact + time_window/2]``.
-          If absent (default) the mass is on for the **entire** integration.
+          is active in ``[time_impact - time_window/2, time_impact + time_window/2]``,
+          clipped to the simulation bounds.  If the turn-off edge reaches or
+          exceeds ``time_end`` the mass stays on for the rest of the
+          simulation (no turn-off transition).  If absent (default) the mass
+          is on for the **entire** integration.
         - ``'trunc_nfw'`` : bool — use a truncated NFW profile (default
           *True*).
     

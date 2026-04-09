@@ -365,8 +365,13 @@ def _create_perturber_potential(
     t_window : float, optional
         Full duration of the mass-on window (same units as *time_impact*).
         The mass turns on at ``time_impact - t_window/2`` and off at
-        ``time_impact + t_window/2``.  If *None* (default) the mass is on
-        for the entire integration.
+        ``time_impact + t_window/2``.  Both edges are clipped to the
+        simulation bounds ``[time_end - time_total, time_end]``:
+        if the turn-on edge falls before the simulation start the mass is
+        on from the very beginning; if the turn-off edge falls at or beyond
+        ``time_end`` the mass stays on for the remainder of the simulation
+        (no turn-off transition is added).  If *None* (default) the mass is
+        on for the entire integration.
     trunc_nfw : bool
         Whether to use Agama style truncated at 10 rs NFW profile.
     verbose : bool
@@ -426,25 +431,46 @@ def _create_perturber_potential(
                 f"ON for full integration (impact at t={time_impact:.3f})."
             )
     else:
-        # Window mode: mass on only within [t_impact - t_window/2, t_impact + t_window/2]
+        # Window mode: mass on within [t_impact - t_window/2, t_impact + t_window/2],
+        # clipped to the simulation bounds [t_start, time_end].
+        # If the window edge falls outside the simulation range the corresponding
+        # transition is dropped and the mass stays on/off through that boundary.
         t_on  = time_impact - t_window / 2.0
         t_off = time_impact + t_window / 2.0
-        scale_table = np.array([
-            [t_start,       0.0, 1.0],
-            [t_on - 2*eps,  0.0, 1.0],
-            [t_on - eps,    0.0, 1.0],   # repeated knot ->no spline ringing
-            [t_on,          1.0, 1.0],
-            [t_on + eps,    1.0, 1.0],
-            [t_off - eps,   1.0, 1.0],
-            [t_off,         0.0, 1.0],
-            [t_off + eps,   0.0, 1.0],   # repeated knot -> no spline ringing
-            [t_off + 2*eps, 0.0, 1.0],
-            [time_end,      0.0, 1.0],
-        ])
+
+        rows = []
+        if t_on <= t_start:
+            # Turn-on is before (or at) sim start — mass on from the beginning
+            rows.append([t_start, 1.0, 1.0])
+        else:
+            rows += [
+                [t_start,      0.0, 1.0],
+                [t_on - 2*eps, 0.0, 1.0],
+                [t_on - eps,   0.0, 1.0],  # repeated knot -> no spline ringing
+                [t_on,         1.0, 1.0],
+                [t_on + eps,   1.0, 1.0],
+            ]
+
+        if t_off >= time_end:
+            # Turn-off is at or beyond sim end — mass stays on until the end
+            rows.append([time_end, 1.0, 1.0])
+        else:
+            rows += [
+                [t_off - eps,   1.0, 1.0],
+                [t_off,         0.0, 1.0],
+                [t_off + eps,   0.0, 1.0],  # repeated knot -> no spline ringing
+                [t_off + 2*eps, 0.0, 1.0],
+                [time_end,      0.0, 1.0],
+            ]
+
+        scale_table = np.array(rows)
+
         if verbose:
+            on_str  = f"t_start ({t_start:.3f})" if t_on  <= t_start  else f"{t_on:.3f}"
+            off_str = f"t_end ({time_end:.3f})"  if t_off >= time_end else f"{t_off:.3f}"
             print(
                 f"Perturber mass={add_perturber['mass']:.2e} M_sun "
-                f"ON in window [{t_on:.3f}, {t_off:.3f}] "
+                f"ON in window [{on_str}, {off_str}] "
                 f"(impact at t={time_impact:.3f})."
             )
 
