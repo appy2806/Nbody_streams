@@ -586,10 +586,10 @@ def create_particle_spray_stream(
         part_xv = np.stack(
             [orbit(save_times) for orbit in result], axis=0,
         )
-        
+
     else:
         # Single snapshot: just integrate to final time without interpolation.
-        part_xv = np.vstack(
+        part_xv = np.concatenate(
             agama.orbit(
                 potential=pot_total,
                 ic=ic_stream[:-2],
@@ -598,7 +598,7 @@ def create_particle_spray_stream(
                 trajsize=1, # Only final state
                 accuracy=accuracy_integ,
                 verbose=verbose,
-                )[:, 1]
+                )[:, 1].tolist(), axis=0
             )
 
     return {
