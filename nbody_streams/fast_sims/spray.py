@@ -558,16 +558,11 @@ def create_particle_spray_stream(
     ic_stream = create_ic_method(**filtered_args)
     time_seed = np.repeat(time_stripping, 2)
 
-    # --- Save times ---
+    # --- Progenitor interpolation for multi-snapshot ---
     if save_rate > 1:
         save_times = np.linspace(
             time_end - time_total, time_end - 1e-6, save_rate,
-        )
-    else:
-        save_times = time_end - 1e-5 # clip for floating points
-
-    # --- Progenitor interpolation for multi-snapshot ---
-    if save_rate > 1:
+        )       
         if verbose:
             print("Interpolating particle trajectories in time.")
         prog_interp = interp1d(
@@ -576,21 +571,35 @@ def create_particle_spray_stream(
         )
         prog_xv = prog_interp(save_times)
 
-    # --- Integrate all stream particles ---
-    result = agama.orbit(
-        potential=pot_total,
-        ic=ic_stream[:-2],
-        timestart=time_seed[:-2],
-        time=time_end - time_seed[:-2],
-        dtype=object, # Agama's inbuild trajectory interpolator. 
-        accuracy=accuracy_integ,
-        verbose=verbose,
-    )
+        # --- Integrate all stream particles ---
+        result = agama.orbit(
+            potential=pot_total,
+            ic=ic_stream[:-2],
+            timestart=time_seed[:-2],
+            time=time_end - time_seed[:-2],
+            dtype=object, # Agama's inbuild trajectory interpolator. 
+            accuracy=accuracy_integ,
+            verbose=verbose,
+        )
 
-    # ======== Particle Trajectory from the interpolator ========
-    part_xv = np.stack(
-        [orbit(save_times) for orbit in result], axis=0,
-    )
+        # ======== Particle Trajectory from the interpolator ========
+        part_xv = np.stack(
+            [orbit(save_times) for orbit in result], axis=0,
+        )
+        
+    else:
+        # Single snapshot: just integrate to final time without interpolation.
+        part_xv = np.vstack(
+            agama.orbit(
+                potential=pot_total,
+                ic=ic_stream[:-2],
+                timestart=time_seed[:-2],
+                time=time_end - time_seed[:-2],
+                trajsize=1, # Only final state
+                accuracy=accuracy_integ,
+                verbose=verbose,
+                )[:, 1]
+            )
 
     return {
         'times': np.around(save_times, decimals=5) if save_rate > 1 else time_sat,
