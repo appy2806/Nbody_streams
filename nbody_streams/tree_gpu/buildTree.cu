@@ -47,7 +47,7 @@ namespace treeBuild
 
   __device__   int *memPool;
   __device__   CellData *cellDataList;
-  __device__   void *ptclVel_tmp;
+  __device__   void *ptclAux_tmp;
   __device__   int *origIdx_buf;
 
   template<int NTHREAD2>
@@ -542,7 +542,7 @@ namespace treeBuild
             {
               Particle4<T> pos = buff[i];
               const int oidx = pos.get_idx();
-              Particle4<T> vel = ((Particle4<T>*)ptclVel_tmp)[oidx];
+              Particle4<T> vel = ((Particle4<T>*)ptclAux_tmp)[oidx];
 #ifdef PSHFL_SANITY_CHECK
               pos.mass() = T(oidx);
 #else
@@ -560,7 +560,7 @@ namespace treeBuild
             {
               Particle4<T> pos = buff[i];
               const int oidx = pos.get_idx();
-              Particle4<T> vel = ((Particle4<T>*)ptclVel_tmp)[oidx];
+              Particle4<T> vel = ((Particle4<T>*)ptclAux_tmp)[oidx];
 #ifdef PSHFL_SANITY_CHECK
               pos.mass() = T(oidx);
 #else
@@ -620,12 +620,20 @@ namespace treeBuild
    * buildOctant writes to instead of recursively launching children.
    *---------------------------------------------------------------------*/
   /* Extract per-particle eps from the tree-sorted vel buffer (.x field) into a flat float array.
-   * Called after buildOctreeHost + pointer swap so that d_ptclVel is in tree order. */
-  static __global__ void extract_eps(const int n, const float4 *d_vel, float *d_epsTree)
+   * Called after buildOctreeHost + pointer swap so that d_ptclAux is in tree order. */
+  static __global__ void extract_eps(const int n, const float4 *d_aux, float *d_epsTree)
   {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
-    d_epsTree[i] = d_vel[i].x;
+    d_epsTree[i] = d_aux[i].x;
+  }
+
+  /* Extract active flag from tree-sorted aux buffer (.y field) into a flat float array. */
+  static __global__ void extract_active(const int n, const float4 *d_aux, float *d_activeTree)
+  {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    d_activeTree[i] = d_aux[i].y;
   }
 
   template<int NLEAF, typename T>
@@ -636,7 +644,7 @@ namespace treeBuild
         int *d_stack_memory_pool,
         Particle4<T> *ptcl,
         Particle4<T> *buff,
-        Particle4<T> *d_ptclVel,
+        Particle4<T> *d_ptclAux,
         int *d_origIdx_ptr,
         /* Pre-allocated scratch (eliminates per-step cudaMalloc/cudaFree): */
         int  *d_octCounter_pre,    /* (8+8)        ints */
@@ -653,8 +661,8 @@ namespace treeBuild
         CUDA_SAFE_CALL(cudaMemcpyToSymbol(cellDataList, &tmp, sizeof(CellData*)));
       }
       {
-        void *tmp = (void*)d_ptclVel;
-        CUDA_SAFE_CALL(cudaMemcpyToSymbol(ptclVel_tmp, &tmp, sizeof(void*)));
+        void *tmp = (void*)d_ptclAux;
+        CUDA_SAFE_CALL(cudaMemcpyToSymbol(ptclAux_tmp, &tmp, sizeof(void*)));
       }
       {
         int *tmp = d_origIdx_ptr;
@@ -976,27 +984,27 @@ void Treecode<real_t>::buildTree(const int nLeaf)
     {
       case 16:
         treeBuild::buildOctreeHost<16,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclAux, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       case 24:
         treeBuild::buildOctreeHost<24,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclAux, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       case 32:
         treeBuild::buildOctreeHost<32,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclAux, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       case 48:
         treeBuild::buildOctreeHost<48,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclAux, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       case 64:
         treeBuild::buildOctreeHost<64,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclAux, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       default:
@@ -1013,17 +1021,23 @@ void Treecode<real_t>::buildTree(const int nLeaf)
     if (verbose){
       fprintf(stderr, " buildOctree done in %g sec : %g Mptcl/sec\n",  dt, nPtcl/1e6/dt);
     }
-      std::swap(d_ptclPos_tmp.ptr, d_ptclVel.ptr);
-      /* After the swap, d_ptclVel is the tree-sorted vel buffer with eps in .x.
-       * Extract eps into the dedicated float array so makeGroups and computeForces can use it. */
+      std::swap(d_ptclPos_tmp.ptr, d_ptclAux.ptr);
+      /* After the swap, d_ptclAux is the tree-sorted auxiliary buffer (.x=eps, .y=active).
+       * Extract eps and active flag into their dedicated flat arrays so makeGroups and
+       * computeForces can access them by tree-sorted index. */
       {
         const int nthread = 256;
         const int nblock  = (nPtcl - 1) / nthread + 1;
         treeBuild::extract_eps<<<nblock, nthread>>>(
             nPtcl,
-            (const float4*)d_ptclVel.ptr,
+            (const float4*)d_ptclAux.ptr,
             d_ptclEpsTree.ptr);
         kernelSuccess("extract_eps");
+        treeBuild::extract_active<<<nblock, nthread>>>(
+            nPtcl,
+            (const float4*)d_ptclAux.ptr,
+            d_ptclActiveTree.ptr);
+        kernelSuccess("extract_active");
       }
   }
 

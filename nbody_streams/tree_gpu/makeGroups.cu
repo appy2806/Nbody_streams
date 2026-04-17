@@ -297,6 +297,9 @@ void Treecode<real_t>::makeGroups(int levelSplit, const int nCrit)
    * can load eps_i (query particle softening) directly by group index. */
   makeGroups::gather_float<<<nblock,nthread>>>(nPtcl, d_value, d_ptclEpsTree.ptr, d_ptclEpsGrp.ptr);
 
+  /* Shuffle per-particle active flag from tree order → group order (mirrors eps). */
+  makeGroups::gather_float<<<nblock,nthread>>>(nPtcl, d_value, d_ptclActiveTree.ptr, d_ptclActiveGrp.ptr);
+
   cuda_mem<int> d_ptclBegIdx, d_ptclEndIdx;
   cuda_mem<unsigned long long> d_keys_inv;
   d_ptclBegIdx.alloc(nPtcl);

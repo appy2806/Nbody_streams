@@ -1985,3 +1985,304 @@ def iterative_unbinding(
             results.append(bound_history_star)
 
     return tuple(results), center_position, center_velocity
+
+
+# ---------------------------------------------------------------------------
+# Section 8. Simulation parameter suggestions
+# ---------------------------------------------------------------------------
+
+# Unit conversion: 1 kpc / (km/s) = 0.9778 Gyr
+_KPC_KMS_TO_GYR = 0.97779
+
+
+def half_mass_radius(pos: np.ndarray, mass: np.ndarray) -> float:
+    """Return the half-mass radius (kpc) measured from the centre of mass.
+
+    Parameters
+    ----------
+    pos : (N, 3) array, kpc
+    mass : (N,) array, Msun (or any consistent mass unit)
+
+    Returns
+    -------
+    float — radius enclosing half the total mass
+    """
+    pos = np.asarray(pos, dtype=np.float64)
+    mass = np.asarray(mass, dtype=np.float64)
+    com = np.average(pos, weights=mass, axis=0)
+    r = np.linalg.norm(pos - com, axis=1)
+    idx = np.argsort(r)
+    m_cum = np.cumsum(mass[idx])
+    half = m_cum[-1] / 2.0
+    i_half = np.searchsorted(m_cum, half)
+    i_half = min(i_half, len(r) - 1)
+    return float(r[idx][i_half])
+
+
+def suggest_simulation_params(
+    pos,
+    mass,
+    vel,
+    G: float = G_DEFAULT,
+    external_potential=None,
+    t_eval: float = 0.0,
+    n_cross_per_dt: int = 10,
+    eta: float = 0.025,
+    eta_v: float = 0.1,
+    n_peri_steps: int = 20,
+    k_density: int = 32,
+    verbose: bool = True,
+) -> dict:
+    """Suggest softening (eps) and maximum timestep (dt_max) for a satellite simulation.
+
+    Evaluates four independent criteria and returns the most restrictive value:
+
+    **Softening eps:**
+
+    - Mean inter-particle spacing in the core (90th-percentile local density),
+      scaled by a factor 4 following Power et al. (2003).
+    - Bounds: ``[0.5 * eps_ips, 0.1 * r_half]``
+
+    **Timestep criteria (self-gravity):**
+
+    1. *Drift criterion*:
+       ``dt_drift = eps / (n_cross_per_dt * v_95)``
+       Ensures particles cross at most ``1/n_cross_per_dt`` softening lengths per step.
+    2. *Dehnen acceleration criterion*:
+       ``dt_dehnen = eta * sqrt(eps / a_max)``
+       where ``a_max = G * M_total / eps^2`` (virial estimate, no force evaluation needed).
+    3. *Velocity criterion*:
+       ``dt_vel = eta_v * eps / v_95``
+
+    **Timestep criteria (orbit in external field, if external_potential is given):**
+
+    4. *Orbital period criterion*:
+       ``dt_orbit = T_orbit_est / n_peri_steps``
+       Orbital period estimated from ``T ≈ 2π |v_com| / |a_ext_com|`` (circular approximation).
+    5. *Dehnen + velocity criteria with total (self + external) acceleration.*
+
+    Parameters
+    ----------
+    pos : array-like, shape (N, 3), kpc
+    mass : array-like, shape (N,), Msun
+    vel : array-like, shape (N, 3), km/s
+    G : float
+        Gravitational constant in units of kpc (km/s)^2 Msun^{-1}.
+        Default: ``G_DEFAULT = 4.300917e-6``.
+    external_potential : callable or None
+        Must accept ``(pos_array, t)`` where pos_array has shape (M, 3) in kpc
+        and return accelerations of shape (M, 3) in (km/s)^2/kpc.
+        Compatible with ``agama.Potential.force``.
+    t_eval : float
+        Time (Gyr) at which to evaluate the external potential. Default 0.
+    n_cross_per_dt : int
+        Drift criterion: allow at most ``1/n_cross_per_dt`` softening-length crossings
+        per step. Default 10.
+    eta : float
+        Dehnen criterion coefficient. Default 0.025.
+    eta_v : float
+        Velocity criterion coefficient. Default 0.1.
+    n_peri_steps : int
+        Orbital criterion: number of timesteps per pericenter passage. Default 20.
+    k_density : int
+        k-nearest neighbours for local density estimation. Default 32.
+    verbose : bool
+        Print a formatted summary table. Default True.
+
+    Returns
+    -------
+    dict with keys:
+
+    ``eps``, ``eps_lower``, ``eps_upper``, ``r_half``, ``rho_core`` — softening estimates
+
+    ``dt_drift``, ``dt_dehnen``, ``dt_vel``, ``dt_self`` — self-gravity criteria (Gyr)
+
+    ``dt_orbit``, ``dt_orbit_dehnen``, ``v_com``, ``a_ext_com``, ``t_orbit_est`` —
+    orbit criteria (Gyr); ``None`` if no external potential given
+
+    ``dt_max``, ``dt_max_Myr`` — recommended maximum timestep (Gyr and Myr)
+
+    ``dt_min_nbins6``, ``dt_min_nbins8`` — finest bin size for block timestepping (Gyr)
+    """
+    from scipy.spatial import cKDTree as _cKDTree
+
+    pos  = np.asarray(pos,  dtype=np.float64)
+    mass = np.asarray(mass, dtype=np.float64)
+    vel  = np.asarray(vel,  dtype=np.float64)
+    N = len(mass)
+
+    # ------------------------------------------------------------------
+    # Softening
+    # ------------------------------------------------------------------
+    kd = _cKDTree(pos)
+    dists, _ = kd.query(pos, k=min(k_density + 1, N))
+    r_k = dists[:, -1]                               # dist to k-th neighbour
+    vol_k = (4.0 / 3.0) * np.pi * r_k ** 3
+    # Guard against zero-distance duplicates
+    vol_k = np.where(vol_k > 0, vol_k, np.finfo(float).tiny)
+    rho_local = (k_density * np.mean(mass)) / vol_k   # Msun/kpc^3
+
+    rho_core = float(np.percentile(rho_local, 90))    # 90th percentile = core density
+    m_mean = float(np.mean(mass))
+    eps_ips = (3.0 * m_mean / (4.0 * np.pi * rho_core)) ** (1.0 / 3.0)
+    eps = 4.0 * eps_ips                               # Power+2003 prefactor
+
+    r_half = half_mass_radius(pos, mass)
+    eps_lower = 0.5 * eps_ips
+    eps_upper = 0.1 * r_half
+
+    # ------------------------------------------------------------------
+    # Self-gravity timestep criteria
+    # ------------------------------------------------------------------
+    v_mag = np.linalg.norm(vel, axis=1)
+    v95   = float(np.percentile(v_mag, 95))
+    v95   = max(v95, 1e-10)
+
+    M_total = float(np.sum(mass))
+    a_max_est = G * M_total / (eps ** 2)              # (km/s)^2/kpc, virial estimate
+
+    dt_drift  = eps / (n_cross_per_dt * v95)          # Gyr-equivalent after unit fix
+    dt_dehnen = eta * np.sqrt(eps / a_max_est)        # same units as sqrt(kpc / (km/s)^2/kpc)
+    dt_vel    = eta_v * eps / v95                     # kpc / (km/s)
+
+    # Unit fix: sqrt(kpc / (km/s)^2/kpc) = kpc/(km/s) = _KPC_KMS_TO_GYR Gyr
+    # and kpc/(km/s) = _KPC_KMS_TO_GYR Gyr for the linear criteria too
+    dt_drift  *= _KPC_KMS_TO_GYR
+    dt_dehnen *= _KPC_KMS_TO_GYR
+    dt_vel    *= _KPC_KMS_TO_GYR
+
+    dt_self = min(dt_drift, dt_dehnen, dt_vel)
+
+    # ------------------------------------------------------------------
+    # External potential criteria
+    # ------------------------------------------------------------------
+    dt_orbit = dt_orbit_dehnen = None
+    v_com_mag = a_ext_com = t_orbit_est = None
+
+    if external_potential is not None:
+        com  = np.average(pos, weights=mass, axis=0)
+        vcom = np.average(vel, weights=mass, axis=0)
+        v_com_mag = float(np.linalg.norm(vcom))
+
+        a_ext_com_vec = np.asarray(
+            external_potential(com.reshape(1, 3), t_eval), dtype=np.float64
+        ).reshape(-1)
+        a_ext_com = float(np.linalg.norm(a_ext_com_vec))  # (km/s)^2/kpc
+
+        if a_ext_com > 0 and v_com_mag > 0:
+            # T ≈ 2π v / a, with v in km/s and a in (km/s)^2/kpc:
+            # T [kpc/(km/s)] × _KPC_KMS_TO_GYR → Gyr
+            t_orbit_est = float(
+                2.0 * np.pi * v_com_mag / a_ext_com * _KPC_KMS_TO_GYR
+            )
+            dt_orbit = t_orbit_est / n_peri_steps
+
+        # Total-acceleration Dehnen + velocity criteria
+        try:
+            a_ext_all = np.asarray(
+                external_potential(pos, t_eval), dtype=np.float64
+            )                                         # (N, 3), (km/s)^2/kpc
+            a_ext_mag = np.linalg.norm(a_ext_all, axis=1)
+        except Exception:
+            a_ext_mag = np.full(N, a_ext_com if a_ext_com else 0.0)
+
+        # Per-particle self-gravity estimate: a_self_i ≈ G * m_mean / eps^2
+        a_self_est = np.full(N, a_max_est)
+        a_total_95 = float(np.percentile(a_ext_mag + a_self_est, 95))
+        a_total_95 = max(a_total_95, 1e-30)
+
+        dt_orbit_dehnen_raw = eta * np.sqrt(eps / a_total_95) * _KPC_KMS_TO_GYR
+        dt_orbit_vel_raw    = eta_v * eps / v95 * _KPC_KMS_TO_GYR
+        dt_orbit_dehnen = min(dt_orbit_dehnen_raw, dt_orbit_vel_raw)
+
+    # ------------------------------------------------------------------
+    # Combined recommendation
+    # ------------------------------------------------------------------
+    dt_candidates = [dt_self]
+    if dt_orbit is not None:
+        dt_candidates.append(dt_orbit)
+    if dt_orbit_dehnen is not None:
+        dt_candidates.append(dt_orbit_dehnen)
+    dt_max = min(dt_candidates)
+    dt_max_Myr = dt_max * 1000.0
+
+    result = dict(
+        # Softening
+        eps=float(eps),
+        eps_lower=float(eps_lower),
+        eps_upper=float(eps_upper),
+        r_half=float(r_half),
+        rho_core=float(rho_core),
+        # Self-gravity dt
+        dt_drift=float(dt_drift),
+        dt_dehnen=float(dt_dehnen),
+        dt_vel=float(dt_vel),
+        dt_self=float(dt_self),
+        # External orbit dt
+        dt_orbit=float(dt_orbit) if dt_orbit is not None else None,
+        dt_orbit_dehnen=float(dt_orbit_dehnen) if dt_orbit_dehnen is not None else None,
+        v_com=float(v_com_mag) if v_com_mag is not None else None,
+        a_ext_com=float(a_ext_com) if a_ext_com is not None else None,
+        t_orbit_est=float(t_orbit_est) if t_orbit_est is not None else None,
+        # Combined
+        dt_max=float(dt_max),
+        dt_max_Myr=float(dt_max_Myr),
+        dt_min_nbins6=float(dt_max / 64.0),
+        dt_min_nbins8=float(dt_max / 256.0),
+    )
+
+    if verbose:
+        _print_suggest_summary(result, N, M_total, v95)
+
+    return result
+
+
+def _print_suggest_summary(r: dict, N: int, M_total: float, v95: float) -> None:
+    """Print a formatted summary of suggest_simulation_params results."""
+    def _fmt_gyr_myr(val):
+        if val is None:
+            return "  N/A"
+        return f"{val:.6f} Gyr = {val*1000:8.3f} Myr"
+
+    print("=" * 52)
+    print("  suggest_simulation_params")
+    print("=" * 52)
+    print(f"  N particles  : {N:,}")
+    print(f"  Total mass   : {M_total:.3e} Msun")
+    print(f"  r_half       : {r['r_half']:.4f} kpc")
+    print(f"  rho_core     : {r['rho_core']:.3e} Msun/kpc^3")
+    print(f"  v_95         : {v95:.2f} km/s")
+    print()
+    print("  --- Softening ---")
+    print(f"  eps (suggested)  : {r['eps']:.4f} kpc"
+          "   [= 4 x mean inter-particle spacing in core]")
+    print(f"  eps (lower bound): {r['eps_lower']:.4f} kpc")
+    print(f"  eps (upper bound): {r['eps_upper']:.4f} kpc")
+    print()
+    print("  --- Timestep (self-gravity) ---")
+    print(f"  dt_drift     : {_fmt_gyr_myr(r['dt_drift'])}"
+          f"   [eps / ({10} x v_95)]")
+    print(f"  dt_dehnen    : {_fmt_gyr_myr(r['dt_dehnen'])}"
+          "   [eta * sqrt(eps / a_max)]")
+    print(f"  dt_vel       : {_fmt_gyr_myr(r['dt_vel'])}"
+          "   [eta_v * eps / v_95]")
+    print(f"  -> dt_self   : {_fmt_gyr_myr(r['dt_self'])}   (most restrictive)")
+    if r['dt_orbit'] is not None:
+        print()
+        print("  --- Timestep (external orbit) ---")
+        print(f"  v_com        : {r['v_com']:.2f} km/s")
+        print(f"  |a_ext| COM  : {r['a_ext_com']:.5f} (km/s)^2/kpc")
+        print(f"  T_orbit est  : {r['t_orbit_est']:.4f} Gyr")
+        print(f"  dt_orbit     : {_fmt_gyr_myr(r['dt_orbit'])}"
+              "   [T_orbit / n_peri_steps]")
+        print(f"  dt_orb_deh   : {_fmt_gyr_myr(r['dt_orbit_dehnen'])}"
+              "   [Dehnen+vel with total acc]")
+    print()
+    print("  --- Recommendation ---")
+    print(f"  dt_max       : {_fmt_gyr_myr(r['dt_max'])}   (most restrictive)")
+    print(f"  eps          : {r['eps']:.4f} kpc")
+    print()
+    print("  --- Block timestep hints (block_timestep=True) ---")
+    print(f"  nbins=6 -> dt_min = {r['dt_min_nbins6']*1000:.4f} Myr  (finest bin, 64x range)")
+    print(f"  nbins=8 -> dt_min = {r['dt_min_nbins8']*1000:.4f} Myr  (finest bin, 256x range)")
+    print("=" * 52)
