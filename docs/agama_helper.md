@@ -26,6 +26,7 @@ from nbody_streams import agama_helper as ah
 - [Reading API](#reading-api)
 - [HDF5 I/O](#hdf5-io)
 - [Loading Agama potentials](#loading-agama-potentials)
+- [GPU potential evaluation (PotentialGPU)](#gpu-potential-evaluation-potentialgpu)
 - [Center parameter](#center-parameter)
 - [FIRE helpers](#fire-helpers)
 - [Potential fitting](#potential-fitting)
@@ -35,19 +36,21 @@ from nbody_streams import agama_helper as ah
 ## Overview
 
 The `agama_helper` module sits on top of Agama and provides a Python-native
-workflow for the two most common expansion types:
+workflow for the two most common expansion types, plus a GPU acceleration layer:
 
 | Expansion | Agama type | File extension | Use case |
 |---|---|---|---|
 | Multipole | `Multipole` | `.coef_mult` | Dark matter halos, spheroidal components |
 | CylSpline | `CylSpline` | `.coef_cylsp` | Stellar discs, baryonic components |
 
-The design separates three concerns:
+The design separates four concerns:
 
 ```
-read_*   ->  MultipoleCoefs / CylSplineCoefs   (structured in-memory data)
-write_*  ->  HDF5 archives                     (compact storage)
-load_*   ->  agama.Potential                   (ready for orbit integration)
+read_*        ->  MultipoleCoefs / CylSplineCoefs   (structured in-memory data)
+write_*       ->  HDF5 archives                     (compact storage)
+load_*        ->  agama.Potential  (default)         (ready for CPU orbit integration)
+              ->  PotentialGPU    (gpu=True)          (GPU-accelerated, drop-in replacement)
+PotentialGPU  ->  GPU potential from any source      (type=, file=, dataclass, agama.Potential)
 ```
 
 ---
@@ -286,12 +289,13 @@ MW_mult.h5
 
 ## Loading Agama potentials
 
-### `load_agama_potential(source, group_name="snap_000", dataset_name="coefs", center=None, keep_lm_mult=None, keep_m_cylspl=None, include_negative_m=True)`
+### `load_agama_potential(source, group_name="snap_000", dataset_name="coefs", center=None, keep_lm_mult=None, keep_m_cylspl=None, include_negative_m=True, gpu=False)`
 
-Load a **single-snapshot** Agama potential.
+Load a **single-snapshot** potential.  By default returns `agama.Potential`;
+pass `gpu=True` for a GPU-accelerated drop-in replacement.
 
 ```python
-# From any source type
+# --- CPU (agama.Potential) ---
 pot = ah.load_agama_potential("potential/090.dark.none_8.coef_mult")
 pot = ah.load_agama_potential("MW_mult.h5", group_name="snap_090")
 pot = ah.load_agama_potential(mc.zeroed([0, 2]))   # from modified dataclass
@@ -308,41 +312,57 @@ pot = ah.load_agama_potential("MW_mult.h5",
 pot = ah.load_agama_potential("MW_cylsp.h5",
                                group_name="snap_090",
                                keep_m_cylspl=[0, 2])
+
+# --- GPU (PotentialGPU) ---
+pot_gpu = ah.load_agama_potential("potential/090.dark.none_8.coef_mult", gpu=True)
+pot_gpu = ah.load_agama_potential("potential/090.bar.none_8.coef_cylsp", gpu=True)
+pot_gpu = ah.load_agama_potential("MW_mult.h5", group_name="snap_090", gpu=True)
+pot_gpu = ah.load_agama_potential(mc.zeroed([(0,0),(2,0)]), gpu=True)
+
+# Filtering still applies before GPU construction
+pot_gpu = ah.load_agama_potential("MW_mult.h5", group_name="snap_090",
+                                   keep_lm_mult=[0, 2], gpu=True)
+
+# center= wraps in ShiftedPotentialGPU (array, not file path)
+pot_gpu = ah.load_agama_potential("MW_mult.h5", gpu=True,
+                                   center=np.array([1.0, 0.0, 0.0]))
+pot_gpu = ah.load_agama_potential("MW_mult.h5", gpu=True,
+                                   center=lmc_trajectory[:, :4])  # (T,4) [t,x,y,z]
 ```
 
 **Type-safety:**
 - Passing `keep_lm_mult` to a CylSpline source raises `TypeError`.
 - Passing `keep_m_cylspl` to a Multipole source raises `TypeError`.
-- Passing an Evolving config (`.ini`) raises `TypeError` with a pointer to
-  `load_agama_evolving_potential`.
+- Passing an Evolving config raises `TypeError` — use `load_agama_evolving_potential`.
 
 All temporary files are removed in a `finally` block (even on failure).
 
 ---
 
-### `load_agama_evolving_potential(source, times=None, *, group_names=None, dataset_name="coefs", center=None, interp_linear=True, keep_lm_mult=None, keep_m_cylspl=None, include_negative_m=True)`
+### `load_agama_evolving_potential(source, times=None, *, group_names=None, dataset_name="coefs", center=None, interp_linear=True, keep_lm_mult=None, keep_m_cylspl=None, include_negative_m=True, gpu=False)`
 
-Build a **time-evolving** `agama.Potential` from an HDF5 archive or a native
-Agama Evolving `.ini` file.
+Build a **time-evolving** potential from an HDF5 archive or a native Agama
+Evolving `.ini` file.
 
 ```python
-# From HDF5 with embedded times
+# --- CPU (agama.Potential) ---
 pot_ev = ah.load_agama_evolving_potential("MW_mult.h5")
-
-# From HDF5, times provided explicitly (overrides embedded times)
 pot_ev = ah.load_agama_evolving_potential("MW_mult.h5",
                                            times=np.linspace(6, 14, 11))
-
-# From a native Agama Evolving .ini file
 pot_ev = ah.load_agama_evolving_potential("potential/MW_mult.ini")
-
-# With per-snapshot filtering
 pot_ev = ah.load_agama_evolving_potential("MW_mult.h5", keep_lm_mult=[0])
 pot_ev = ah.load_agama_evolving_potential("MW_cylsp.h5", keep_m_cylspl=[0, 2])
+
+# --- GPU (EvolvingPotentialGPU) ---
+pot_ev = ah.load_agama_evolving_potential("MW_mult.h5", gpu=True)
+pot_ev = ah.load_agama_evolving_potential("MW_mult.h5",
+                                           times=np.linspace(6, 14, 11),
+                                           keep_lm_mult=[0, 2], gpu=True)
 ```
 
-The function materialises every snapshot to `/dev/shm`, assembles a new
-`Evolving` config, constructs the potential, and cleans up all temporaries.
+With `gpu=True` the function builds one `PotentialGPU` per snapshot and
+returns an `EvolvingPotentialGPU` with linear time-interpolation (controlled
+by `interp_linear`).  All filtering is applied before GPU construction.
 
 **Agama `.ini` format** (parsed automatically):
 
@@ -375,10 +395,126 @@ ini_path = ah.create_evolving_ini(
 
 ---
 
+## GPU potential evaluation (PotentialGPU)
+
+`PotentialGPU` is a GPU-accelerated drop-in for `agama.Potential` that targets
+N ≥ 50 k particles where GPU throughput gives a 5–10× speedup.  It is
+importable directly or reached via `load_agama_potential(gpu=True)`.
+
+```python
+from nbody_streams.agama_helper import PotentialGPU
+```
+
+### Supported types
+
+| Source | GPU class |
+|---|---|
+| Multipole `.coef_mul` / `.coef_mul_DR` | `MultipolePotentialGPU` |
+| CylSpline `.coef_cylsp_DR` | `CylSplinePotentialGPU` |
+| Analytic: `NFW`, `Plummer`, `Hernquist`, `Isochrone` | Direct CuPy kernel |
+| Analytic: `MiyamotoNagai`, `LogHalo`/`Logarithmic` | Direct CuPy kernel |
+| Analytic: `DehnenSpherical` (γ ∈ [0,2)) | Direct CuPy kernel |
+| `Disk` | `CompositePotentialGPU(DiskAnsatzGPU + MultipolePotentialGPU)` |
+| `Spheroid`, `King` | Agama CPU export → `MultipolePotentialGPU` |
+| Multi-component `.ini` / any text file with `[Potential]` | `CompositePotentialGPU` |
+| `EvolvingPotentialGPU` | Linear lerp of snapshot GPU potentials |
+
+### Factory: `PotentialGPU(...)`
+
+Mirrors `agama.Potential` — accepts the same argument styles:
+
+```python
+# Analytic type (case-insensitive type= and kwargs)
+pot = PotentialGPU(type='NFW', mass=1e12, scaleRadius=20)
+pot = PotentialGPU(type='nfw', Mass=1e12, ScaleRadius=20)   # case-insensitive
+
+# BFE from file (auto-detects Multipole vs CylSpline by content)
+pot = PotentialGPU(file='snap.coef_mul_DR')
+pot = PotentialGPU(file='bar.coef_cylsp_DR')
+
+# Multi-section INI / any text file with [Potential ...] headers
+pot = PotentialGPU(file='potential.ini')        # .ini extension
+pot = PotentialGPU(file='potential.dat')        # any extension: content-detected
+pot = PotentialGPU(file='potential')            # no extension: also works
+
+# Arbitrary section header names (case-insensitive, Agama-compatible)
+# potential.ini:
+#   [Potential halo]
+#   type = NFW
+#   mass = 1e12
+#   scaleRadius = 20
+#   [Potential disk]
+#   type = MiyamotoNagai
+#   mass = 5e10
+#   scaleRadius = 3
+#   scaleHeight = 0.3
+pot = PotentialGPU(file='potential.ini')   # → CompositePotentialGPU([NFW, MN])
+
+# From MultipoleCoefs / CylSplineCoefs dataclass
+pot = PotentialGPU(mc)
+pot = PotentialGPU(mc.zeroed([(0,0),(2,0)]))
+
+# From agama.Potential (exports to BFE)
+pot = PotentialGPU(agama.Potential(type='Spheroid', ...))
+
+# Composite: variadic positional args
+pot = PotentialGPU(pot_halo, pot_disk, pot_lmc)
+
+# Modifiers
+pot = PotentialGPU(mc, center=[x0, y0, z0])           # static shift
+pot = PotentialGPU(mc, center=lmc_traj[:, :4])        # time-varying [t,x,y,z]
+pot = PotentialGPU(mc, center=lmc_traj[:, :7])        # Hermite spline [t,x,y,z,vx,vy,vz]
+pot = PotentialGPU(mc, scale=2.0, ampl=0.5)           # scaled
+
+# + operator composes into CompositePotentialGPU
+pot = pot_halo + pot_disk + pot_lmc
+```
+
+### API (matches `agama.Potential`)
+
+All methods accept CuPy or NumPy arrays of shape `(N, 3)` or `(3,)`:
+
+```python
+phi  = pot.potential(xyz, t=0.)       # (N,)   [km/s]^2
+F    = pot.force(xyz, t=0.)           # (N,3)  [km/s]^2/kpc  (= -grad Phi)
+rho  = pot.density(xyz, t=0.)         # (N,)   [Msol/kpc^3]
+F, dF = pot.forceDeriv(xyz, t=0.)    # (N,3), (N,6)
+phi, F, dF = pot.evalDeriv(xyz, t=0.)
+phi  = pot.eval(xyz, pot=True)        # Agama-compatible eval
+F, dF = pot.eval(xyz, acc=True, der=True)
+```
+
+`forceDeriv` returns `dF = [dFx/dx, dFy/dy, dFz/dz, dFx/dy, dFy/dz, dFz/dx]`
+matching `agama.Potential.forceDeriv` exactly.
+
+### Accuracy (vs Agama CPU)
+
+| Component | phi rel err | force rel err |
+|---|---|---|
+| Multipole l=0 (monopole) | ~1e-12 | ~1e-12 |
+| Multipole l>0 harmonics | ~1e-7 | ~1e-5 |
+| Disk composite (DiskAnsatz + Multipole lmax=32) | ~1e-6 | ~2e-6 |
+| Analytic (NFW, Hernquist, etc.) | ~1e-15 | ~1e-15 |
+
+l>0 errors are a numerical floor from log-scaling derivative cancellation —
+both GPU and Agama CPU hit the same floor.  BFE fitting error for N-body data
+is typically > 1 %, so this precision floor has no practical impact.
+
+### Requirements
+
+- CUDA GPU (tested on NVIDIA L40)
+- `cupy >= 10.0` (matching CUDA version)
+- `nvcc` accessible on PATH
+- `scipy` (quintic spline construction; graceful fallback if absent)
+- `agama` (for `Disk` / `Spheroid` / `King` types that use CPU export)
+
+---
+
 ## Center parameter
 
 All `load_*` functions accept a `center=` keyword that is forwarded to
-`agama.Potential`.  Four forms are supported:
+`agama.Potential` (CPU path) or `ShiftedPotentialGPU` (GPU path).
+Four forms are supported:
 
 | Form | Type | Columns | Description |
 |---|---|---|---|

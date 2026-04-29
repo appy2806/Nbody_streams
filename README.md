@@ -54,7 +54,7 @@ cd ../..
 | `nbody_streams.io` | `ParticleReader` for HDF5 snapshots, save/load helpers |
 | `nbody_streams.utils` | Profile fitting (Dehnen, Plummer, double-power-law), iterative shape measurement, energy-based unbinding |
 | `nbody_streams.fast_sims` | Fast stream generation: particle spray and restricted N-body (requires AGAMA) |
-| `nbody_streams.agama_helper` | Fit, store, modify, and load Agama Multipole/CylSpline BFE potentials; HDF5 coefficient archives; time-evolving potentials; FIRE helpers |
+| `nbody_streams.agama_helper` | Fit, store, modify, and load Agama Multipole/CylSpline BFE potentials; HDF5 coefficient archives; time-evolving potentials; FIRE helpers; **`PotentialGPU`** — GPU-accelerated drop-in for `agama.Potential` (5–10× speedup at N≥50k) |
 | `nbody_streams.coords` | Coordinate transforms, vector field transforms, stream coordinate generation |
 | `nbody_streams.viz` | SPH/histogram surface density (`plot_density`), Mollweide projections, stream sky and evolution plots; `render_surface_density`, `get_smoothing_lengths` |
 
@@ -498,6 +498,7 @@ result = run_restricted_nbody(
 
 ```python
 from nbody_streams import agama_helper as ah
+from nbody_streams.agama_helper import PotentialGPU   # GPU-accelerated factory
 
 # --- Read coefficient dataclasses (file, HDF5, or raw string — same call) ---
 mc = ah.read_coefs("potential/090.dark.none_8.coef_mult")    # Multipole
@@ -519,9 +520,33 @@ pot = ah.load_agama_potential("MW_mult.h5",
                                group_name="snap_090",
                                keep_lm_mult=[0, 2])    # in-memory filtering
 
+# --- Same loaders, gpu=True → PotentialGPU instead of agama.Potential ---
+pot_gpu = ah.load_agama_potential("potential/090.dark.none_8.coef_mult", gpu=True)
+pot_gpu = ah.load_agama_potential("potential/090.bar.none_8.coef_cylsp", gpu=True)
+pot_gpu = ah.load_agama_potential("MW_mult.h5", group_name="snap_090",
+                                   keep_lm_mult=[0, 2], gpu=True)
+
+# --- PotentialGPU factory: mirrors agama.Potential call style ---
+pot_gpu = PotentialGPU(type='NFW', mass=1e12, scaleRadius=20)        # analytic
+pot_gpu = PotentialGPU(type='Disk', surfaceDensity=5e8,              # composite BFE
+                        scaleRadius=3.0, scaleHeight=0.3)
+pot_gpu = PotentialGPU(file='potential/MW.ini')                       # INI (any extension)
+pot_gpu = PotentialGPU(mc_sel)                                         # from dataclass
+pot_gpu = PotentialGPU(mc_halo, mc_bar)                               # → CompositePotentialGPU
+pot_gpu = PotentialGPU(mc, center=lmc_traj[:, :4])                   # + shift modifier
+
+# GPU API matches agama.Potential:
+import cupy as cp
+xyz_cp = cp.asarray(xyz_np)
+phi  = pot_gpu.potential(xyz_cp, t=0.)    # (N,)
+F    = pot_gpu.force(xyz_cp, t=0.)        # (N,3)
+rho  = pot_gpu.density(xyz_cp, t=0.)     # (N,)
+F, dF = pot_gpu.forceDeriv(xyz_cp, t=0.) # (N,3), (N,6)
+
 # --- Time-evolving potential ---
-# From HDF5 (times embedded at write time)
-pot_ev = ah.load_agama_evolving_potential("MW_mult.h5")
+import numpy as np
+pot_ev     = ah.load_agama_evolving_potential("MW_mult.h5")           # CPU
+pot_ev_gpu = ah.load_agama_evolving_potential("MW_mult.h5", gpu=True) # GPU (EvolvingPotentialGPU)
 
 # From a native Agama .ini file
 pot_ev = ah.load_agama_evolving_potential("potential/MW_mult.ini")
@@ -530,7 +555,6 @@ pot_ev = ah.load_agama_evolving_potential("potential/MW_mult.ini")
 pot_ev = ah.load_agama_evolving_potential("MW_mult.h5", keep_lm_mult=[0, 2])
 
 # --- Pack text coefficient files into HDF5 ---
-import numpy as np
 ah.write_snapshot_coefs_to_h5(
     snapshot_ids=range(90, 101),
     coef_file_patterns=["potential/{snap:03d}.dark.none_8.coef_mult"],

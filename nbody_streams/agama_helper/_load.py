@@ -96,6 +96,7 @@ def load_agama_potential(
     keep_lm_mult: Optional[list] = None,
     keep_m_cylspl: Optional[list[int]] = None,
     include_negative_m: bool = True,
+    gpu: bool = False,
 ):
     """
     Load a single-snapshot Agama potential from any coefficient source.
@@ -143,10 +144,17 @@ def load_agama_potential(
     include_negative_m : bool, optional
         Auto-include negative-m counterparts when filtering, by default
         ``True``.
+    gpu : bool, optional
+        When ``True``, return a :class:`~agama_helper._potential.PotentialGPU`
+        object instead of an ``agama.Potential``.  Requires CuPy and nvcc.
+        All filtering (``keep_lm_mult`` / ``keep_m_cylspl``) is applied before
+        building the GPU potential.  ``center`` is forwarded to
+        ``ShiftedPotentialGPU``; supply it as a length-3 array or an (N,4) /
+        (N,7) trajectory array.
 
     Returns
     -------
-    agama.Potential
+    agama.Potential or GPU potential object
     """
     agama = _require_agama()
 
@@ -190,6 +198,18 @@ def load_agama_potential(
                 .to_coef_string()
             )
 
+    # --- GPU path ---
+    if gpu:
+        from ._potential import PotentialGPU, ShiftedPotentialGPU
+        tmp = _write_tmp_coef(coef_str)
+        try:
+            pot = PotentialGPU(file=tmp)
+        finally:
+            _cleanup_tmp_file(tmp)
+        if center is not None:
+            pot = ShiftedPotentialGPU(pot, center=np.asarray(center, dtype=np.float64))
+        return pot
+
     # Resolve center (handles static, time-varying array, and file path)
     center_arg, center_tmp = _resolve_center(center) if center is not None else (None, None)
 
@@ -222,6 +242,7 @@ def load_agama_evolving_potential(
     keep_lm_mult: Optional[list] = None,
     keep_m_cylspl: Optional[list[int]] = None,
     include_negative_m: bool = True,
+    gpu: bool = False,
 ):
     """
     Build a time-evolving Agama potential from an HDF5 archive or a native
@@ -278,10 +299,17 @@ def load_agama_evolving_potential(
     include_negative_m : bool, optional
         Auto-include negative-m counterparts when filtering, by default
         ``True``.
+    gpu : bool, optional
+        When ``True``, return an
+        :class:`~agama_helper._potential.EvolvingPotentialGPU` object instead
+        of an ``agama.Potential``.  Each snapshot is loaded as a GPU potential
+        and interpolated linearly (``interp_linear=True``) or with nearest-
+        neighbour (``interp_linear=False``).  ``center`` is forwarded to
+        ``ShiftedPotentialGPU``.
 
     Returns
     -------
-    agama.Potential
+    agama.Potential or EvolvingPotentialGPU
         Time-evolving potential object.
 
     Raises
@@ -386,6 +414,26 @@ def load_agama_evolving_potential(
                     .zeroed(keep_m_cylspl, include_negative=include_negative_m)
                     .to_coef_string()
                 )
+
+    # ------------------------------------------------------------------
+    # GPU path: build EvolvingPotentialGPU from per-snapshot GPU pots
+    # ------------------------------------------------------------------
+    if gpu:
+        from ._potential import PotentialGPU, EvolvingPotentialGPU, ShiftedPotentialGPU
+        gpu_pots: list = []
+        for cs in _iter_coef_strings():
+            if _filter_fn is not None:
+                cs = _filter_fn(cs)
+            tmp = _write_tmp_coef(cs)
+            try:
+                gpu_pots.append(PotentialGPU(file=tmp))
+            finally:
+                _cleanup_tmp_file(tmp)
+        use_interp = ini_interp_linear if not is_h5 else interp_linear
+        pot = EvolvingPotentialGPU(gpu_pots, resolved_times, interpolate=bool(use_interp))
+        if center is not None:
+            pot = ShiftedPotentialGPU(pot, center=np.asarray(center, dtype=np.float64))
+        return pot
 
     # ------------------------------------------------------------------
     # Materialise coef strings → temp files, build Evolving config

@@ -85,7 +85,12 @@ from ._fire import (
     create_fire_evolving_ini,
 )
 
+from ._potential import (
+    PotentialGPU,
+)
 __all__ = [
+    # potential class
+    "PotentialGPU",
     # snapshot dict + fitting
     "create_snapshot_dict",
     "fit_potential",
