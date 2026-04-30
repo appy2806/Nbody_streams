@@ -2142,6 +2142,9 @@ def _coerce(v: str):
 # Canonical camelCase param names keyed by their lowercased+no-underscore form.
 # Used to normalise INI key=value pairs before dispatching to GPU constructors.
 _CANONICAL_PARAM: dict[str, str] = {
+    # Only GPU-native class constructor params are listed here.
+    # Agama-routed types (Spheroid, King, Disk, Dehnen-triaxial) pass kwargs
+    # directly to agama.Potential which is case-insensitive — no remapping needed.
     "mass":               "mass",
     "scaleradius":        "scaleRadius",
     "scaleheight":        "scaleHeight",
@@ -2149,12 +2152,14 @@ _CANONICAL_PARAM: dict[str, str] = {
     "alpha":              "alpha",
     "beta":               "beta",
     "velocity":           "velocity",
-    "v0":                 "velocity",   # Agama Logarithmic uses v0
+    "v0":                 "velocity",   # Agama Logarithmic uses v0; GPU class uses velocity
     "coreradius":         "coreRadius",
     "axisratioy":         "axisRatioY",
     "axisratioz":         "axisRatioZ",
     "surfacedensity":     "surfaceDensity",
-    "densitynorm":        "surfaceDensity",
+    # NOTE: densityNorm is intentionally NOT aliased here.  For Spheroid/NFW
+    # it is a distinct Agama parameter that must reach agama.Potential unchanged.
+    # _build_disk_gpu handles densityNorm → surfaceDensity internally via _kl.
     "innercutoffradius":  "innerCutoffRadius",
     "outercutoffradius":  "outerCutoffRadius",
     "cutoffstrength":     "cutoffStrength",
@@ -2386,8 +2391,9 @@ def _build_single(source, pot_kw: dict):
         cen_  = _pop_ci(d, 'center')
         sc_   = _pop_ci(d, 'scale')
         am_   = float(_pop_ci(d, 'ampl') or 1.0)
-        # Normalize remaining keys to canonical camelCase (handles INI mixed-case)
-        d = _normalize_params(d)
+        # Do NOT normalize here: Agama-routed factories (Spheroid, King, Disk)
+        # pass kwargs directly to agama.Potential which is case-insensitive.
+        # GPU-native constructors (NFW, Plummer, …) normalize inside PotentialGPU.
         # Expansion types with a file= reference must bypass PotentialGPU(type=)
         # because that path only handles analytic types.
         if type_k == 'cylspline':
@@ -2541,7 +2547,16 @@ def PotentialGPU(*args,
                 f"Unknown GPU potential type {type!r}. "
                 f"Available: {sorted(amap.keys())}"
             )
-        pot = cls(**_normalize_params(kw))
+        import inspect as _inspect
+        if _inspect.isclass(cls):
+            # GPU-native analytic class: normalize kwargs to canonical camelCase
+            # so that mixed-case INI params (Mass=, ScaleRadius=) work.
+            pot = cls(**_normalize_params(kw))
+        else:
+            # Agama-routed factory (_build_spheroid_gpu, _build_disk_gpu, …):
+            # pass kwargs through unchanged — agama.Potential is case-insensitive
+            # and the factory handles its own internal normalization via _kl.
+            pot = cls(**kw)
         return _apply_modifiers(pot, center, scale, ampl)
 
     # --- file= shorthand ---
