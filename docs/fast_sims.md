@@ -35,6 +35,7 @@ create_particle_spray_stream(
     gala_modified=True,
     add_perturber=None,
     create_ic_method=create_ic_particle_spray_chen2025,
+    dissolve_progenitor=False,
     verbose=False,
     accuracy_integ=1e-7,
     eigenvalue_method=True,
@@ -67,6 +68,7 @@ released at the tidal radius as the satellite evolves forward to `time_end`.
 | `gala_modified` | bool | Use Gala-modified dispersion parameters (Fardal method only). Default True. |
 | `add_perturber` | dict or None | Perturber properties. Required keys: `'mass'` (M_sun), `'scaleRadius'` (kpc), `'w_subhalo_impact'` (shape `(6,)`), `'time_impact'` (Gyr). Optional keys: `'time_window'` (Gyr, full width of mass-on window centred on `time_impact` — default: mass on for entire integration), `'trunc_nfw'` (bool, default True). Set to None to disable. |
 | `create_ic_method` | Callable | IC generator function. Defaults to `create_ic_particle_spray_chen2025`. Can be replaced with `create_ic_particle_spray_fardal2015`. |
+| `dissolve_progenitor` | bool | If True, linearly scale the progenitor mass from `initmass` at `time_end - time_total` to zero at `time_end`, modelling progressive tidal dissolution of the satellite. Default False. |
 | `verbose` | bool | Print progress messages. Default False. |
 | `accuracy_integ` | float | Orbit integrator accuracy. Default 1e-7. |
 | `eigenvalue_method` | bool | Use tidal-tensor eigenvalues for Jacobi radius (more accurate). Default True. |

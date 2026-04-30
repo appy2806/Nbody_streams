@@ -305,6 +305,7 @@ def create_particle_spray_stream(
     scaleradius: float,
     num_particles: int = int(1e4),
     prog_pot_kind: str = 'King',
+    dissolve_progenitor: bool = False,
     time_total: float = 3.0,
     time_end: float = 13.78,
     time_stripping: np.ndarray | None = None,
@@ -338,6 +339,10 @@ def create_particle_spray_stream(
         Number of stream particles (must be > 0).
     prog_pot_kind : ``'King'``, ``'Plummer'``, or ``'Plummer_withRcut'``
         Progenitor potential profile.
+    dissolve_progenitor : bool
+        If *True*, linearly scale the progenitor mass from ``initmass`` at
+        ``time_end - time_total`` to zero at ``time_end``, modelling
+        progressive tidal disruption of the satellite itself.
     time_total : float
         Look-back time to rewind the orbit (kpc/(km/s)~Gyr, >= 0).
     time_end : float
@@ -465,6 +470,11 @@ def create_particle_spray_stream(
         pot_host_eff = pot_host
 
     # --- Rewind progenitor orbit (in host + perturber if present) ---
+    if verbose:
+        print(
+            f"Rewinding progenitor orbit: t=[{time_end - time_total:.3f}, {time_end:.3f}] "
+            f"({time_total:.3f} Gyr look-back), N={N} steps."
+        )
     time_sat, orbit_sat = agama.orbit(
         ic=sat_cen_present, potential=pot_host_eff,
         time=-time_total, timestart=time_end, trajsize=N,
@@ -475,14 +485,26 @@ def create_particle_spray_stream(
     orbit_sat = orbit_sat[::-1]
 
     # --- Progenitor potential ---
+    if verbose:
+        dissolve_str = ", dissolving to 0 at t_end" if dissolve_progenitor else ""
+        print(
+            f"Building {prog_pot_kind} progenitor potential "
+            f"(mass={initmass:.3e} M_sun, r_s={scaleradius:.3f} kpc{dissolve_str})."
+        )
     pot_sat = _get_prog_GalaxyModel(
         initmass, scaleradius, prog_pot_kind,
         return_DistribFunc=False, **kwargs,
     )
-    pot_sat_moving = agama.Potential(
+    sat_moving_kwargs: dict = dict(
         potential=pot_sat,
         center=np.column_stack([time_sat, orbit_sat]),
     )
+    if dissolve_progenitor:
+        sat_moving_kwargs['scale'] = np.array([
+            [time_end - time_total, 1.0, 1.0],
+            [time_end,              0.0, 1.0],
+        ])
+    pot_sat_moving = agama.Potential(**sat_moving_kwargs)
     pot_total = agama.Potential(pot_host_eff, pot_sat_moving)
 
     # --- Stripping times ---
@@ -539,6 +561,12 @@ def create_particle_spray_stream(
 
 
     # --- Generate initial conditions ---
+    if verbose:
+        jac_method = "eigenvalue" if eigenvalue_method else "radial derivative"
+        print(
+            f"Computing Jacobi radii ({jac_method} method) "
+            f"and generating {num_particles} stream ICs via {create_ic_method.__name__}."
+        )
     rj, vj, R = _get_jacobi_rad_vel_mtx(
         pot_host_eff, orbit_strip, initmass,
         t=time_stripping, eigenvalue_method=eigenvalue_method,
@@ -562,9 +590,12 @@ def create_particle_spray_stream(
     if save_rate > 1:
         save_times = np.linspace(
             time_end - time_total, time_end - 1e-6, save_rate,
-        )       
+        )
         if verbose:
-            print("Interpolating particle trajectories in time.")
+            print(
+                f"Integrating {len(ic_stream) - 2} stream particles "
+                f"({save_rate} snapshots, t=[{save_times[0]:.3f}, {save_times[-1]:.3f}])."
+            )
         prog_interp = interp1d(
             time_sat, orbit_sat, axis=0, kind='cubic',
             fill_value='extrapolate',
@@ -589,6 +620,11 @@ def create_particle_spray_stream(
 
     else:
         # Single snapshot: just integrate to final time without interpolation.
+        if verbose:
+            print(
+                f"Integrating {len(ic_stream) - 2} stream particles "
+                f"to t={time_end:.3f} (single snapshot)."
+            )
         part_xv = np.concatenate(
             agama.orbit(
                 potential=pot_total,
@@ -600,6 +636,9 @@ def create_particle_spray_stream(
                 verbose=verbose,
                 )[:, 1].tolist(), axis=0
             )
+
+    if verbose:
+        print(f"Done. Stream shape: {part_xv.shape}.")
 
     return {
         'times': np.around(save_times, decimals=5) if save_rate > 1 else time_sat,

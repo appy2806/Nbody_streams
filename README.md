@@ -404,6 +404,7 @@ result = create_particle_spray_stream(
     time_end=13.78,                     # Gyr present epoch
     save_rate=5,                        # number of output snapshots
     prog_pot_kind='Plummer',            # or 'King', 'Plummer_withRcut'
+    dissolve_progenitor=False,          # if True, linearly dissolves progenitor mass to 0 at time_end
 )
 # result['times']   — (5,) save times
 # result['prog_xv'] — (5, 6) progenitor trajectory
