@@ -91,7 +91,7 @@ def run_simulation(
         Time-varying external potential.  Two backends are supported:
 
         * **agama.Potential** — standard Agama C++ potential; evaluated on
-          CPU with host↔device position transfers on the GPU paths.
+          CPU with host<->device position transfers on the GPU paths.
         * **PotentialGPU** (``nbody_streams.agama_helper.PotentialGPU``) —
           GPU-native potential; force is evaluated directly on the GPU array
           with no host transfer.  Requires CuPy + nvcc.
@@ -105,10 +105,6 @@ def run_simulation(
         lookups delegate to the GPU.  ``sigma_method='quasispherical'`` is
         not available for ``PotentialGPU`` and silently falls back to Jeans.
         Default: ``False``.
-
-        .. note:: Not yet implemented.  Will raise ``NotImplementedError``
-            if set to ``True``.  Tracked for a future release.
-
     output_dir : str, optional
         Directory for snapshot and restart files.  Default: ``'./output'``.
     save_snapshots : bool, optional
