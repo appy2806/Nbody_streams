@@ -106,32 +106,6 @@ NBODY_UNITS = {
 # INTERNAL I/O FUNCTIONS
 # ============================================================================
 
-def _save_snapshot_simplistic(
-    phase_space: np.ndarray,
-    snap_index: int,
-    time: float,
-    output_dir: Path,
-    **kwargs,
-) -> None:
-    """
-    Fallback saver: Stores data in a simple .npy format.
-    
-    Parameters
-    ----------
-    phase_space : np.ndarray, shape (N, 6)
-        Phase space [x, y, z, vx, vy, vz].
-    snapshot_num : int
-        Snapshot index.
-    time : float
-        Current time.
-    output_dir : Path
-        Output directory.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    filename = output_dir / f"snap_{snapshot_num:04d}.nbody"
-    header = f"t={time:.12e}\nx y z vx vy vz"
-    np.savetxt(filename, phase_space, header=header, fmt='%.12e')
-
 # ==========================================================================
 # ACCELERATION COMPUTATION FUNCTIONS
 # ==========================================================================
