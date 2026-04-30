@@ -110,6 +110,15 @@ NBODY_UNITS = {
 # ACCELERATION COMPUTATION FUNCTIONS
 # ==========================================================================
 
+def _is_gpu_potential(pot) -> bool:
+    """Return True when *pot* is a PotentialGPU family object (stays on GPU)."""
+    try:
+        from .agama_helper._potential import _GPUPotBase
+        return isinstance(pot, _GPUPotBase)
+    except ImportError:
+        return False
+
+
 def _compute_accelerations_gpu(
     pos_gpu: cp.ndarray,
     mass: np.ndarray,
@@ -117,7 +126,7 @@ def _compute_accelerations_gpu(
     G: float,
     precision: Literal['float32', 'float64', 'float32_kahan'],
     kernel_type: str,
-    external_potential: 'agama.Potential | None',
+    external_potential,
     time: float,
     external_update_interval: int,
     step: int,
@@ -125,77 +134,84 @@ def _compute_accelerations_gpu(
 ) -> tuple[cp.ndarray, cp.ndarray | None]:
     """
     Compute total accelerations on GPU.
-    
-    Combines self-gravity (GPU) with optional external potential (CPU).
-    External forces can be cached and updated less frequently.
-    
+
+    Combines self-gravity (GPU) with optional external potential.  Two backends
+    are supported for ``external_potential``:
+
+    * **agama.Potential** — positions transferred to CPU, force evaluated in
+      Agama's C++, result transferred back to GPU.
+    * **PotentialGPU** (``nbody_streams.agama_helper.PotentialGPU``) — force
+      evaluated entirely on GPU; no host↔device transfer needed.
+
+    External forces can be cached and updated less frequently via
+    ``external_update_interval``.
+
     Parameters
     ----------
     pos_gpu : cp.ndarray, shape (N, 3)
         Positions on GPU (float64).
     mass : np.ndarray, shape (N,)
-        Particle masses (float32).
+        Particle masses.
     softening : float | np.ndarray
         Softening length(s).
     G : float
         Gravitational constant.
+    precision : str
+        Force kernel precision.
     kernel_type : str
         Force kernel type.
-    external_potential : agama.Potential | None
-        External potential.
+    external_potential : agama.Potential | PotentialGPU | None
+        External potential — either an Agama CPU potential or a package
+        GPU potential.  ``None`` means no external field.
     time : float
-        Current time.
+        Current simulation time.
     external_update_interval : int
-        Update external forces every N steps.
+        Recompute external forces every this many steps.
     step : int
         Current step number.
     cached_external_acc : cp.ndarray | None
-        Cached external accelerations.
-    
+        Cached external accelerations from the previous update.
+
     Returns
     -------
     acc_total : cp.ndarray, shape (N, 3), float64
-        Total accelerations on GPU.
     new_cached_external : cp.ndarray | None
-        Updated cached external accelerations (or None if not updated).
     """
-    
-    # precision mapping - default to float32 for GPU performance, but allow float64 for accuracy if needed
     prec_key = precision.lower()
     if prec_key not in _PRECISION_MAP:
-        raise ValueError(f"Precision must be one of {list(_PRECISION_MAP.keys())}")     
-    
-    dtype, dtype_np = _PRECISION_MAP[prec_key]
+        raise ValueError(f"Precision must be one of {list(_PRECISION_MAP.keys())}")
+    dtype, _ = _PRECISION_MAP[prec_key]
 
-
-    # Convert mass to GPU if needed
     mass_gpu = cp.asarray(mass, dtype=dtype)
-    
-    # Self-gravity on GPU (keep everything on GPU!)
+
     acc_self_gpu = compute_nbody_forces_gpu(
-        pos_gpu.astype(dtype),  # Convert on GPU
+        pos_gpu.astype(dtype),
         mass_gpu,
         softening,
         G,
         precision,
         kernel_type,
-        return_cupy=True  # Return CuPy array directly
-    ).astype(cp.float64, copy=False) # Convert to float64
-    
-    # External potential (if provided)
+        return_cupy=True,
+    ).astype(cp.float64, copy=False)
+
     if external_potential is not None:
-        # Update external forces at specified interval
         if step % external_update_interval == 0 or cached_external_acc is None:
-            pos_cpu_f64 = pos_gpu.get()  # Only transfer when needed
-            acc_ext_cpu = external_potential.force(pos_cpu_f64, t=time)
-            new_cached_external = cp.asarray(acc_ext_cpu, dtype=cp.float64)
+            if _is_gpu_potential(external_potential):
+                # PotentialGPU: stays entirely on GPU — no host transfer
+                acc_ext = external_potential.force(pos_gpu, t=time).astype(cp.float64)
+            else:
+                # agama.Potential: CPU round-trip
+                pos_cpu = pos_gpu.get()
+                acc_ext = cp.asarray(
+                    external_potential.force(pos_cpu, t=time), dtype=cp.float64
+                )
+            new_cached_external = acc_ext
         else:
             new_cached_external = cached_external_acc
-        
-        acc_total = acc_self_gpu + new_cached_external
-        return acc_total, new_cached_external
-    else:
-        return acc_self_gpu, None
+
+        return acc_self_gpu + new_cached_external, new_cached_external
+
+    return acc_self_gpu, None
 
 def _compute_accelerations_tree(
     pos_cpu: np.ndarray,
