@@ -87,12 +87,24 @@ def run_simulation(
           ``nbody_streams/tree_gpu/``).
 
         Default: ``'direct'``.
-    external_potential : agama.Potential or None, optional
-        Time-varying external potential (requires Agama).  Default: ``None``.
+    external_potential : agama.Potential or PotentialGPU or None, optional
+        Time-varying external potential.  Two backends are supported:
+
+        * **agama.Potential** — standard Agama C++ potential; evaluated on
+          CPU with host↔device position transfers on the GPU paths.
+        * **PotentialGPU** (``nbody_streams.agama_helper.PotentialGPU``) —
+          GPU-native potential; force is evaluated directly on the GPU array
+          with no host transfer.  Requires CuPy + nvcc.
+
+        Default: ``None``.
     dynamical_friction : bool, optional
         Apply Chandrasekhar dynamical friction to the satellite CoM motion.
-        Requires ``external_potential`` to be set (density and σ(r) are read
-        from the host potential via Agama).  Default: ``False``.
+        Requires ``external_potential`` to be set.  When *external_potential*
+        is a ``PotentialGPU``, the DF computation remains CPU-side (sigma(r),
+        bound-centre iteration, Chandrasekhar formula); only the density/force
+        lookups delegate to the GPU.  ``sigma_method='quasispherical'`` is
+        not available for ``PotentialGPU`` and silently falls back to Jeans.
+        Default: ``False``.
 
         .. note:: Not yet implemented.  Will raise ``NotImplementedError``
             if set to ``True``.  Tracked for a future release.
