@@ -354,8 +354,12 @@ def load_agama_evolving_potential(
             )
 
         def _iter_coef_strings():
-            for grp in group_names:
-                yield _resolve_coef_string(source, grp, dataset_name)
+            # Keep the HDF5 file open for the entire iteration — avoids 301
+            # separate open/close cycles on slow filesystems (e.g. WSL /mnt/).
+            with h5py.File(source, "r") as _f:
+                for grp in group_names:
+                    raw = _f[grp][dataset_name][()]
+                    yield raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
 
         ini_interp_linear = interp_linear  # no override from file for H5
 

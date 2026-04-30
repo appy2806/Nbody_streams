@@ -1027,6 +1027,48 @@ def _sph_harm_agama(lmax: int, m: int, ct: float, st: float) -> np.ndarray:
     return result
 
 
+def _sph_harm_agama_vect(lmax: int, m: int,
+                         ct: np.ndarray, st: np.ndarray) -> np.ndarray:
+    """
+    Vectorized form of ``_sph_harm_agama``: processes all points simultaneously.
+
+    Parameters
+    ----------
+    lmax, m : int
+    ct, st  : (npoints,) cos/sin(theta) for all boundary points
+
+    Returns
+    -------
+    Plm : (npoints, lmax - m + 1) normalized harmonics for l = m .. lmax
+    """
+    npoints = len(ct)
+    ncols   = lmax - m + 1
+    result  = np.zeros((npoints, ncols))
+
+    val = _CS_COEF[m] * st ** m          # (npoints,)
+    result[:, 0] = val
+    if lmax == m:
+        return result
+
+    prefact = _CS_PREFACT[m]
+    Plm1 = result[:, 0] / prefact        # (npoints,)
+    Plm  = ct * (2*m + 1) * Plm1
+    Plm2 = np.zeros(npoints)
+
+    prefact *= math.sqrt((2*m + 3) / (2*m + 1) / (2.0*m + 1.0))
+    result[:, 1] = Plm * prefact
+
+    for l in range(m + 2, lmax + 1):
+        Plm_new = (ct * (2*l - 1) * Plm - (l + m - 1) * Plm2) / (l - m)
+        prefact *= math.sqrt((2*l + 1) / (2*l - 1) * (l - m) / (l + m))
+        result[:, l - m] = Plm_new * prefact
+        Plm2 = Plm1
+        Plm1 = Plm
+        Plm  = Plm_new
+
+    return result
+
+
 def _determine_asympt_cylspline(
     R_grid: np.ndarray,
     z_grid: np.ndarray,
@@ -1057,71 +1099,165 @@ def _determine_asympt_cylspline(
     zsym = (z_grid[0] == 0)
     mmax_fit = min(lmax_fit, mmax)
 
-    # --- boundary points (replicates Agama's determineAsympt loop) ----------
-    Rp, zp, iRp, izp = [], [], [], []
+    # --- boundary points (vectorised) ----------------------------------------
+    # Top/bottom z-edge (all iR < nR-1)
+    iR_top = np.arange(nR - 1)
+    Rp_top = R_grid[iR_top]
+    if zsym:
+        # mirror: top edge + its reflection
+        Rp_edge = np.tile(Rp_top, 2)
+        zp_edge = np.concatenate([np.full(nR-1, z_grid[-1]),
+                                   np.full(nR-1, -z_grid[-1])])
+        iRp_edge = np.tile(iR_top, 2)
+        izp_edge = np.full(2*(nR-1), nz-1)
+    else:
+        Rp_edge = np.concatenate([Rp_top, Rp_top])
+        zp_edge = np.concatenate([np.full(nR-1, z_grid[-1]),
+                                   np.full(nR-1, z_grid[0])])
+        iRp_edge = np.tile(iR_top, 2)
+        izp_edge = np.concatenate([np.full(nR-1, nz-1), np.zeros(nR-1, dtype=int)])
 
-    for iR in range(nR - 1):
-        # top z edge
-        Rp.append(R_grid[iR]); zp.append(z_grid[nz-1]); iRp.append(iR); izp.append(nz-1)
-        if zsym:
-            Rp.append(R_grid[iR]); zp.append(-z_grid[nz-1]); iRp.append(iR); izp.append(nz-1)
-        else:
-            # bottom z edge
-            Rp.append(R_grid[iR]); zp.append(z_grid[0]); iRp.append(iR); izp.append(0)
+    # Max-R edge (all iz)
+    iz_all  = np.arange(nz)
+    Rp_rmax = np.full(nz, R_grid[-1])
+    zp_rmax = z_grid[iz_all]
+    iRp_rmax = np.full(nz, nR-1)
+    izp_rmax = iz_all
+    if zsym:
+        # mirror non-zero z only
+        iz_nz = iz_all[1:]
+        Rp_rmax   = np.concatenate([Rp_rmax, np.full(len(iz_nz), R_grid[-1])])
+        zp_rmax   = np.concatenate([zp_rmax, -z_grid[iz_nz]])
+        iRp_rmax  = np.concatenate([iRp_rmax, np.full(len(iz_nz), nR-1)])
+        izp_rmax  = np.concatenate([izp_rmax, iz_nz])
 
-    for iz in range(nz):
-        # max R edge
-        Rp.append(R_grid[nR-1]); zp.append(z_grid[iz]); iRp.append(nR-1); izp.append(iz)
-        if zsym and iz > 0:
-            Rp.append(R_grid[nR-1]); zp.append(-z_grid[iz]); iRp.append(nR-1); izp.append(iz)
+    Rp   = np.concatenate([Rp_edge,  Rp_rmax]).astype(np.float64)
+    zp   = np.concatenate([zp_edge,  zp_rmax]).astype(np.float64)
+    iRp  = np.concatenate([iRp_edge, iRp_rmax]).astype(int)
+    izp  = np.concatenate([izp_edge, izp_rmax]).astype(int)
 
-    Rp   = np.array(Rp,  dtype=np.float64)
-    zp   = np.array(zp,  dtype=np.float64)
     rp   = np.hypot(Rp, zp)
-    ct_p = zp / rp     # cos(theta) = z/r
-    st_p = Rp / rp     # sin(theta) = R/r
+    ct_p = zp / rp
+    st_p = Rp / rp
+    npoints = len(Rp)
 
     r0 = min(float(R_grid[-1]), float(np.max(np.abs(z_grid))))
-    ncoefs  = (lmax_fit + 1) ** 2
+    ncoefs = (lmax_fit + 1) ** 2
     W = np.zeros(ncoefs)
-    npoints = len(Rp)
+
+    # Precompute (rp/r0)^{-(l+1)} for all l at once: shape (npoints, lmax_fit+1)
+    log_rp_r0 = np.log(rp / r0)                                  # (npoints,)
+    l_arr      = np.arange(lmax_fit + 1, dtype=np.float64)
+    pow_table  = np.exp(-np.outer(log_rp_r0, l_arr + 1))         # (npoints, lmax+1)
 
     for m in range(-mmax_fit, mmax_fit + 1):
         if m not in phi_dict:
             continue
-        phi_m = phi_dict[m]    # (nR, nz)
+        phi_m = phi_dict[m]
         absm  = abs(m)
         ncols = lmax_fit - absm + 1
         MUL   = _CS_MUL0 if m == 0 else _CS_MUL1
 
-        M   = np.zeros((npoints, ncols))
-        rhs = np.zeros(npoints)
+        # Build design matrix: fully vectorised over all boundary points
+        Plm_all = _sph_harm_agama_vect(lmax_fit, absm, ct_p, st_p)  # (npoints, ncols)
+        M = Plm_all * pow_table[:, absm:absm + ncols] * MUL          # (npoints, ncols)
 
-        for p in range(npoints):
-            rhs[p] = float(phi_m[iRp[p], izp[p]])
-            Plm = _sph_harm_agama(lmax_fit, absm, float(ct_p[p]), float(st_p[p]))
-            for l_idx in range(ncols):
-                l = absm + l_idx
-                M[p, l_idx] = Plm[l_idx] * (rp[p] / r0) ** (-(l + 1)) * MUL
+        rhs = phi_m[iRp, izp]                                     # (npoints,) vectorised
 
         sol, _, _, _ = _lstsq(M, rhs)
         for l_idx in range(ncols):
-            l = absm + l_idx
-            W[l * (l + 1) + m] = float(sol[l_idx])
+            W[(absm + l_idx) * (absm + l_idx + 1) + m] = float(sol[l_idx])
 
     # Safeguard: if W[0] is not finite, fall back to average monopole amplitude
     if not np.isfinite(W[0]):
         phi0 = phi_dict.get(0)
-        if phi0 is not None:
-            avg = float(np.mean(
-                [phi0[iRp[p], izp[p]] * rp[p] / r0 for p in range(npoints)]
-            ))
-        else:
-            avg = 0.0
         W[:] = 0.0
-        W[0] = avg
+        if phi0 is not None:
+            W[0] = float(np.mean(phi0[iRp, izp] * rp / r0))
 
     return W, float(r0)
+
+
+def _natural_cubic_deriv_batch(t: np.ndarray, Y: np.ndarray) -> np.ndarray:
+    """
+    First derivatives at all knots for natural cubic splines — batched over columns.
+
+    Equivalent to calling scipy CubicSpline(t, Y[:, k], bc_type='natural') and
+    evaluating the derivative at each knot for every column k, but solved with a
+    single banded linear system whose RHS has m columns.
+
+    Parameters
+    ----------
+    t : (n,) strictly increasing knots
+    Y : (n, m) values — m independent splines on the same grid
+
+    Returns
+    -------
+    dy : (n, m) first derivatives at each knot
+    """
+    from scipy.linalg import solve_banded as _slvb
+    n, m = Y.shape
+    h     = np.diff(t)                              # (n-1,)
+    slope = np.diff(Y, axis=0) / h[:, None]         # (n-1, m)
+    if n < 3:
+        return np.vstack([slope, slope[-1:]])
+
+    size = n - 2
+    ab       = np.zeros((3, size))
+    ab[1, :] = 2.0 * (h[:size] + h[1:size + 1])    # main diagonal
+    ab[0, 1:] = h[1:size]                           # superdiagonal
+    ab[2, :-1] = h[1:size]                          # subdiagonal (symmetric system)
+
+    sig_int = _slvb((1, 1), ab, 6.0 * np.diff(slope, axis=0))  # (size, m)
+    sigma = np.zeros((n, m))
+    sigma[1:-1] = sig_int                           # σ[0] = σ[n-1] = 0
+
+    dy      = slope - h[:, None] * (2.0 * sigma[:-1] + sigma[1:]) / 6.0
+    dy_last = slope[-1:] + h[-1] * sigma[-2:-1] / 6.0
+    return np.vstack([dy, dy_last])
+
+
+def _clamped_left_cubic_deriv_batch(t: np.ndarray, Y: np.ndarray,
+                                    left_deriv: float = 0.0) -> np.ndarray:
+    """
+    First derivatives at all knots for cubic splines with clamped-left
+    (f'(t[0]) = left_deriv) and natural-right (f''(t[-1]) = 0) BC — batched.
+
+    Equivalent to scipy CubicSpline(t, Y[:, k], bc_type=((1, left_deriv), 'natural'))
+    evaluated at all knots for every column k.
+
+    Parameters
+    ----------
+    t          : (n,) strictly increasing knots
+    Y          : (n, m) values — m independent splines on the same grid
+    left_deriv : float, imposed first derivative at t[0] (default 0)
+
+    Returns
+    -------
+    dy : (n, m) first derivatives at each knot
+    """
+    from scipy.linalg import solve_banded as _slvb
+    n, m  = Y.shape
+    h     = np.diff(t)                              # (n-1,)
+    slope = np.diff(Y, axis=0) / h[:, None]         # (n-1, m)
+
+    size = n - 1                                    # unknowns: σ[0..n-2], σ[n-1]=0
+    ab        = np.zeros((3, size))
+    ab[1, 0]  = 2.0 * h[0]
+    ab[1, 1:] = 2.0 * (h[:-1] + h[1:])             # 2(h[i-1]+h[i]) for i=1..n-2
+    ab[0, 1:] = h[:size - 1]                        # superdiagonal
+    ab[2, :-1] = h[:size - 1]                       # subdiagonal (symmetric)
+
+    rhs      = np.empty((size, m))
+    rhs[0]   = 6.0 * (slope[0] - left_deriv)
+    rhs[1:]  = 6.0 * np.diff(slope, axis=0)
+
+    sigma = np.zeros((n, m))
+    sigma[:-1] = _slvb((1, 1), ab, rhs)             # σ[n-1] = 0
+
+    dy      = slope - h[:, None] * (2.0 * sigma[:-1] + sigma[1:]) / 6.0
+    dy_last = slope[-1:] + h[-1] * sigma[-2:-1] / 6.0
+    return np.vstack([dy, dy_last])
 
 
 def _setup_cubic2d_nodes(lR: np.ndarray, lz: np.ndarray, fval: np.ndarray) -> np.ndarray:
@@ -1131,6 +1267,10 @@ def _setup_cubic2d_nodes(lR: np.ndarray, lz: np.ndarray, fval: np.ndarray) -> np
     Replicates Agama's CubicSpline2d constructor with:
       deriv_xmin=0 (clamped at R=0), deriv_xmax=NAN (natural),
       deriv_ymin=NAN, deriv_ymax=NAN (natural in z).
+
+    Uses 3 batched tridiagonal solves instead of (nR + 2*nz) individual
+    scipy CubicSpline calls, which is ~100x faster for many-snapshot evolving
+    potentials (e.g. 301 FIRE snapshots: reduces ~1.3M scipy calls to ~900).
 
     Parameters
     ----------
@@ -1142,31 +1282,13 @@ def _setup_cubic2d_nodes(lR: np.ndarray, lz: np.ndarray, fval: np.ndarray) -> np
     -------
     nodes : (nR, nz, 4) float64 : [fval, fx, fy, fxy] per node
     """
-    from scipy.interpolate import CubicSpline as _CS
-
-    nR, nz = fval.shape
-    fx  = np.zeros((nR, nz))
-    fy  = np.zeros((nR, nz))
-    fxy = np.zeros((nR, nz))
-
-    # Step 1: natural cubic spline in lz for each R-row -> fy = df/dlz
-    for i in range(nR):
-        spl = _CS(lz, fval[i, :], bc_type='natural')
-        fy[i, :] = spl(lz, 1)
-
-    # Step 2: clamped-left cubic spline in lR for each z-column -> fx = df/dlR
-    # bc_type=((1, 0.0), 'natural'): f'=0 at lR[0], f''=0 at lR[-1]
-    for j in range(nz):
-        spl = _CS(lR, fval[:, j], bc_type=((1, 0.0), 'natural'))
-        fx[:, j] = spl(lR, 1)
-
-    # Step 3: clamped-left cubic spline in lR for each z-column -> fxy = d(fy)/dlR
-    # Same BCs as step 2 (matches Agama's: isFinite(deriv_xmin)?0:NAN, NAN)
-    for j in range(nz):
-        spl = _CS(lR, fy[:, j], bc_type=((1, 0.0), 'natural'))
-        fxy[:, j] = spl(lR, 1)
-
-    return np.stack([fval, fx, fy, fxy], axis=-1).astype(np.float64)   # (nR, nz, 4)
+    # Step 1: natural cubic spline in lz for each R row (all nR at once)
+    fy  = _natural_cubic_deriv_batch(lz, fval.T).T          # (nR, nz)
+    # Step 2: clamped-left (f'=0 at R=0) in lR for each z column (all nz at once)
+    fx  = _clamped_left_cubic_deriv_batch(lR, fval)          # (nR, nz)
+    # Step 3: cross derivative d(fy)/dlR (same BC as step 2)
+    fxy = _clamped_left_cubic_deriv_batch(lR, fy)            # (nR, nz)
+    return np.stack([fval, fx, fy, fxy], axis=-1).astype(np.float64)
 
 
 def _build_cylspline_data(coefs) -> dict:
