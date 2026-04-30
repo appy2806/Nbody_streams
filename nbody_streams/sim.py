@@ -153,7 +153,7 @@ def run_simulation(
         * ``df_fixed_ln_lambda`` (float, default 3.0) -- Fixed ln(Λ) when
           ``df_coulomb_mode='fixed'``.
         * ``df_core_gamma`` (float, default 0.0) -- Core-stalling suppression
-          index (0 = off; ~1–2 for constant-density cores).
+          index (0 = off; ~1-2 for constant-density cores).
         * ``df_r_core`` (float, default 1.0) -- Core radius [kpc].
         * ``df_update_interval`` (int, default 10) -- Correct CoM every N
           steps.
