@@ -417,18 +417,55 @@ def load_agama_evolving_potential(
 
     # ------------------------------------------------------------------
     # GPU path: build EvolvingPotentialGPU from per-snapshot GPU pots
+    #
+    # Performance notes vs Agama CPU:
+    #   - Per snapshot, _build_multipole_data / _build_cylspline_data run
+    #     NumPy/SciPy quintic spline construction (band-solve per (l,m) pair).
+    #     Agama does the equivalent in C++, which is ~100x faster per snapshot.
+    #   - We avoid the temp-file round-trip (the coef string is already in RAM)
+    #     and use a ThreadPoolExecutor to parallelise the CPU-side spline work
+    #     across snapshots.  NumPy/SciPy release the GIL, so threads achieve
+    #     genuine parallelism.  GPU uploads stay on the main thread to avoid
+    #     CUDA context complications.
     # ------------------------------------------------------------------
     if gpu:
-        from ._potential import PotentialGPU, EvolvingPotentialGPU, ShiftedPotentialGPU
-        gpu_pots: list = []
+        import os as _os
+        from concurrent.futures import ThreadPoolExecutor
+        from ._potential import (
+            EvolvingPotentialGPU, ShiftedPotentialGPU,
+            MultipolePotentialGPU, CylSplinePotentialGPU,
+            _build_multipole_data, _build_cylspline_data,
+        )
+        from ._coefs import MultipoleCoefs, CylSplineCoefs, read_coefs as _rc
+
+        # Materialise all coef strings up-front (generator can only be iterated once).
+        all_cs: list[str] = []
         for cs in _iter_coef_strings():
             if _filter_fn is not None:
                 cs = _filter_fn(cs)
-            tmp = _write_tmp_coef(cs)
-            try:
-                gpu_pots.append(PotentialGPU(file=tmp))
-            finally:
-                _cleanup_tmp_file(tmp)
+            all_cs.append(cs)
+
+        def _cpu_build(cs: str):
+            """Parse coef string and run spline construction — CPU only, no GPU."""
+            mc = _rc(cs)
+            if isinstance(mc, MultipoleCoefs):
+                return ('mul', _build_multipole_data(mc))
+            else:
+                return ('cyl', _build_cylspline_data(mc))
+
+        # Parallel CPU spline construction across snapshots.
+        n_workers = min(len(all_cs), _os.cpu_count() or 4)
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            built = list(pool.map(_cpu_build, all_cs))
+
+        # GPU upload — sequential in main thread (safe, no context issues).
+        gpu_pots: list = []
+        for kind, data in built:
+            if kind == 'mul':
+                gpu_pots.append(MultipolePotentialGPU._from_data(data))
+            else:
+                gpu_pots.append(CylSplinePotentialGPU._from_data(data))
+
         use_interp = ini_interp_linear if not is_h5 else interp_linear
         pot = EvolvingPotentialGPU(gpu_pots, resolved_times, interpolate=bool(use_interp))
         if center is not None:

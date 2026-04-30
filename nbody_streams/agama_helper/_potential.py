@@ -686,6 +686,35 @@ class MultipolePotentialGPU(_GPUPotBase):
         return cls(read_coefs(str(path)), **kw)
 
     @classmethod
+    def _from_data(cls, data: dict) -> "MultipolePotentialGPU":
+        """Construct from a pre-built data dict (output of _build_multipole_data).
+
+        Skips the CPU spline-construction step.  GPU uploads happen here in
+        the calling thread.  Used by load_agama_evolving_potential(gpu=True)
+        to separate parallel CPU work from sequential GPU upload.
+        """
+        obj = cls.__new__(cls)
+        obj._d_poly = cp.asarray(data["poly"].ravel(), dtype=cp.float64)
+        obj._d_lm_l = cp.asarray(data["lm_l"],        dtype=cp.int32)
+        obj._d_lm_m = cp.asarray(data["lm_m"],        dtype=cp.int32)
+        obj._logr_min    = float(data["logr_min"])
+        obj._dlogr       = float(data["dlogr"])
+        obj._inv_dlogr   = float(data["inv_dlogr"])
+        obj._n_intervals = int(data["n_intervals"])
+        obj._n_lm        = int(data["n_lm"])
+        obj._lmax        = int(data["lmax"])
+        obj._log_scaling = int(data["log_scaling"])
+        obj._invPhi0     = float(data["invPhi0"])
+        obj._inner_s     = float(data["inner_s"])
+        obj._inner_U     = float(data["inner_U"])
+        obj._inner_W     = float(data["inner_W"])
+        obj._outer_s     = float(data["outer_s"])
+        obj._outer_U     = float(data["outer_U"])
+        obj._outer_W     = float(data["outer_W"])
+        obj._inv_4piG    = _INV_4PIG
+        return obj
+
+    @classmethod
     def from_agama(cls, pot, **kw) -> "MultipolePotentialGPU":
         """
         Build from an ``agama.Potential`` by exporting its coefficients.
@@ -1311,6 +1340,33 @@ class CylSplinePotentialGPU(_GPUPotBase):
         except ImportError:
             from _coefs import read_coefs as _rc
         return cls(_rc(str(path)), **kw)
+
+    @classmethod
+    def _from_data(cls, data: dict) -> "CylSplinePotentialGPU":
+        """Construct from a pre-built data dict (output of _build_cylspline_data).
+
+        Skips the CPU spline-construction step.  Used by
+        load_agama_evolving_potential(gpu=True) for parallel loading.
+        """
+        obj = cls.__new__(cls)
+        nR = len(data["lR_grid"])
+        nz = len(data["lz_grid"])
+        obj._d_lR_grid  = cp.asarray(data["lR_grid"])
+        obj._d_lz_grid  = cp.asarray(data["lz_grid"])
+        obj._d_node_arr = cp.asarray(data["node_arr"].ravel())
+        obj._d_m_arr    = cp.asarray(data["m_arr"], dtype=cp.int32)
+        obj._d_W_outer  = cp.asarray(data["W_outer"])
+        obj._Rscale      = float(data["Rscale"])
+        obj._nR          = nR
+        obj._nz          = nz
+        obj._n_harm      = int(data["n_harm"])
+        obj._mmax        = int(data["mmax"])
+        obj._log_scaling = int(data["log_scaling"])
+        obj._r0_outer    = float(data["r0_outer"])
+        obj._lmax_outer  = int(data["lmax_outer"])
+        obj._mmax_outer  = int(data["mmax_outer"])
+        obj._inv_4piG    = _INV_4PIG
+        return obj
 
     # ---- kernel launch helpers ----------------------------------------------
 
