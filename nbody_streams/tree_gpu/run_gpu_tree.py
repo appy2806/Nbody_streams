@@ -291,9 +291,18 @@ def run_nbody_gpu_tree(
                 )
 
     # ── External potential ────────────────────────────────────────────────────
-    if external_potential is not None and not _AGAMA_OK:
+    def _is_gpu_potential(pot) -> bool:
+        """True when pot is a PotentialGPU family object (no CPU round-trip needed)."""
+        try:
+            from ..agama_helper._potential import _GPUPotBase
+            return isinstance(pot, _GPUPotBase)
+        except ImportError:
+            return False
+
+    if external_potential is not None and not _AGAMA_OK and not _is_gpu_potential(external_potential):
         raise NotImplementedError(
-            "external_potential requires Agama. Install it with: "
+            "external_potential requires Agama (or a PotentialGPU from nbody_streams.agama_helper). "
+            "Install Agama with: "
             "pip install agama @ git+https://github.com/GalacticDynamics-Oxford/Agama.git"
         )
 
@@ -360,11 +369,23 @@ def run_nbody_gpu_tree(
         PE = 0.5 * float(cp.sum(mass_f64 * phi_.astype(cp.float64)))
         return KE, PE
 
-    def _ext_acc(pos_: cp.ndarray, t_: float):
+    def _ext_acc(pos_: cp.ndarray, t_: float) -> cp.ndarray | None:
+        """Evaluate external acceleration for either agama.Potential or PotentialGPU.
+
+        PotentialGPU: force() accepts a CuPy array directly — no host transfer.
+        agama.Potential: positions moved to CPU, result brought back to GPU.
+        Both paths return a float32 CuPy array matching the tree-code dtype.
+        """
         if external_potential is None:
             return None
+        if _is_gpu_potential(external_potential):
+            # PotentialGPU: stays on GPU entirely
+            return external_potential.force(
+                pos_.astype(cp.float64), t=t_
+            ).astype(cp.float32)
+        # agama.Potential: CPU round-trip
         xyz_cpu = cp.asnumpy(pos_.astype(cp.float64))
-        return cp.asarray(external_potential.force(xyz_cpu).astype(np.float32))
+        return cp.asarray(external_potential.force(xyz_cpu, t=t_).astype(np.float32))
 
     def _save_snap_now(t_: float):
         if not save_snapshots or _save_snapshot is None:
