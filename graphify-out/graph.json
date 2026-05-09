@@ -863,72 +863,72 @@
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L58",
-      "id": "nbody_streams_chandrasekhar_rationale_58",
       "community": 4,
-      "norm_label": "true when *pot* is from the potentialgpu family (nbody_streams.agama_helper)."
+      "norm_label": "true when *pot* is from the potentialgpu family (nbody_streams.agama_helper).",
+      "id": "nbody_streams_chandrasekhar_rationale_58"
     },
     {
       "label": "Jeans-equation estimate of the isotropic 1-D velocity dispersion.      Uses the",
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L75",
-      "id": "nbody_streams_chandrasekhar_rationale_75",
       "community": 4,
-      "norm_label": "jeans-equation estimate of the isotropic 1-d velocity dispersion.      uses the"
+      "norm_label": "jeans-equation estimate of the isotropic 1-d velocity dispersion.      uses the",
+      "id": "nbody_streams_chandrasekhar_rationale_75"
     },
     {
       "label": "Local circular-speed approximation to the 1-D velocity dispersion.      Uses the",
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L149",
-      "id": "nbody_streams_chandrasekhar_rationale_149",
       "community": 4,
-      "norm_label": "local circular-speed approximation to the 1-d velocity dispersion.      uses the"
+      "norm_label": "local circular-speed approximation to the 1-d velocity dispersion.      uses the",
+      "id": "nbody_streams_chandrasekhar_rationale_149"
     },
     {
       "label": "Compute a radial velocity-dispersion profile from an Agama potential.      Param",
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L184",
-      "id": "nbody_streams_chandrasekhar_rationale_184",
       "community": 4,
-      "norm_label": "compute a radial velocity-dispersion profile from an agama potential.      param"
+      "norm_label": "compute a radial velocity-dispersion profile from an agama potential.      param",
+      "id": "nbody_streams_chandrasekhar_rationale_184"
     },
     {
       "label": "Phi-energy iterative bound-particle centre.      Finds the centre of the gravita",
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L284",
-      "id": "nbody_streams_chandrasekhar_rationale_284",
       "community": 4,
-      "norm_label": "phi-energy iterative bound-particle centre.      finds the centre of the gravita"
+      "norm_label": "phi-energy iterative bound-particle centre.      finds the centre of the gravita",
+      "id": "nbody_streams_chandrasekhar_rationale_284"
     },
     {
       "label": "Iterative shrinking-sphere centre-of-mass estimator.      At each iteration the",
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L378",
-      "id": "nbody_streams_chandrasekhar_rationale_378",
       "community": 4,
-      "norm_label": "iterative shrinking-sphere centre-of-mass estimator.      at each iteration the"
+      "norm_label": "iterative shrinking-sphere centre-of-mass estimator.      at each iteration the",
+      "id": "nbody_streams_chandrasekhar_rationale_378"
     },
     {
       "label": "Chandrasekhar dynamical-friction acceleration at the satellite CoM.      Compute",
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L451",
-      "id": "nbody_streams_chandrasekhar_rationale_451",
       "community": 4,
-      "norm_label": "chandrasekhar dynamical-friction acceleration at the satellite com.      compute"
+      "norm_label": "chandrasekhar dynamical-friction acceleration at the satellite com.      compute",
+      "id": "nbody_streams_chandrasekhar_rationale_451"
     },
     {
       "label": "Build a ``force_extra`` closure that applies Chandrasekhar dynamical     frictio",
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L545",
-      "id": "nbody_streams_chandrasekhar_rationale_545",
       "community": 4,
-      "norm_label": "build a ``force_extra`` closure that applies chandrasekhar dynamical     frictio"
+      "norm_label": "build a ``force_extra`` closure that applies chandrasekhar dynamical     frictio",
+      "id": "nbody_streams_chandrasekhar_rationale_545"
     },
     {
       "label": "__init__.py",
@@ -1034,72 +1034,72 @@
       "file_type": "rationale",
       "source_file": "nbody_streams/run.py",
       "source_location": "L114",
-      "id": "nbody_streams_run_rationale_114",
       "community": 0,
-      "norm_label": "return true when *pot* is a potentialgpu family object (stays on gpu)."
+      "norm_label": "return true when *pot* is a potentialgpu family object (stays on gpu).",
+      "id": "nbody_streams_run_rationale_114"
     },
     {
       "label": "Compute total accelerations on GPU.      Combines self-gravity (GPU) with option",
       "file_type": "rationale",
       "source_file": "nbody_streams/run.py",
       "source_location": "L135",
-      "id": "nbody_streams_run_rationale_135",
       "community": 0,
-      "norm_label": "compute total accelerations on gpu.      combines self-gravity (gpu) with option"
+      "norm_label": "compute total accelerations on gpu.      combines self-gravity (gpu) with option",
+      "id": "nbody_streams_run_rationale_135"
     },
     {
       "label": "Compute accelerations using tree algorithm (pyfalcon).      Parameters     -----",
       "file_type": "rationale",
       "source_file": "nbody_streams/run.py",
       "source_location": "L226",
-      "id": "nbody_streams_run_rationale_226",
       "community": 0,
-      "norm_label": "compute accelerations using tree algorithm (pyfalcon).      parameters     -----"
+      "norm_label": "compute accelerations using tree algorithm (pyfalcon).      parameters     -----",
+      "id": "nbody_streams_run_rationale_226"
     },
     {
       "label": "Compute accelerations using direct O(N^2) pairwise summation.          Parameter",
       "file_type": "rationale",
       "source_file": "nbody_streams/run.py",
       "source_location": "L281",
-      "id": "nbody_streams_run_rationale_281",
       "community": 0,
-      "norm_label": "compute accelerations using direct o(n^2) pairwise summation.          parameter"
+      "norm_label": "compute accelerations using direct o(n^2) pairwise summation.          parameter",
+      "id": "nbody_streams_run_rationale_281"
     },
     {
       "label": "Run GPU-accelerated N-body simulation with leapfrog (KDK) integration.",
       "file_type": "rationale",
       "source_file": "nbody_streams/run.py",
       "source_location": "L351",
-      "id": "nbody_streams_run_rationale_351",
       "community": 0,
-      "norm_label": "run gpu-accelerated n-body simulation with leapfrog (kdk) integration."
+      "norm_label": "run gpu-accelerated n-body simulation with leapfrog (kdk) integration.",
+      "id": "nbody_streams_run_rationale_351"
     },
     {
       "label": "Run CPU-NUMBA accelerated N-body simulation with leapfrog (KDK) integration.",
       "file_type": "rationale",
       "source_file": "nbody_streams/run.py",
       "source_location": "L802",
-      "id": "nbody_streams_run_rationale_802",
       "community": 0,
-      "norm_label": "run cpu-numba accelerated n-body simulation with leapfrog (kdk) integration."
+      "norm_label": "run cpu-numba accelerated n-body simulation with leapfrog (kdk) integration.",
+      "id": "nbody_streams_run_rationale_802"
     },
     {
       "label": "Generate a Plummer sphere in virial equilibrium.      Positions are sampled from",
       "file_type": "rationale",
       "source_file": "nbody_streams/run.py",
       "source_location": "L1232",
-      "id": "nbody_streams_run_rationale_1232",
       "community": 0,
-      "norm_label": "generate a plummer sphere in virial equilibrium.      positions are sampled from"
+      "norm_label": "generate a plummer sphere in virial equilibrium.      positions are sampled from",
+      "id": "nbody_streams_run_rationale_1232"
     },
     {
       "label": "Place system on orbit in external potential.          Parameters     ----------",
       "file_type": "rationale",
       "source_file": "nbody_streams/run.py",
       "source_location": "L1334",
-      "id": "nbody_streams_run_rationale_1334",
       "community": 0,
-      "norm_label": "place system on orbit in external potential.          parameters     ----------"
+      "norm_label": "place system on orbit in external potential.          parameters     ----------",
+      "id": "nbody_streams_run_rationale_1334"
     },
     {
       "label": "transforms.py",
@@ -4517,108 +4517,108 @@
       "file_type": "rationale",
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L88",
-      "id": "agama_helper_analytic_potentials_rationale_88",
       "community": 14,
-      "norm_label": "abstract base for analytic gpu potentials.      inherits ``__add__`` / ``__radd_"
+      "norm_label": "abstract base for analytic gpu potentials.      inherits ``__add__`` / ``__radd_",
+      "id": "agama_helper_analytic_potentials_rationale_88"
     },
     {
       "label": "Agama-compatible eval --- returns any combination of potential, acceleration,",
       "file_type": "rationale",
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L139",
-      "id": "agama_helper_analytic_potentials_rationale_139",
       "community": 14,
-      "norm_label": "agama-compatible eval --- returns any combination of potential, acceleration,"
+      "norm_label": "agama-compatible eval --- returns any combination of potential, acceleration,",
+      "id": "agama_helper_analytic_potentials_rationale_139"
     },
     {
       "label": "Navarro-Frenk-White potential optimized with CuPy ElementwiseKernels.",
       "file_type": "rationale",
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L251",
-      "id": "agama_helper_analytic_potentials_rationale_251",
       "community": 1,
-      "norm_label": "navarro-frenk-white potential optimized with cupy elementwisekernels."
+      "norm_label": "navarro-frenk-white potential optimized with cupy elementwisekernels.",
+      "id": "agama_helper_analytic_potentials_rationale_251"
     },
     {
       "label": "Plummer sphere: Phi(r) = -GM / sqrt(r^2 + b^2)      Constructor: PlummerPotentia",
       "file_type": "rationale",
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L348",
-      "id": "agama_helper_analytic_potentials_rationale_348",
       "community": 1,
-      "norm_label": "plummer sphere: phi(r) = -gm / sqrt(r^2 + b^2)      constructor: plummerpotentia"
+      "norm_label": "plummer sphere: phi(r) = -gm / sqrt(r^2 + b^2)      constructor: plummerpotentia",
+      "id": "agama_helper_analytic_potentials_rationale_348"
     },
     {
       "label": "Hernquist: Phi(r) = -GM / (r + a)      Constructor: HernquistPotentialGPU(mass=1",
       "file_type": "rationale",
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L452",
-      "id": "agama_helper_analytic_potentials_rationale_452",
       "community": 1,
-      "norm_label": "hernquist: phi(r) = -gm / (r + a)      constructor: hernquistpotentialgpu(mass=1"
+      "norm_label": "hernquist: phi(r) = -gm / (r + a)      constructor: hernquistpotentialgpu(mass=1",
+      "id": "agama_helper_analytic_potentials_rationale_452"
     },
     {
       "label": "Dehnen spherical: Phi(r) = -(GM/a) * (1 - (r/(r+a))^(2-gamma)) / (2-gamma)     S",
       "file_type": "rationale",
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L557",
-      "id": "agama_helper_analytic_potentials_rationale_557",
       "community": 1,
-      "norm_label": "dehnen spherical: phi(r) = -(gm/a) * (1 - (r/(r+a))^(2-gamma)) / (2-gamma)     s"
+      "norm_label": "dehnen spherical: phi(r) = -(gm/a) * (1 - (r/(r+a))^(2-gamma)) / (2-gamma)     s",
+      "id": "agama_helper_analytic_potentials_rationale_557"
     },
     {
       "label": "Isochrone: Phi(r) = -GM / (b + sqrt(r^2 + b^2))      Constructor: IsochronePoten",
       "file_type": "rationale",
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L684",
-      "id": "agama_helper_analytic_potentials_rationale_684",
       "community": 1,
-      "norm_label": "isochrone: phi(r) = -gm / (b + sqrt(r^2 + b^2))      constructor: isochronepoten"
+      "norm_label": "isochrone: phi(r) = -gm / (b + sqrt(r^2 + b^2))      constructor: isochronepoten",
+      "id": "agama_helper_analytic_potentials_rationale_684"
     },
     {
       "label": "Miyamoto-Nagai disk: Phi = -GM / sqrt(R^2 + (sqrt(z^2+b^2)+a)^2)     where R^2 =",
       "file_type": "rationale",
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L801",
-      "id": "agama_helper_analytic_potentials_rationale_801",
       "community": 1,
-      "norm_label": "miyamoto-nagai disk: phi = -gm / sqrt(r^2 + (sqrt(z^2+b^2)+a)^2)     where r^2 ="
+      "norm_label": "miyamoto-nagai disk: phi = -gm / sqrt(r^2 + (sqrt(z^2+b^2)+a)^2)     where r^2 =",
+      "id": "agama_helper_analytic_potentials_rationale_801"
     },
     {
       "label": "LogHalo: Phi = (v0^2/2) * ln(rc^2 + x^2 + y^2/p^2 + z^2/q^2)      Constructor ma",
       "file_type": "rationale",
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L900",
-      "id": "agama_helper_analytic_potentials_rationale_900",
       "community": 1,
-      "norm_label": "loghalo: phi = (v0^2/2) * ln(rc^2 + x^2 + y^2/p^2 + z^2/q^2)      constructor ma"
+      "norm_label": "loghalo: phi = (v0^2/2) * ln(rc^2 + x^2 + y^2/p^2 + z^2/q^2)      constructor ma",
+      "id": "agama_helper_analytic_potentials_rationale_900"
     },
     {
       "label": "DiskAnsatz separable disk potential: Phi(R,z) = f(r) * H(z)     where r = sqrt(R",
       "file_type": "rationale",
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L1067",
-      "id": "agama_helper_analytic_potentials_rationale_1067",
       "community": 1,
-      "norm_label": "diskansatz separable disk potential: phi(r,z) = f(r) * h(z)     where r = sqrt(r"
+      "norm_label": "diskansatz separable disk potential: phi(r,z) = f(r) * h(z)     where r = sqrt(r",
+      "id": "agama_helper_analytic_potentials_rationale_1067"
     },
     {
       "label": "Uniform (spatially constant) acceleration: F = (ax, ay, az).     Phi(x,y,z) = -a",
       "file_type": "rationale",
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L1140",
-      "id": "agama_helper_analytic_potentials_rationale_1140",
       "community": 1,
-      "norm_label": "uniform (spatially constant) acceleration: f = (ax, ay, az).     phi(x,y,z) = -a"
+      "norm_label": "uniform (spatially constant) acceleration: f = (ax, ay, az).     phi(x,y,z) = -a",
+      "id": "agama_helper_analytic_potentials_rationale_1140"
     },
     {
       "label": "Factory function matching Agama's constructor syntax::          pot = AnalyticPo",
       "file_type": "rationale",
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L1200",
-      "id": "agama_helper_analytic_potentials_rationale_1200",
       "community": 1,
-      "norm_label": "factory function matching agama's constructor syntax::          pot = analyticpo"
+      "norm_label": "factory function matching agama's constructor syntax::          pot = analyticpo",
+      "id": "agama_helper_analytic_potentials_rationale_1200"
     },
     {
       "label": "_load.py",
@@ -17207,11 +17207,11 @@
       "source_file": "nbody_streams/run.py",
       "source_location": "L45",
       "weight": 0.8,
-      "_src": "nbody_streams_run_rationale_114",
-      "_tgt": "nbody_streams_species_species",
+      "_src": "nbody_streams_species_species",
+      "_tgt": "nbody_streams_run_rationale_114",
+      "confidence_score": 0.5,
       "source": "nbody_streams_species_species",
-      "target": "nbody_streams_run_rationale_114",
-      "confidence_score": 0.5
+      "target": "nbody_streams_run_rationale_114"
     },
     {
       "relation": "uses",
@@ -17219,11 +17219,11 @@
       "source_file": "nbody_streams/run.py",
       "source_location": "L45",
       "weight": 0.8,
-      "_src": "nbody_streams_run_rationale_135",
-      "_tgt": "nbody_streams_species_species",
+      "_src": "nbody_streams_species_species",
+      "_tgt": "nbody_streams_run_rationale_135",
+      "confidence_score": 0.5,
       "source": "nbody_streams_species_species",
-      "target": "nbody_streams_run_rationale_135",
-      "confidence_score": 0.5
+      "target": "nbody_streams_run_rationale_135"
     },
     {
       "relation": "uses",
@@ -17231,11 +17231,11 @@
       "source_file": "nbody_streams/run.py",
       "source_location": "L45",
       "weight": 0.8,
-      "_src": "nbody_streams_run_rationale_226",
-      "_tgt": "nbody_streams_species_species",
+      "_src": "nbody_streams_species_species",
+      "_tgt": "nbody_streams_run_rationale_226",
+      "confidence_score": 0.5,
       "source": "nbody_streams_species_species",
-      "target": "nbody_streams_run_rationale_226",
-      "confidence_score": 0.5
+      "target": "nbody_streams_run_rationale_226"
     },
     {
       "relation": "uses",
@@ -17243,11 +17243,11 @@
       "source_file": "nbody_streams/run.py",
       "source_location": "L45",
       "weight": 0.8,
-      "_src": "nbody_streams_run_rationale_281",
-      "_tgt": "nbody_streams_species_species",
+      "_src": "nbody_streams_species_species",
+      "_tgt": "nbody_streams_run_rationale_281",
+      "confidence_score": 0.5,
       "source": "nbody_streams_species_species",
-      "target": "nbody_streams_run_rationale_281",
-      "confidence_score": 0.5
+      "target": "nbody_streams_run_rationale_281"
     },
     {
       "relation": "uses",
@@ -17255,11 +17255,11 @@
       "source_file": "nbody_streams/run.py",
       "source_location": "L45",
       "weight": 0.8,
-      "_src": "nbody_streams_run_rationale_351",
-      "_tgt": "nbody_streams_species_species",
+      "_src": "nbody_streams_species_species",
+      "_tgt": "nbody_streams_run_rationale_351",
+      "confidence_score": 0.5,
       "source": "nbody_streams_species_species",
-      "target": "nbody_streams_run_rationale_351",
-      "confidence_score": 0.5
+      "target": "nbody_streams_run_rationale_351"
     },
     {
       "relation": "uses",
@@ -17267,11 +17267,11 @@
       "source_file": "nbody_streams/run.py",
       "source_location": "L45",
       "weight": 0.8,
-      "_src": "nbody_streams_run_rationale_802",
-      "_tgt": "nbody_streams_species_species",
+      "_src": "nbody_streams_species_species",
+      "_tgt": "nbody_streams_run_rationale_802",
+      "confidence_score": 0.5,
       "source": "nbody_streams_species_species",
-      "target": "nbody_streams_run_rationale_802",
-      "confidence_score": 0.5
+      "target": "nbody_streams_run_rationale_802"
     },
     {
       "relation": "uses",
@@ -17279,11 +17279,11 @@
       "source_file": "nbody_streams/run.py",
       "source_location": "L45",
       "weight": 0.8,
-      "_src": "nbody_streams_run_rationale_1232",
-      "_tgt": "nbody_streams_species_species",
+      "_src": "nbody_streams_species_species",
+      "_tgt": "nbody_streams_run_rationale_1232",
+      "confidence_score": 0.5,
       "source": "nbody_streams_species_species",
-      "target": "nbody_streams_run_rationale_1232",
-      "confidence_score": 0.5
+      "target": "nbody_streams_run_rationale_1232"
     },
     {
       "relation": "uses",
@@ -17291,11 +17291,11 @@
       "source_file": "nbody_streams/run.py",
       "source_location": "L45",
       "weight": 0.8,
-      "_src": "nbody_streams_run_rationale_1334",
-      "_tgt": "nbody_streams_species_species",
+      "_src": "nbody_streams_species_species",
+      "_tgt": "nbody_streams_run_rationale_1334",
+      "confidence_score": 0.5,
       "source": "nbody_streams_species_species",
-      "target": "nbody_streams_run_rationale_1334",
-      "confidence_score": 0.5
+      "target": "nbody_streams_run_rationale_1334"
     },
     {
       "relation": "uses",
@@ -19644,8 +19644,8 @@
       "source_file": "nbody_streams/tree_gpu/run_gpu_tree.py",
       "source_location": "L302",
       "weight": 1.0,
-      "_src": "tree_gpu_run_gpu_tree_run_nbody_gpu_tree",
-      "_tgt": "nbody_streams_run_is_gpu_potential",
+      "_src": "nbody_streams_run_is_gpu_potential",
+      "_tgt": "tree_gpu_run_gpu_tree_run_nbody_gpu_tree",
       "source": "nbody_streams_run_is_gpu_potential",
       "target": "tree_gpu_run_gpu_tree_run_nbody_gpu_tree"
     },
@@ -42479,8 +42479,8 @@
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L84",
       "weight": 0.8,
-      "_src": "agama_helper_analytic_potentials_rationale_78",
-      "_tgt": "agama_helper_potential_compositepotentialgpu",
+      "_src": "agama_helper_potential_compositepotentialgpu",
+      "_tgt": "agama_helper_analytic_potentials_rationale_78",
       "confidence_score": 0.5,
       "source": "agama_helper_potential_compositepotentialgpu",
       "target": "agama_helper_analytic_potentials_rationale_78"
@@ -42491,8 +42491,8 @@
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L84",
       "weight": 0.8,
-      "_src": "agama_helper_analytic_potentials_rationale_137",
-      "_tgt": "agama_helper_potential_compositepotentialgpu",
+      "_src": "agama_helper_potential_compositepotentialgpu",
+      "_tgt": "agama_helper_analytic_potentials_rationale_137",
       "confidence_score": 0.5,
       "source": "agama_helper_potential_compositepotentialgpu",
       "target": "agama_helper_analytic_potentials_rationale_137"
@@ -42503,8 +42503,8 @@
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L84",
       "weight": 0.8,
-      "_src": "agama_helper_analytic_potentials_rationale_249",
-      "_tgt": "agama_helper_potential_compositepotentialgpu",
+      "_src": "agama_helper_potential_compositepotentialgpu",
+      "_tgt": "agama_helper_analytic_potentials_rationale_249",
       "confidence_score": 0.5,
       "source": "agama_helper_potential_compositepotentialgpu",
       "target": "agama_helper_analytic_potentials_rationale_249"
@@ -42515,8 +42515,8 @@
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L84",
       "weight": 0.8,
-      "_src": "agama_helper_analytic_potentials_rationale_346",
-      "_tgt": "agama_helper_potential_compositepotentialgpu",
+      "_src": "agama_helper_potential_compositepotentialgpu",
+      "_tgt": "agama_helper_analytic_potentials_rationale_346",
       "confidence_score": 0.5,
       "source": "agama_helper_potential_compositepotentialgpu",
       "target": "agama_helper_analytic_potentials_rationale_346"
@@ -42527,8 +42527,8 @@
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L84",
       "weight": 0.8,
-      "_src": "agama_helper_analytic_potentials_rationale_450",
-      "_tgt": "agama_helper_potential_compositepotentialgpu",
+      "_src": "agama_helper_potential_compositepotentialgpu",
+      "_tgt": "agama_helper_analytic_potentials_rationale_450",
       "confidence_score": 0.5,
       "source": "agama_helper_potential_compositepotentialgpu",
       "target": "agama_helper_analytic_potentials_rationale_450"
@@ -42539,8 +42539,8 @@
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L84",
       "weight": 0.8,
-      "_src": "agama_helper_analytic_potentials_rationale_555",
-      "_tgt": "agama_helper_potential_compositepotentialgpu",
+      "_src": "agama_helper_potential_compositepotentialgpu",
+      "_tgt": "agama_helper_analytic_potentials_rationale_555",
       "confidence_score": 0.5,
       "source": "agama_helper_potential_compositepotentialgpu",
       "target": "agama_helper_analytic_potentials_rationale_555"
@@ -42551,8 +42551,8 @@
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L84",
       "weight": 0.8,
-      "_src": "agama_helper_analytic_potentials_rationale_682",
-      "_tgt": "agama_helper_potential_compositepotentialgpu",
+      "_src": "agama_helper_potential_compositepotentialgpu",
+      "_tgt": "agama_helper_analytic_potentials_rationale_682",
       "confidence_score": 0.5,
       "source": "agama_helper_potential_compositepotentialgpu",
       "target": "agama_helper_analytic_potentials_rationale_682"
@@ -42563,8 +42563,8 @@
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L84",
       "weight": 0.8,
-      "_src": "agama_helper_analytic_potentials_rationale_799",
-      "_tgt": "agama_helper_potential_compositepotentialgpu",
+      "_src": "agama_helper_potential_compositepotentialgpu",
+      "_tgt": "agama_helper_analytic_potentials_rationale_799",
       "confidence_score": 0.5,
       "source": "agama_helper_potential_compositepotentialgpu",
       "target": "agama_helper_analytic_potentials_rationale_799"
@@ -42575,8 +42575,8 @@
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L84",
       "weight": 0.8,
-      "_src": "agama_helper_analytic_potentials_rationale_898",
-      "_tgt": "agama_helper_potential_compositepotentialgpu",
+      "_src": "agama_helper_potential_compositepotentialgpu",
+      "_tgt": "agama_helper_analytic_potentials_rationale_898",
       "confidence_score": 0.5,
       "source": "agama_helper_potential_compositepotentialgpu",
       "target": "agama_helper_analytic_potentials_rationale_898"
@@ -42587,8 +42587,8 @@
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L84",
       "weight": 0.8,
-      "_src": "agama_helper_analytic_potentials_rationale_1065",
-      "_tgt": "agama_helper_potential_compositepotentialgpu",
+      "_src": "agama_helper_potential_compositepotentialgpu",
+      "_tgt": "agama_helper_analytic_potentials_rationale_1065",
       "confidence_score": 0.5,
       "source": "agama_helper_potential_compositepotentialgpu",
       "target": "agama_helper_analytic_potentials_rationale_1065"
@@ -42599,8 +42599,8 @@
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L84",
       "weight": 0.8,
-      "_src": "agama_helper_analytic_potentials_rationale_1138",
-      "_tgt": "agama_helper_potential_compositepotentialgpu",
+      "_src": "agama_helper_potential_compositepotentialgpu",
+      "_tgt": "agama_helper_analytic_potentials_rationale_1138",
       "confidence_score": 0.5,
       "source": "agama_helper_potential_compositepotentialgpu",
       "target": "agama_helper_analytic_potentials_rationale_1138"
@@ -42611,8 +42611,8 @@
       "source_file": "nbody_streams/agama_helper/_analytic_potentials.py",
       "source_location": "L84",
       "weight": 0.8,
-      "_src": "agama_helper_analytic_potentials_rationale_1198",
-      "_tgt": "agama_helper_potential_compositepotentialgpu",
+      "_src": "agama_helper_potential_compositepotentialgpu",
+      "_tgt": "agama_helper_analytic_potentials_rationale_1198",
       "confidence_score": 0.5,
       "source": "agama_helper_potential_compositepotentialgpu",
       "target": "agama_helper_analytic_potentials_rationale_1198"
