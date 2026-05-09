@@ -364,7 +364,7 @@ def run_nbody_gpu_tree(
         if external_potential is None:
             return None
         xyz_cpu = cp.asnumpy(pos_.astype(cp.float64))
-        return cp.asarray(external_potential.force(xyz_cpu).astype(np.float32))
+        return cp.asarray(external_potential.force(xyz_cpu, t=t_).astype(np.float32))
 
     def _save_snap_now(t_: float):
         if not save_snapshots or _save_snapshot is None:

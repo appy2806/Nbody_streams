@@ -7253,9 +7253,9 @@
       "file_type": "rationale",
       "source_file": "nbody_streams/fast_sims/spray.py",
       "source_location": "L321",
-      "id": "fast_sims_spray_rationale_321",
       "community": 11,
-      "norm_label": "r\"\"\"create a stellar stream using the particle-spray method.      the progenitor"
+      "norm_label": "r\"\"\"create a stellar stream using the particle-spray method.      the progenitor",
+      "id": "fast_sims_spray_rationale_321"
     },
     {
       "label": "restricted.py",
