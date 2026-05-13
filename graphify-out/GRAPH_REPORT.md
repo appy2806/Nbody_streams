@@ -1,7 +1,7 @@
-# Graph Report - Nbody_streams  (2026-05-08)
+# Graph Report - Nbody_streams  (2026-05-12)
 
 ## Corpus Check
-- 65 files · ~165,275 words
+- 65 files · ~165,276 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
