@@ -1,11 +1,11 @@
-# Graph Report - Nbody_streams  (2026-05-02)
+# Graph Report - Nbody_streams  (2026-05-12)
 
 ## Corpus Check
-- 65 files · ~165,559 words
+- 65 files · ~166,014 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1568 nodes · 3632 edges · 99 communities detected
+- 1575 nodes · 3632 edges · 106 communities detected
 - Extraction: 55% EXTRACTED · 45% INFERRED · 0% AMBIGUOUS · INFERRED: 1627 edges (avg confidence: 0.58)
 - Token cost: 0 input · 0 output
 
@@ -109,6 +109,13 @@
 - [[_COMMUNITY_Community 103|Community 103]]
 - [[_COMMUNITY_Community 104|Community 104]]
 - [[_COMMUNITY_Community 105|Community 105]]
+- [[_COMMUNITY_Community 106|Community 106]]
+- [[_COMMUNITY_Community 107|Community 107]]
+- [[_COMMUNITY_Community 108|Community 108]]
+- [[_COMMUNITY_Community 109|Community 109]]
+- [[_COMMUNITY_Community 110|Community 110]]
+- [[_COMMUNITY_Community 111|Community 111]]
+- [[_COMMUNITY_Community 112|Community 112]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `Species` - 119 edges
@@ -290,250 +297,278 @@ Nodes (1): Short orbit + Jacobi quantities for IC tests.
 
 ### Community 45 - "Community 45"
 Cohesion: 1.0
-Nodes (1): Jeans-equation estimate of the isotropic 1-D velocity dispersion.      Uses the
+Nodes (1): Generate uniformly random points on the surface of a sphere.      Parameters
 
 ### Community 46 - "Community 46"
 Cohesion: 1.0
-Nodes (1): Local circular-speed approximation to the 1-D velocity dispersion.      Uses the
+Nodes (1): Load a pre-defined spherical spiral grid scaled to a given radius.      The grid
 
 ### Community 47 - "Community 47"
 Cohesion: 1.0
-Nodes (1): Compute a radial velocity-dispersion profile from an Agama potential.      Param
+Nodes (1): Shrinking-sphere centre finder.      Starts from the mass-weighted centroid and
 
 ### Community 48 - "Community 48"
 Cohesion: 1.0
-Nodes (1): Phi-energy iterative bound-particle centre.      Finds the centre of the gravita
+Nodes (1): Find the density peak by locating the minimum gravitational potential.      Uses
 
 ### Community 49 - "Community 49"
 Cohesion: 1.0
-Nodes (1): Iterative shrinking-sphere centre-of-mass estimator.      At each iteration the
+Nodes (1): Find the centre (and optionally the velocity centre) of a particle distribution.
 
 ### Community 50 - "Community 50"
 Cohesion: 1.0
-Nodes (1): Chandrasekhar dynamical-friction acceleration at the satellite CoM.      Compute
+Nodes (1): Find the centre of a particle distribution.      .. deprecated::         Use :fu
 
 ### Community 51 - "Community 51"
 Cohesion: 1.0
-Nodes (1): Build a ``force_extra`` closure that applies Chandrasekhar dynamical     frictio
+Nodes (1): Iterative unbinding to determine bound particles.      Computes the gravitationa
 
 ### Community 52 - "Community 52"
 Cohesion: 1.0
-Nodes (1): r"""Create a stellar stream using the particle-spray method.      The progenitor
+Nodes (1): Jeans-equation estimate of the isotropic 1-D velocity dispersion.      Uses the
 
 ### Community 53 - "Community 53"
 Cohesion: 1.0
-Nodes (1): Selectable force kernel function.         Returns the 1/r^3 equivalent factor fo
+Nodes (1): Local circular-speed approximation to the 1-D velocity dispersion.      Uses the
 
 ### Community 54 - "Community 54"
 Cohesion: 1.0
-Nodes (1): CPU parallelized force computation with Numba.                  Parameters
+Nodes (1): Compute a radial velocity-dispersion profile from an Agama potential.      Param
 
 ### Community 55 - "Community 55"
 Cohesion: 1.0
-Nodes (1): CPU potential kernel matching GPU version.         Returns -1/r equivalent for p
+Nodes (1): Phi-energy iterative bound-particle centre.      Finds the centre of the gravita
 
 ### Community 56 - "Community 56"
 Cohesion: 1.0
-Nodes (1): CPU parallelized potential computation with Numba.                  Parameters
+Nodes (1): Iterative shrinking-sphere centre-of-mass estimator.      At each iteration the
 
 ### Community 57 - "Community 57"
 Cohesion: 1.0
-Nodes (1): Get compiled CUDA kernel for forces or potential.          Parameters     ------
+Nodes (1): Chandrasekhar dynamical-friction acceleration at the satellite CoM.      Compute
 
 ### Community 58 - "Community 58"
 Cohesion: 1.0
-Nodes (1): Validate inputs and prepare CPU arrays.     Works regardless of whether CuPy is
+Nodes (1): Build a ``force_extra`` closure that applies Chandrasekhar dynamical     frictio
 
 ### Community 59 - "Community 59"
 Cohesion: 1.0
-Nodes (1): Transfer validated CPU data to GPU or use existing GPU arrays.     Only called b
+Nodes (1): r"""Create a stellar stream using the particle-spray method.      The progenitor
 
 ### Community 60 - "Community 60"
 Cohesion: 1.0
-Nodes (1): Prepare CPU arrays from validated data.     Only called by CPU functions.
+Nodes (1): Selectable force kernel function.         Returns the 1/r^3 equivalent factor fo
 
 ### Community 61 - "Community 61"
 Cohesion: 1.0
-Nodes (1): Compute direct N-body gravitational forces using GPU acceleration.          Calc
+Nodes (1): CPU parallelized force computation with Numba.                  Parameters
 
 ### Community 62 - "Community 62"
 Cohesion: 1.0
-Nodes (1): Compute gravitational potential at each particle location on GPU.          Calcu
+Nodes (1): CPU potential kernel matching GPU version.         Returns -1/r equivalent for p
 
 ### Community 63 - "Community 63"
 Cohesion: 1.0
-Nodes (1): Compute N-body gravitational accelerations (direct O(N^2) pairwise) with numba.
+Nodes (1): CPU parallelized potential computation with Numba.                  Parameters
 
 ### Community 64 - "Community 64"
 Cohesion: 1.0
-Nodes (1): Compute gravitational potential using CPU parallelization (Numba).          Fall
+Nodes (1): Get compiled CUDA kernel for forces or potential.          Parameters     ------
 
 ### Community 65 - "Community 65"
 Cohesion: 1.0
-Nodes (1): Get information about available GPU(s).          Returns     -------     info :
+Nodes (1): Validate inputs and prepare CPU arrays.     Works regardless of whether CuPy is
 
 ### Community 66 - "Community 66"
 Cohesion: 1.0
-Nodes (1): Compute direct N-body gravitational forces using GPU acceleration.          Calc
+Nodes (1): Transfer validated CPU data to GPU or use existing GPU arrays.     Only called b
 
 ### Community 67 - "Community 67"
 Cohesion: 1.0
-Nodes (1): Get information about available GPU(s).          Returns     -------     info :
+Nodes (1): Prepare CPU arrays from validated data.     Only called by CPU functions.
 
 ### Community 68 - "Community 68"
 Cohesion: 1.0
-Nodes (1): Fallback saver: Stores data in a simple .npy format.          Parameters     ---
+Nodes (1): Compute direct N-body gravitational forces using GPU acceleration.          Calc
 
 ### Community 69 - "Community 69"
 Cohesion: 1.0
-Nodes (1): Compute total accelerations on GPU.          Combines self-gravity (GPU) with op
+Nodes (1): Compute gravitational potential at each particle location on GPU.          Calcu
 
 ### Community 70 - "Community 70"
 Cohesion: 1.0
-Nodes (1): Compute accelerations using tree algorithm (pyfalcon).          Parameters     -
+Nodes (1): Compute N-body gravitational accelerations (direct O(N^2) pairwise) with numba.
 
 ### Community 71 - "Community 71"
 Cohesion: 1.0
-Nodes (1): Compute accelerations using direct O(N^2) pairwise summation.          Parameter
+Nodes (1): Compute gravitational potential using CPU parallelization (Numba).          Fall
 
 ### Community 72 - "Community 72"
 Cohesion: 1.0
-Nodes (1): Run GPU-accelerated N-body simulation with leapfrog (KDK) integration.
+Nodes (1): Get information about available GPU(s).          Returns     -------     info :
 
 ### Community 73 - "Community 73"
 Cohesion: 1.0
-Nodes (1): Run GPU-accelerated N-body simulation with leapfrog (KDK) integration.
+Nodes (1): Compute direct N-body gravitational forces using GPU acceleration.          Calc
 
 ### Community 74 - "Community 74"
 Cohesion: 1.0
-Nodes (1): Run CPU-NUMBA accelerated N-body simulation with leapfrog (KDK) integration.
+Nodes (1): Get information about available GPU(s).          Returns     -------     info :
 
 ### Community 75 - "Community 75"
 Cohesion: 1.0
-Nodes (1): Generate Plummer sphere in virial equilibrium.          Parameters     ---------
+Nodes (1): Fallback saver: Stores data in a simple .npy format.          Parameters     ---
 
 ### Community 76 - "Community 76"
 Cohesion: 1.0
-Nodes (1): Place system on orbit in external potential.          Parameters     ----------
+Nodes (1): Compute total accelerations on GPU.          Combines self-gravity (GPU) with op
 
 ### Community 77 - "Community 77"
 Cohesion: 1.0
-Nodes (1): Compute direct N-body gravitational forces using GPU acceleration.          Calc
+Nodes (1): Compute accelerations using tree algorithm (pyfalcon).          Parameters     -
 
 ### Community 78 - "Community 78"
 Cohesion: 1.0
-Nodes (1): Get information about available GPU(s).          Returns     -------     info :
+Nodes (1): Compute accelerations using direct O(N^2) pairwise summation.          Parameter
 
 ### Community 79 - "Community 79"
 Cohesion: 1.0
-Nodes (1): Selectable force kernel function.         Returns the 1/r^3 equivalent factor fo
+Nodes (1): Run GPU-accelerated N-body simulation with leapfrog (KDK) integration.
 
 ### Community 80 - "Community 80"
 Cohesion: 1.0
-Nodes (1): CPU parallelized force computation with Numba.                  Parameters
+Nodes (1): Run GPU-accelerated N-body simulation with leapfrog (KDK) integration.
 
 ### Community 81 - "Community 81"
 Cohesion: 1.0
-Nodes (1): Compute direct N-body gravitational forces using GPU acceleration.          Calc
+Nodes (1): Run CPU-NUMBA accelerated N-body simulation with leapfrog (KDK) integration.
 
 ### Community 82 - "Community 82"
 Cohesion: 1.0
-Nodes (1): Compute N-body gravitational accelerations (direct O(N^2) pairwise) with numba.
+Nodes (1): Generate Plummer sphere in virial equilibrium.          Parameters     ---------
 
 ### Community 83 - "Community 83"
 Cohesion: 1.0
-Nodes (1): Get information about available GPU(s).          Returns     -------     info :
+Nodes (1): Place system on orbit in external potential.          Parameters     ----------
 
 ### Community 84 - "Community 84"
 Cohesion: 1.0
-Nodes (1): Worker executed in a separate process. Reads one snapshot from disk and writes
+Nodes (1): Compute direct N-body gravitational forces using GPU acceleration.          Calc
 
 ### Community 85 - "Community 85"
 Cohesion: 1.0
-Nodes (1): A class to read N-body simulation data from one or more HDF5 files.      This re
+Nodes (1): Get information about available GPU(s).          Returns     -------     info :
 
 ### Community 86 - "Community 86"
 Cohesion: 1.0
-Nodes (1): Read simulation properties from the first HDF5 file.         Robust to missing '
+Nodes (1): Selectable force kernel function.         Returns the 1/r^3 equivalent factor fo
 
 ### Community 87 - "Community 87"
 Cohesion: 1.0
-Nodes (1): Scan HDF5 files and map snapshot index -> file path for fast lookups.          S
+Nodes (1): CPU parallelized force computation with Numba.                  Parameters
 
 ### Community 88 - "Community 88"
 Cohesion: 1.0
-Nodes (1): Read a single snapshot by index or physical time.          Parameters         --
+Nodes (1): Compute direct N-body gravitational forces using GPU acceleration.          Calc
 
 ### Community 89 - "Community 89"
 Cohesion: 1.0
-Nodes (1): Extract orbits for selected particle types across all available snapshots.
+Nodes (1): Compute N-body gravitational accelerations (direct O(N^2) pairwise) with numba.
 
 ### Community 90 - "Community 90"
 Cohesion: 1.0
-Nodes (1): Fast append-only version. Sort at the end with _finalize_snapshot_times().
+Nodes (1): Get information about available GPU(s).          Returns     -------     info :
 
 ### Community 91 - "Community 91"
 Cohesion: 1.0
-Nodes (1): Call this ONCE at the end of run_nbody_gpu.
+Nodes (1): Worker executed in a separate process. Reads one snapshot from disk and writes
 
 ### Community 92 - "Community 92"
 Cohesion: 1.0
-Nodes (1): Write snapshot(s) compatible with ParticleReader.      Modes:       - single_fil
+Nodes (1): A class to read N-body simulation data from one or more HDF5 files.      This re
 
 ### Community 93 - "Community 93"
 Cohesion: 1.0
-Nodes (1): Save restart file for crash recovery.          Parameters     ----------     pha
+Nodes (1): Read simulation properties from the first HDF5 file.         Robust to missing '
 
 ### Community 94 - "Community 94"
 Cohesion: 1.0
-Nodes (1): Load restart file if it exists.          Parameters     ----------     output_di
+Nodes (1): Scan HDF5 files and map snapshot index -> file path for fast lookups.          S
 
 ### Community 95 - "Community 95"
 Cohesion: 1.0
-Nodes (1): matplotlib dependency
+Nodes (1): Read a single snapshot by index or physical time.          Parameters         --
 
 ### Community 96 - "Community 96"
 Cohesion: 1.0
-Nodes (1): graphify knowledge graph rules
+Nodes (1): Extract orbits for selected particle types across all available snapshots.
 
 ### Community 97 - "Community 97"
 Cohesion: 1.0
-Nodes (1): NBODY_UNITS constant
+Nodes (1): Fast append-only version. Sort at the end with _finalize_snapshot_times().
 
 ### Community 98 - "Community 98"
 Cohesion: 1.0
-Nodes (1): fit_double_spheroid_profile
+Nodes (1): Call this ONCE at the end of run_nbody_gpu.
 
 ### Community 99 - "Community 99"
 Cohesion: 1.0
-Nodes (1): fit_iterative_ellipsoid
+Nodes (1): Write snapshot(s) compatible with ParticleReader.      Modes:       - single_fil
 
 ### Community 100 - "Community 100"
 Cohesion: 1.0
-Nodes (1): cuda_alive
+Nodes (1): Save restart file for crash recovery.          Parameters     ----------     pha
 
 ### Community 101 - "Community 101"
 Cohesion: 1.0
-Nodes (1): compute_nbody_potential_cpu
+Nodes (1): Load restart file if it exists.          Parameters     ----------     output_di
 
 ### Community 102 - "Community 102"
 Cohesion: 1.0
-Nodes (1): get_gpu_info
+Nodes (1): matplotlib dependency
 
 ### Community 103 - "Community 103"
 Cohesion: 1.0
-Nodes (1): _load_restart internal
+Nodes (1): graphify knowledge graph rules
 
 ### Community 104 - "Community 104"
 Cohesion: 1.0
-Nodes (1): convert_vectors
+Nodes (1): NBODY_UNITS constant
 
 ### Community 105 - "Community 105"
+Cohesion: 1.0
+Nodes (1): fit_double_spheroid_profile
+
+### Community 106 - "Community 106"
+Cohesion: 1.0
+Nodes (1): fit_iterative_ellipsoid
+
+### Community 107 - "Community 107"
+Cohesion: 1.0
+Nodes (1): cuda_alive
+
+### Community 108 - "Community 108"
+Cohesion: 1.0
+Nodes (1): compute_nbody_potential_cpu
+
+### Community 109 - "Community 109"
+Cohesion: 1.0
+Nodes (1): get_gpu_info
+
+### Community 110 - "Community 110"
+Cohesion: 1.0
+Nodes (1): _load_restart internal
+
+### Community 111 - "Community 111"
+Cohesion: 1.0
+Nodes (1): convert_vectors
+
+### Community 112 - "Community 112"
 Cohesion: 1.0
 Nodes (1): convert_to_vel_los
 
 ## Knowledge Gaps
-- **439 isolated node(s):** `Selectable force kernel function.         Returns the 1/r^3 equivalent factor fo`, `CPU parallelized force computation with Numba.                  Parameters`, `CPU potential kernel matching GPU version.         Returns -1/r equivalent for p`, `CPU parallelized potential computation with Numba.                  Parameters`, `Get compiled CUDA kernel for forces or potential.          Parameters     ------` (+434 more)
+- **446 isolated node(s):** `Selectable force kernel function.         Returns the 1/r^3 equivalent factor fo`, `CPU parallelized force computation with Numba.                  Parameters`, `CPU potential kernel matching GPU version.         Returns -1/r equivalent for p`, `CPU parallelized potential computation with Numba.                  Parameters`, `Get compiled CUDA kernel for forces or potential.          Parameters     ------` (+441 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **Thin community `Community 11`** (34 nodes): `.density()`, `.eval()`, `.evalDeriv()`, `.force()`, `.forceDeriv()`, `.potential()`, `.eval()`, `._bracket()`, `.density()`, `.eval()`, `.evalDeriv()`, `.force()`, `.forceDeriv()`, `._interp()`, `.potential()`, `_lerp()`, `.eval()`, `ScaledPotentialGPU`, `.density()`, `.eval()`, `.evalDeriv()`, `.force()`, `.forceDeriv()`, `.__init__()`, `.potential()`, `._sa()`, `._center_at()`, `.density()`, `.eval()`, `.evalDeriv()`, `.force()`, `.forceDeriv()`, `.potential()`, `._shift()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -557,138 +592,150 @@ Nodes (1): convert_to_vel_los
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 44`** (1 nodes): `Short orbit + Jacobi quantities for IC tests.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 45`** (1 nodes): `Jeans-equation estimate of the isotropic 1-D velocity dispersion.      Uses the`
+- **Thin community `Community 45`** (1 nodes): `Generate uniformly random points on the surface of a sphere.      Parameters`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 46`** (1 nodes): `Local circular-speed approximation to the 1-D velocity dispersion.      Uses the`
+- **Thin community `Community 46`** (1 nodes): `Load a pre-defined spherical spiral grid scaled to a given radius.      The grid`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 47`** (1 nodes): `Compute a radial velocity-dispersion profile from an Agama potential.      Param`
+- **Thin community `Community 47`** (1 nodes): `Shrinking-sphere centre finder.      Starts from the mass-weighted centroid and`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 48`** (1 nodes): `Phi-energy iterative bound-particle centre.      Finds the centre of the gravita`
+- **Thin community `Community 48`** (1 nodes): `Find the density peak by locating the minimum gravitational potential.      Uses`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 49`** (1 nodes): `Iterative shrinking-sphere centre-of-mass estimator.      At each iteration the`
+- **Thin community `Community 49`** (1 nodes): `Find the centre (and optionally the velocity centre) of a particle distribution.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 50`** (1 nodes): `Chandrasekhar dynamical-friction acceleration at the satellite CoM.      Compute`
+- **Thin community `Community 50`** (1 nodes): `Find the centre of a particle distribution.      .. deprecated::         Use :fu`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 51`** (1 nodes): `Build a ``force_extra`` closure that applies Chandrasekhar dynamical     frictio`
+- **Thin community `Community 51`** (1 nodes): `Iterative unbinding to determine bound particles.      Computes the gravitationa`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 52`** (1 nodes): `r"""Create a stellar stream using the particle-spray method.      The progenitor`
+- **Thin community `Community 52`** (1 nodes): `Jeans-equation estimate of the isotropic 1-D velocity dispersion.      Uses the`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 53`** (1 nodes): `Selectable force kernel function.         Returns the 1/r^3 equivalent factor fo`
+- **Thin community `Community 53`** (1 nodes): `Local circular-speed approximation to the 1-D velocity dispersion.      Uses the`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 54`** (1 nodes): `CPU parallelized force computation with Numba.                  Parameters`
+- **Thin community `Community 54`** (1 nodes): `Compute a radial velocity-dispersion profile from an Agama potential.      Param`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 55`** (1 nodes): `CPU potential kernel matching GPU version.         Returns -1/r equivalent for p`
+- **Thin community `Community 55`** (1 nodes): `Phi-energy iterative bound-particle centre.      Finds the centre of the gravita`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 56`** (1 nodes): `CPU parallelized potential computation with Numba.                  Parameters`
+- **Thin community `Community 56`** (1 nodes): `Iterative shrinking-sphere centre-of-mass estimator.      At each iteration the`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 57`** (1 nodes): `Get compiled CUDA kernel for forces or potential.          Parameters     ------`
+- **Thin community `Community 57`** (1 nodes): `Chandrasekhar dynamical-friction acceleration at the satellite CoM.      Compute`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 58`** (1 nodes): `Validate inputs and prepare CPU arrays.     Works regardless of whether CuPy is`
+- **Thin community `Community 58`** (1 nodes): `Build a ``force_extra`` closure that applies Chandrasekhar dynamical     frictio`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 59`** (1 nodes): `Transfer validated CPU data to GPU or use existing GPU arrays.     Only called b`
+- **Thin community `Community 59`** (1 nodes): `r"""Create a stellar stream using the particle-spray method.      The progenitor`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 60`** (1 nodes): `Prepare CPU arrays from validated data.     Only called by CPU functions.`
+- **Thin community `Community 60`** (1 nodes): `Selectable force kernel function.         Returns the 1/r^3 equivalent factor fo`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 61`** (1 nodes): `Compute direct N-body gravitational forces using GPU acceleration.          Calc`
+- **Thin community `Community 61`** (1 nodes): `CPU parallelized force computation with Numba.                  Parameters`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 62`** (1 nodes): `Compute gravitational potential at each particle location on GPU.          Calcu`
+- **Thin community `Community 62`** (1 nodes): `CPU potential kernel matching GPU version.         Returns -1/r equivalent for p`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 63`** (1 nodes): `Compute N-body gravitational accelerations (direct O(N^2) pairwise) with numba.`
+- **Thin community `Community 63`** (1 nodes): `CPU parallelized potential computation with Numba.                  Parameters`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 64`** (1 nodes): `Compute gravitational potential using CPU parallelization (Numba).          Fall`
+- **Thin community `Community 64`** (1 nodes): `Get compiled CUDA kernel for forces or potential.          Parameters     ------`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 65`** (1 nodes): `Get information about available GPU(s).          Returns     -------     info :`
+- **Thin community `Community 65`** (1 nodes): `Validate inputs and prepare CPU arrays.     Works regardless of whether CuPy is`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 66`** (1 nodes): `Compute direct N-body gravitational forces using GPU acceleration.          Calc`
+- **Thin community `Community 66`** (1 nodes): `Transfer validated CPU data to GPU or use existing GPU arrays.     Only called b`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 67`** (1 nodes): `Get information about available GPU(s).          Returns     -------     info :`
+- **Thin community `Community 67`** (1 nodes): `Prepare CPU arrays from validated data.     Only called by CPU functions.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 68`** (1 nodes): `Fallback saver: Stores data in a simple .npy format.          Parameters     ---`
+- **Thin community `Community 68`** (1 nodes): `Compute direct N-body gravitational forces using GPU acceleration.          Calc`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 69`** (1 nodes): `Compute total accelerations on GPU.          Combines self-gravity (GPU) with op`
+- **Thin community `Community 69`** (1 nodes): `Compute gravitational potential at each particle location on GPU.          Calcu`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 70`** (1 nodes): `Compute accelerations using tree algorithm (pyfalcon).          Parameters     -`
+- **Thin community `Community 70`** (1 nodes): `Compute N-body gravitational accelerations (direct O(N^2) pairwise) with numba.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 71`** (1 nodes): `Compute accelerations using direct O(N^2) pairwise summation.          Parameter`
+- **Thin community `Community 71`** (1 nodes): `Compute gravitational potential using CPU parallelization (Numba).          Fall`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 72`** (1 nodes): `Run GPU-accelerated N-body simulation with leapfrog (KDK) integration.`
+- **Thin community `Community 72`** (1 nodes): `Get information about available GPU(s).          Returns     -------     info :`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 73`** (1 nodes): `Run GPU-accelerated N-body simulation with leapfrog (KDK) integration.`
+- **Thin community `Community 73`** (1 nodes): `Compute direct N-body gravitational forces using GPU acceleration.          Calc`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 74`** (1 nodes): `Run CPU-NUMBA accelerated N-body simulation with leapfrog (KDK) integration.`
+- **Thin community `Community 74`** (1 nodes): `Get information about available GPU(s).          Returns     -------     info :`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 75`** (1 nodes): `Generate Plummer sphere in virial equilibrium.          Parameters     ---------`
+- **Thin community `Community 75`** (1 nodes): `Fallback saver: Stores data in a simple .npy format.          Parameters     ---`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 76`** (1 nodes): `Place system on orbit in external potential.          Parameters     ----------`
+- **Thin community `Community 76`** (1 nodes): `Compute total accelerations on GPU.          Combines self-gravity (GPU) with op`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 77`** (1 nodes): `Compute direct N-body gravitational forces using GPU acceleration.          Calc`
+- **Thin community `Community 77`** (1 nodes): `Compute accelerations using tree algorithm (pyfalcon).          Parameters     -`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 78`** (1 nodes): `Get information about available GPU(s).          Returns     -------     info :`
+- **Thin community `Community 78`** (1 nodes): `Compute accelerations using direct O(N^2) pairwise summation.          Parameter`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 79`** (1 nodes): `Selectable force kernel function.         Returns the 1/r^3 equivalent factor fo`
+- **Thin community `Community 79`** (1 nodes): `Run GPU-accelerated N-body simulation with leapfrog (KDK) integration.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 80`** (1 nodes): `CPU parallelized force computation with Numba.                  Parameters`
+- **Thin community `Community 80`** (1 nodes): `Run GPU-accelerated N-body simulation with leapfrog (KDK) integration.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 81`** (1 nodes): `Compute direct N-body gravitational forces using GPU acceleration.          Calc`
+- **Thin community `Community 81`** (1 nodes): `Run CPU-NUMBA accelerated N-body simulation with leapfrog (KDK) integration.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 82`** (1 nodes): `Compute N-body gravitational accelerations (direct O(N^2) pairwise) with numba.`
+- **Thin community `Community 82`** (1 nodes): `Generate Plummer sphere in virial equilibrium.          Parameters     ---------`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 83`** (1 nodes): `Get information about available GPU(s).          Returns     -------     info :`
+- **Thin community `Community 83`** (1 nodes): `Place system on orbit in external potential.          Parameters     ----------`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 84`** (1 nodes): `Worker executed in a separate process. Reads one snapshot from disk and writes`
+- **Thin community `Community 84`** (1 nodes): `Compute direct N-body gravitational forces using GPU acceleration.          Calc`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 85`** (1 nodes): `A class to read N-body simulation data from one or more HDF5 files.      This re`
+- **Thin community `Community 85`** (1 nodes): `Get information about available GPU(s).          Returns     -------     info :`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 86`** (1 nodes): `Read simulation properties from the first HDF5 file.         Robust to missing '`
+- **Thin community `Community 86`** (1 nodes): `Selectable force kernel function.         Returns the 1/r^3 equivalent factor fo`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 87`** (1 nodes): `Scan HDF5 files and map snapshot index -> file path for fast lookups.          S`
+- **Thin community `Community 87`** (1 nodes): `CPU parallelized force computation with Numba.                  Parameters`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 88`** (1 nodes): `Read a single snapshot by index or physical time.          Parameters         --`
+- **Thin community `Community 88`** (1 nodes): `Compute direct N-body gravitational forces using GPU acceleration.          Calc`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 89`** (1 nodes): `Extract orbits for selected particle types across all available snapshots.`
+- **Thin community `Community 89`** (1 nodes): `Compute N-body gravitational accelerations (direct O(N^2) pairwise) with numba.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 90`** (1 nodes): `Fast append-only version. Sort at the end with _finalize_snapshot_times().`
+- **Thin community `Community 90`** (1 nodes): `Get information about available GPU(s).          Returns     -------     info :`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 91`** (1 nodes): `Call this ONCE at the end of run_nbody_gpu.`
+- **Thin community `Community 91`** (1 nodes): `Worker executed in a separate process. Reads one snapshot from disk and writes`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 92`** (1 nodes): `Write snapshot(s) compatible with ParticleReader.      Modes:       - single_fil`
+- **Thin community `Community 92`** (1 nodes): `A class to read N-body simulation data from one or more HDF5 files.      This re`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 93`** (1 nodes): `Save restart file for crash recovery.          Parameters     ----------     pha`
+- **Thin community `Community 93`** (1 nodes): `Read simulation properties from the first HDF5 file.         Robust to missing '`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 94`** (1 nodes): `Load restart file if it exists.          Parameters     ----------     output_di`
+- **Thin community `Community 94`** (1 nodes): `Scan HDF5 files and map snapshot index -> file path for fast lookups.          S`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 95`** (1 nodes): `matplotlib dependency`
+- **Thin community `Community 95`** (1 nodes): `Read a single snapshot by index or physical time.          Parameters         --`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 96`** (1 nodes): `graphify knowledge graph rules`
+- **Thin community `Community 96`** (1 nodes): `Extract orbits for selected particle types across all available snapshots.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 97`** (1 nodes): `NBODY_UNITS constant`
+- **Thin community `Community 97`** (1 nodes): `Fast append-only version. Sort at the end with _finalize_snapshot_times().`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 98`** (1 nodes): `fit_double_spheroid_profile`
+- **Thin community `Community 98`** (1 nodes): `Call this ONCE at the end of run_nbody_gpu.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 99`** (1 nodes): `fit_iterative_ellipsoid`
+- **Thin community `Community 99`** (1 nodes): `Write snapshot(s) compatible with ParticleReader.      Modes:       - single_fil`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 100`** (1 nodes): `cuda_alive`
+- **Thin community `Community 100`** (1 nodes): `Save restart file for crash recovery.          Parameters     ----------     pha`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 101`** (1 nodes): `compute_nbody_potential_cpu`
+- **Thin community `Community 101`** (1 nodes): `Load restart file if it exists.          Parameters     ----------     output_di`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 102`** (1 nodes): `get_gpu_info`
+- **Thin community `Community 102`** (1 nodes): `matplotlib dependency`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 103`** (1 nodes): `_load_restart internal`
+- **Thin community `Community 103`** (1 nodes): `graphify knowledge graph rules`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 104`** (1 nodes): `convert_vectors`
+- **Thin community `Community 104`** (1 nodes): `NBODY_UNITS constant`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 105`** (1 nodes): `convert_to_vel_los`
+- **Thin community `Community 105`** (1 nodes): `fit_double_spheroid_profile`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 106`** (1 nodes): `fit_iterative_ellipsoid`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 107`** (1 nodes): `cuda_alive`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 108`** (1 nodes): `compute_nbody_potential_cpu`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 109`** (1 nodes): `get_gpu_info`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 110`** (1 nodes): `_load_restart internal`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 111`** (1 nodes): `convert_vectors`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 112`** (1 nodes): `convert_to_vel_los`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `max()` connect `Community 10` to `Community 0`, `Community 2`, `Community 3`, `Community 4`, `Community 5`, `Community 6`, `Community 15`?**
-  _High betweenness centrality (0.320) - this node is a cross-community bridge._
+  _High betweenness centrality (0.322) - this node is a cross-community bridge._
 - **Why does `min()` connect `Community 2` to `Community 0`, `Community 3`, `Community 4`, `Community 5`, `Community 6`, `Community 10`, `Community 15`?**
   _High betweenness centrality (0.156) - this node is a cross-community bridge._
-- **Why does `test_mmax_sweep()` connect `Community 3` to `Community 1`, `Community 10`?**
-  _High betweenness centrality (0.081) - this node is a cross-community bridge._
 - **Are the 114 inferred relationships involving `Species` (e.g. with `ParticleReader` and `nbody_streams.nbody_io  I/O utilities for N-body snapshots and restart data.  Pr`) actually correct?**
   _`Species` has 114 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 98 inferred relationships involving `NFWPotentialGPU` (e.g. with `_GPUPotBase` and `MultipolePotentialGPU`) actually correct?**
@@ -697,3 +744,5 @@ _Questions this graph is uniquely positioned to answer:_
   _`MiyamotoNagaiPotentialGPU` has 98 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 98 inferred relationships involving `LogHaloPotentialGPU` (e.g. with `_GPUPotBase` and `MultipolePotentialGPU`) actually correct?**
   _`LogHaloPotentialGPU` has 98 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 98 inferred relationships involving `DiskAnsatzPotentialGPU` (e.g. with `_GPUPotBase` and `MultipolePotentialGPU`) actually correct?**
+  _`DiskAnsatzPotentialGPU` has 98 INFERRED edges - model-reasoned connections that need verification._

@@ -7690,19 +7690,19 @@
       "norm_label": "uniform_spherical_grid()"
     },
     {
-      "label": "spherical_spiral_grid()",
+      "label": "fibonacci_sphere_grid()",
       "file_type": "code",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1341",
-      "id": "utils_main_spherical_spiral_grid",
+      "source_location": "L1364",
+      "id": "utils_main_fibonacci_sphere_grid",
       "community": 5,
-      "norm_label": "spherical_spiral_grid()"
+      "norm_label": "fibonacci_sphere_grid()"
     },
     {
       "label": "_shrinking_sphere_center()",
       "file_type": "code",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1400",
+      "source_location": "L1440",
       "id": "utils_main_shrinking_sphere_center",
       "community": 5,
       "norm_label": "_shrinking_sphere_center()"
@@ -7711,7 +7711,7 @@
       "label": "_density_peak_center()",
       "file_type": "code",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1439",
+      "source_location": "L1479",
       "id": "utils_main_density_peak_center",
       "community": 5,
       "norm_label": "_density_peak_center()"
@@ -7720,7 +7720,7 @@
       "label": "find_center()",
       "file_type": "code",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1520",
+      "source_location": "L1560",
       "id": "utils_main_find_center",
       "community": 5,
       "norm_label": "find_center()"
@@ -7729,7 +7729,7 @@
       "label": "find_center_position()",
       "file_type": "code",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1632",
+      "source_location": "L1672",
       "id": "utils_main_find_center_position",
       "community": 5,
       "norm_label": "find_center_position()"
@@ -7738,7 +7738,7 @@
       "label": "compute_iterative_boundness()",
       "file_type": "code",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1654",
+      "source_location": "L1694",
       "id": "utils_main_compute_iterative_boundness",
       "community": 5,
       "norm_label": "compute_iterative_boundness()"
@@ -7747,7 +7747,7 @@
       "label": "iterative_unbinding()",
       "file_type": "code",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1662",
+      "source_location": "L1702",
       "id": "utils_main_iterative_unbinding",
       "community": 5,
       "norm_label": "iterative_unbinding()"
@@ -7891,64 +7891,64 @@
       "label": "Generate uniformly random points on the surface of a sphere.      Parameters",
       "file_type": "rationale",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1311",
+      "source_location": "L1313",
       "community": 5,
       "norm_label": "generate uniformly random points on the surface of a sphere.      parameters",
-      "id": "utils_main_rationale_1311"
+      "id": "utils_main_rationale_1313"
     },
     {
-      "label": "Load a pre-defined spherical spiral grid scaled to a given radius.      The grid",
+      "label": "Generate num_pts points on a sphere using the Fibonacci spiral.      Points are",
       "file_type": "rationale",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1345",
+      "source_location": "L1371",
       "community": 5,
-      "norm_label": "load a pre-defined spherical spiral grid scaled to a given radius.      the grid",
-      "id": "utils_main_rationale_1345"
+      "norm_label": "generate num_pts points on a sphere using the fibonacci spiral.      points are",
+      "id": "utils_main_rationale_1371"
     },
     {
       "label": "Shrinking-sphere centre finder.      Starts from the mass-weighted centroid and",
       "file_type": "rationale",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1407",
+      "source_location": "L1447",
       "community": 5,
       "norm_label": "shrinking-sphere centre finder.      starts from the mass-weighted centroid and",
-      "id": "utils_main_rationale_1407"
+      "id": "utils_main_rationale_1447"
     },
     {
       "label": "Find the density peak by locating the minimum gravitational potential.      Uses",
       "file_type": "rationale",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1446",
+      "source_location": "L1486",
       "community": 5,
       "norm_label": "find the density peak by locating the minimum gravitational potential.      uses",
-      "id": "utils_main_rationale_1446"
+      "id": "utils_main_rationale_1486"
     },
     {
       "label": "Find the centre (and optionally the velocity centre) of a particle distribution.",
       "file_type": "rationale",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1529",
+      "source_location": "L1569",
       "community": 5,
       "norm_label": "find the centre (and optionally the velocity centre) of a particle distribution.",
-      "id": "utils_main_rationale_1529"
+      "id": "utils_main_rationale_1569"
     },
     {
       "label": "Find the centre of a particle distribution.      .. deprecated::         Use :fu",
       "file_type": "rationale",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1638",
+      "source_location": "L1678",
       "community": 5,
       "norm_label": "find the centre of a particle distribution.      .. deprecated::         use :fu",
-      "id": "utils_main_rationale_1638"
+      "id": "utils_main_rationale_1678"
     },
     {
       "label": "Iterative unbinding to determine bound particles.      Computes the gravitationa",
       "file_type": "rationale",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1682",
+      "source_location": "L1722",
       "community": 5,
       "norm_label": "iterative unbinding to determine bound particles.      computes the gravitationa",
-      "id": "utils_main_rationale_1682"
+      "id": "utils_main_rationale_1722"
     },
     {
       "label": "__init__.py",
@@ -12028,11 +12028,74 @@
       "id": "tests_test_newtons_third_law_rationale_93"
     },
     {
+      "label": "Generate uniformly random points on the surface of a sphere.      Parameters",
+      "file_type": "rationale",
+      "source_file": "nbody_streams/utils/main.py",
+      "source_location": "L1311",
+      "community": 45,
+      "norm_label": "generate uniformly random points on the surface of a sphere.      parameters",
+      "id": "utils_main_rationale_1311"
+    },
+    {
+      "label": "Load a pre-defined spherical spiral grid scaled to a given radius.      The grid",
+      "file_type": "rationale",
+      "source_file": "nbody_streams/utils/main.py",
+      "source_location": "L1345",
+      "community": 46,
+      "norm_label": "load a pre-defined spherical spiral grid scaled to a given radius.      the grid",
+      "id": "utils_main_rationale_1345"
+    },
+    {
+      "label": "Shrinking-sphere centre finder.      Starts from the mass-weighted centroid and",
+      "file_type": "rationale",
+      "source_file": "nbody_streams/utils/main.py",
+      "source_location": "L1407",
+      "community": 47,
+      "norm_label": "shrinking-sphere centre finder.      starts from the mass-weighted centroid and",
+      "id": "utils_main_rationale_1407"
+    },
+    {
+      "label": "Find the density peak by locating the minimum gravitational potential.      Uses",
+      "file_type": "rationale",
+      "source_file": "nbody_streams/utils/main.py",
+      "source_location": "L1446",
+      "community": 48,
+      "norm_label": "find the density peak by locating the minimum gravitational potential.      uses",
+      "id": "utils_main_rationale_1446"
+    },
+    {
+      "label": "Find the centre (and optionally the velocity centre) of a particle distribution.",
+      "file_type": "rationale",
+      "source_file": "nbody_streams/utils/main.py",
+      "source_location": "L1529",
+      "community": 49,
+      "norm_label": "find the centre (and optionally the velocity centre) of a particle distribution.",
+      "id": "utils_main_rationale_1529"
+    },
+    {
+      "label": "Find the centre of a particle distribution.      .. deprecated::         Use :fu",
+      "file_type": "rationale",
+      "source_file": "nbody_streams/utils/main.py",
+      "source_location": "L1638",
+      "community": 50,
+      "norm_label": "find the centre of a particle distribution.      .. deprecated::         use :fu",
+      "id": "utils_main_rationale_1638"
+    },
+    {
+      "label": "Iterative unbinding to determine bound particles.      Computes the gravitationa",
+      "file_type": "rationale",
+      "source_file": "nbody_streams/utils/main.py",
+      "source_location": "L1682",
+      "community": 51,
+      "norm_label": "iterative unbinding to determine bound particles.      computes the gravitationa",
+      "id": "utils_main_rationale_1682"
+    },
+    {
       "label": "Jeans-equation estimate of the isotropic 1-D velocity dispersion.      Uses the",
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L66",
-      "community": 45,
+      "community": 52,
       "norm_label": "jeans-equation estimate of the isotropic 1-d velocity dispersion.      uses the",
       "id": "nbody_streams_chandrasekhar_rationale_66"
     },
@@ -12041,7 +12104,7 @@
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L140",
-      "community": 46,
+      "community": 53,
       "norm_label": "local circular-speed approximation to the 1-d velocity dispersion.      uses the",
       "id": "nbody_streams_chandrasekhar_rationale_140"
     },
@@ -12050,7 +12113,7 @@
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L175",
-      "community": 47,
+      "community": 54,
       "norm_label": "compute a radial velocity-dispersion profile from an agama potential.      param",
       "id": "nbody_streams_chandrasekhar_rationale_175"
     },
@@ -12059,7 +12122,7 @@
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L275",
-      "community": 48,
+      "community": 55,
       "norm_label": "phi-energy iterative bound-particle centre.      finds the centre of the gravita",
       "id": "nbody_streams_chandrasekhar_rationale_275"
     },
@@ -12068,7 +12131,7 @@
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L369",
-      "community": 49,
+      "community": 56,
       "norm_label": "iterative shrinking-sphere centre-of-mass estimator.      at each iteration the",
       "id": "nbody_streams_chandrasekhar_rationale_369"
     },
@@ -12077,7 +12140,7 @@
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L442",
-      "community": 50,
+      "community": 57,
       "norm_label": "chandrasekhar dynamical-friction acceleration at the satellite com.      compute",
       "id": "nbody_streams_chandrasekhar_rationale_442"
     },
@@ -12086,7 +12149,7 @@
       "file_type": "rationale",
       "source_file": "nbody_streams/_chandrasekhar.py",
       "source_location": "L536",
-      "community": 51,
+      "community": 58,
       "norm_label": "build a ``force_extra`` closure that applies chandrasekhar dynamical     frictio",
       "id": "nbody_streams_chandrasekhar_rationale_536"
     },
@@ -12275,7 +12338,7 @@
       "file_type": "rationale",
       "source_file": "nbody_streams/fast_sims/spray.py",
       "source_location": "L320",
-      "community": 52,
+      "community": 59,
       "norm_label": "r\"\"\"create a stellar stream using the particle-spray method.      the progenitor",
       "id": "fast_sims_spray_rationale_320"
     },
@@ -12311,7 +12374,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_fields_old.py",
       "source_location": "L112",
-      "community": 53,
+      "community": 60,
       "norm_label": "selectable force kernel function.         returns the 1/r^3 equivalent factor fo",
       "id": "legacy_nbody_fields_old_rationale_112"
     },
@@ -12320,7 +12383,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_fields_old.py",
       "source_location": "L182",
-      "community": 54,
+      "community": 61,
       "norm_label": "cpu parallelized force computation with numba.                  parameters",
       "id": "legacy_nbody_fields_old_rationale_182"
     },
@@ -12329,7 +12392,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_fields_old.py",
       "source_location": "L248",
-      "community": 55,
+      "community": 62,
       "norm_label": "cpu potential kernel matching gpu version.         returns -1/r equivalent for p",
       "id": "legacy_nbody_fields_old_rationale_248"
     },
@@ -12338,7 +12401,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_fields_old.py",
       "source_location": "L308",
-      "community": 56,
+      "community": 63,
       "norm_label": "cpu parallelized potential computation with numba.                  parameters",
       "id": "legacy_nbody_fields_old_rationale_308"
     },
@@ -12347,7 +12410,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_fields_old.py",
       "source_location": "L404",
-      "community": 57,
+      "community": 64,
       "norm_label": "get compiled cuda kernel for forces or potential.          parameters     ------",
       "id": "legacy_nbody_fields_old_rationale_404"
     },
@@ -12356,7 +12419,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_fields_old.py",
       "source_location": "L461",
-      "community": 58,
+      "community": 65,
       "norm_label": "validate inputs and prepare cpu arrays.     works regardless of whether cupy is",
       "id": "legacy_nbody_fields_old_rationale_461"
     },
@@ -12365,7 +12428,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_fields_old.py",
       "source_location": "L543",
-      "community": 59,
+      "community": 66,
       "norm_label": "transfer validated cpu data to gpu or use existing gpu arrays.     only called b",
       "id": "legacy_nbody_fields_old_rationale_543"
     },
@@ -12374,7 +12437,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_fields_old.py",
       "source_location": "L593",
-      "community": 60,
+      "community": 67,
       "norm_label": "prepare cpu arrays from validated data.     only called by cpu functions.",
       "id": "legacy_nbody_fields_old_rationale_593"
     },
@@ -12383,7 +12446,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_fields_old.py",
       "source_location": "L648",
-      "community": 61,
+      "community": 68,
       "norm_label": "compute direct n-body gravitational forces using gpu acceleration.          calc",
       "id": "legacy_nbody_fields_old_rationale_648"
     },
@@ -12392,7 +12455,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_fields_old.py",
       "source_location": "L821",
-      "community": 62,
+      "community": 69,
       "norm_label": "compute gravitational potential at each particle location on gpu.          calcu",
       "id": "legacy_nbody_fields_old_rationale_821"
     },
@@ -12401,7 +12464,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_fields_old.py",
       "source_location": "L950",
-      "community": 63,
+      "community": 70,
       "norm_label": "compute n-body gravitational accelerations (direct o(n^2) pairwise) with numba.",
       "id": "legacy_nbody_fields_old_rationale_950"
     },
@@ -12410,7 +12473,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_fields_old.py",
       "source_location": "L1017",
-      "community": 64,
+      "community": 71,
       "norm_label": "compute gravitational potential using cpu parallelization (numba).          fall",
       "id": "legacy_nbody_fields_old_rationale_1017"
     },
@@ -12419,7 +12482,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_fields_old.py",
       "source_location": "L1069",
-      "community": 65,
+      "community": 72,
       "norm_label": "get information about available gpu(s).          returns     -------     info :",
       "id": "legacy_nbody_fields_old_rationale_1069"
     },
@@ -12428,7 +12491,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_forces_gpu_stripped.py",
       "source_location": "L274",
-      "community": 66,
+      "community": 73,
       "norm_label": "compute direct n-body gravitational forces using gpu acceleration.          calc",
       "id": "legacy_nbody_forces_gpu_stripped_rationale_274"
     },
@@ -12437,7 +12500,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_forces_gpu_stripped.py",
       "source_location": "L466",
-      "community": 67,
+      "community": 74,
       "norm_label": "get information about available gpu(s).          returns     -------     info :",
       "id": "legacy_nbody_forces_gpu_stripped_rationale_466"
     },
@@ -12446,7 +12509,7 @@
       "file_type": "rationale",
       "source_file": "legacy/run_nbody_faulty.py",
       "source_location": "L80",
-      "community": 68,
+      "community": 75,
       "norm_label": "fallback saver: stores data in a simple .npy format.          parameters     ---",
       "id": "legacy_run_nbody_faulty_rationale_80"
     },
@@ -12455,7 +12518,7 @@
       "file_type": "rationale",
       "source_file": "legacy/run_nbody_faulty.py",
       "source_location": "L132",
-      "community": 69,
+      "community": 76,
       "norm_label": "compute total accelerations on gpu.          combines self-gravity (gpu) with op",
       "id": "legacy_run_nbody_faulty_rationale_132"
     },
@@ -12464,7 +12527,7 @@
       "file_type": "rationale",
       "source_file": "legacy/run_nbody_faulty.py",
       "source_location": "L216",
-      "community": 70,
+      "community": 77,
       "norm_label": "compute accelerations using tree algorithm (pyfalcon).          parameters     -",
       "id": "legacy_run_nbody_faulty_rationale_216"
     },
@@ -12473,7 +12536,7 @@
       "file_type": "rationale",
       "source_file": "legacy/run_nbody_faulty.py",
       "source_location": "L268",
-      "community": 71,
+      "community": 78,
       "norm_label": "compute accelerations using direct o(n^2) pairwise summation.          parameter",
       "id": "legacy_run_nbody_faulty_rationale_268"
     },
@@ -12482,7 +12545,7 @@
       "file_type": "rationale",
       "source_file": "legacy/run_nbody_faulty.py",
       "source_location": "L335",
-      "community": 72,
+      "community": 79,
       "norm_label": "run gpu-accelerated n-body simulation with leapfrog (kdk) integration.",
       "id": "legacy_run_nbody_faulty_rationale_335"
     },
@@ -12491,7 +12554,7 @@
       "file_type": "rationale",
       "source_file": "legacy/run_nbody_faulty.py",
       "source_location": "L760",
-      "community": 73,
+      "community": 80,
       "norm_label": "run gpu-accelerated n-body simulation with leapfrog (kdk) integration.",
       "id": "legacy_run_nbody_faulty_rationale_760"
     },
@@ -12500,7 +12563,7 @@
       "file_type": "rationale",
       "source_file": "legacy/run_nbody_faulty.py",
       "source_location": "L1100",
-      "community": 74,
+      "community": 81,
       "norm_label": "run cpu-numba accelerated n-body simulation with leapfrog (kdk) integration.",
       "id": "legacy_run_nbody_faulty_rationale_1100"
     },
@@ -12509,7 +12572,7 @@
       "file_type": "rationale",
       "source_file": "legacy/run_nbody_faulty.py",
       "source_location": "L1400",
-      "community": 75,
+      "community": 82,
       "norm_label": "generate plummer sphere in virial equilibrium.          parameters     ---------",
       "id": "legacy_run_nbody_faulty_rationale_1400"
     },
@@ -12518,7 +12581,7 @@
       "file_type": "rationale",
       "source_file": "legacy/run_nbody_faulty.py",
       "source_location": "L1470",
-      "community": 76,
+      "community": 83,
       "norm_label": "place system on orbit in external potential.          parameters     ----------",
       "id": "legacy_run_nbody_faulty_rationale_1470"
     },
@@ -12527,7 +12590,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_forces_gpu_old.py",
       "source_location": "L283",
-      "community": 77,
+      "community": 84,
       "norm_label": "compute direct n-body gravitational forces using gpu acceleration.          calc",
       "id": "legacy_nbody_forces_gpu_old_rationale_283"
     },
@@ -12536,7 +12599,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_forces_gpu_old.py",
       "source_location": "L483",
-      "community": 78,
+      "community": 85,
       "norm_label": "get information about available gpu(s).          returns     -------     info :",
       "id": "legacy_nbody_forces_gpu_old_rationale_483"
     },
@@ -12545,7 +12608,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_forces_gpu_legacy.py",
       "source_location": "L101",
-      "community": 79,
+      "community": 86,
       "norm_label": "selectable force kernel function.         returns the 1/r^3 equivalent factor fo",
       "id": "legacy_nbody_forces_gpu_legacy_rationale_101"
     },
@@ -12554,7 +12617,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_forces_gpu_legacy.py",
       "source_location": "L171",
-      "community": 80,
+      "community": 87,
       "norm_label": "cpu parallelized force computation with numba.                  parameters",
       "id": "legacy_nbody_forces_gpu_legacy_rationale_171"
     },
@@ -12563,7 +12626,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_forces_gpu_legacy.py",
       "source_location": "L610",
-      "community": 81,
+      "community": 88,
       "norm_label": "compute direct n-body gravitational forces using gpu acceleration.          calc",
       "id": "legacy_nbody_forces_gpu_legacy_rationale_610"
     },
@@ -12572,7 +12635,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_forces_gpu_legacy.py",
       "source_location": "L834",
-      "community": 82,
+      "community": 89,
       "norm_label": "compute n-body gravitational accelerations (direct o(n^2) pairwise) with numba.",
       "id": "legacy_nbody_forces_gpu_legacy_rationale_834"
     },
@@ -12581,7 +12644,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_forces_gpu_legacy.py",
       "source_location": "L942",
-      "community": 83,
+      "community": 90,
       "norm_label": "get information about available gpu(s).          returns     -------     info :",
       "id": "legacy_nbody_forces_gpu_legacy_rationale_942"
     },
@@ -12590,7 +12653,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_io_faulty.py",
       "source_location": "L12",
-      "community": 84,
+      "community": 91,
       "norm_label": "worker executed in a separate process. reads one snapshot from disk and writes",
       "id": "legacy_nbody_io_faulty_rationale_12"
     },
@@ -12599,7 +12662,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_io_faulty.py",
       "source_location": "L76",
-      "community": 85,
+      "community": 92,
       "norm_label": "a class to read n-body simulation data from one or more hdf5 files.      this re",
       "id": "legacy_nbody_io_faulty_rationale_76"
     },
@@ -12608,7 +12671,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_io_faulty.py",
       "source_location": "L181",
-      "community": 86,
+      "community": 93,
       "norm_label": "read simulation properties from the first hdf5 file.         robust to missing '",
       "id": "legacy_nbody_io_faulty_rationale_181"
     },
@@ -12617,7 +12680,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_io_faulty.py",
       "source_location": "L246",
-      "community": 87,
+      "community": 94,
       "norm_label": "scan hdf5 files and map snapshot index -> file path for fast lookups.          s",
       "id": "legacy_nbody_io_faulty_rationale_246"
     },
@@ -12626,7 +12689,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_io_faulty.py",
       "source_location": "L279",
-      "community": 88,
+      "community": 95,
       "norm_label": "read a single snapshot by index or physical time.          parameters         --",
       "id": "legacy_nbody_io_faulty_rationale_279"
     },
@@ -12635,7 +12698,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_io_faulty.py",
       "source_location": "L337",
-      "community": 89,
+      "community": 96,
       "norm_label": "extract orbits for selected particle types across all available snapshots.",
       "id": "legacy_nbody_io_faulty_rationale_337"
     },
@@ -12644,7 +12707,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_io_faulty.py",
       "source_location": "L508",
-      "community": 90,
+      "community": 97,
       "norm_label": "fast append-only version. sort at the end with _finalize_snapshot_times().",
       "id": "legacy_nbody_io_faulty_rationale_508"
     },
@@ -12653,7 +12716,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_io_faulty.py",
       "source_location": "L522",
-      "community": 91,
+      "community": 98,
       "norm_label": "call this once at the end of run_nbody_gpu.",
       "id": "legacy_nbody_io_faulty_rationale_522"
     },
@@ -12662,7 +12725,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_io_faulty.py",
       "source_location": "L568",
-      "community": 92,
+      "community": 99,
       "norm_label": "write snapshot(s) compatible with particlereader.      modes:       - single_fil",
       "id": "legacy_nbody_io_faulty_rationale_568"
     },
@@ -12671,7 +12734,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_io_faulty.py",
       "source_location": "L663",
-      "community": 93,
+      "community": 100,
       "norm_label": "save restart file for crash recovery.          parameters     ----------     pha",
       "id": "legacy_nbody_io_faulty_rationale_663"
     },
@@ -12680,7 +12743,7 @@
       "file_type": "rationale",
       "source_file": "legacy/nbody_io_faulty.py",
       "source_location": "L688",
-      "community": 94,
+      "community": 101,
       "norm_label": "load restart file if it exists.          parameters     ----------     output_di",
       "id": "legacy_nbody_io_faulty_rationale_688"
     },
@@ -13356,7 +13419,7 @@
       "captured_at": null,
       "author": null,
       "contributor": null,
-      "community": 95,
+      "community": 102,
       "norm_label": "matplotlib dependency",
       "id": "requirements_matplotlib"
     },
@@ -13369,7 +13432,7 @@
       "captured_at": null,
       "author": null,
       "contributor": null,
-      "community": 96,
+      "community": 103,
       "norm_label": "graphify knowledge graph rules",
       "id": "claude_graphify_rules"
     },
@@ -13642,7 +13705,7 @@
       "captured_at": null,
       "author": null,
       "contributor": null,
-      "community": 97,
+      "community": 104,
       "norm_label": "nbody_units constant",
       "id": "run_nbody_units"
     },
@@ -13720,7 +13783,7 @@
       "captured_at": null,
       "author": null,
       "contributor": null,
-      "community": 98,
+      "community": 105,
       "norm_label": "fit_double_spheroid_profile",
       "id": "utils_fit_double_spheroid"
     },
@@ -13733,7 +13796,7 @@
       "captured_at": null,
       "author": null,
       "contributor": null,
-      "community": 99,
+      "community": 106,
       "norm_label": "fit_iterative_ellipsoid",
       "id": "utils_fit_iterative_ellipsoid"
     },
@@ -13811,7 +13874,7 @@
       "captured_at": null,
       "author": null,
       "contributor": null,
-      "community": 100,
+      "community": 107,
       "norm_label": "cuda_alive",
       "id": "treegpu_cuda_alive"
     },
@@ -14032,7 +14095,7 @@
       "captured_at": null,
       "author": null,
       "contributor": null,
-      "community": 101,
+      "community": 108,
       "norm_label": "compute_nbody_potential_cpu",
       "id": "fields_compute_potential_cpu"
     },
@@ -14045,7 +14108,7 @@
       "captured_at": null,
       "author": null,
       "contributor": null,
-      "community": 102,
+      "community": 109,
       "norm_label": "get_gpu_info",
       "id": "fields_get_gpu_info"
     },
@@ -14136,7 +14199,7 @@
       "captured_at": null,
       "author": null,
       "contributor": null,
-      "community": 103,
+      "community": 110,
       "norm_label": "_load_restart internal",
       "id": "io_load_restart"
     },
@@ -14344,7 +14407,7 @@
       "captured_at": null,
       "author": null,
       "contributor": null,
-      "community": 104,
+      "community": 111,
       "norm_label": "convert_vectors",
       "id": "docs_coords_convert_vectors"
     },
@@ -14357,7 +14420,7 @@
       "captured_at": null,
       "author": null,
       "contributor": null,
-      "community": 105,
+      "community": 112,
       "norm_label": "convert_to_vel_los",
       "id": "docs_coords_convert_to_vel_los"
     },
@@ -48081,19 +48144,19 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1341",
+      "source_location": "L1364",
       "weight": 1.0,
       "_src": "nbody_streams_utils_main_py",
-      "_tgt": "utils_main_spherical_spiral_grid",
+      "_tgt": "utils_main_fibonacci_sphere_grid",
       "source": "nbody_streams_utils_main_py",
-      "target": "utils_main_spherical_spiral_grid",
+      "target": "utils_main_fibonacci_sphere_grid",
       "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1400",
+      "source_location": "L1440",
       "weight": 1.0,
       "_src": "nbody_streams_utils_main_py",
       "_tgt": "utils_main_shrinking_sphere_center",
@@ -48105,7 +48168,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1439",
+      "source_location": "L1479",
       "weight": 1.0,
       "_src": "nbody_streams_utils_main_py",
       "_tgt": "utils_main_density_peak_center",
@@ -48117,7 +48180,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1520",
+      "source_location": "L1560",
       "weight": 1.0,
       "_src": "nbody_streams_utils_main_py",
       "_tgt": "utils_main_find_center",
@@ -48129,7 +48192,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1632",
+      "source_location": "L1672",
       "weight": 1.0,
       "_src": "nbody_streams_utils_main_py",
       "_tgt": "utils_main_find_center_position",
@@ -48141,7 +48204,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1654",
+      "source_location": "L1694",
       "weight": 1.0,
       "_src": "nbody_streams_utils_main_py",
       "_tgt": "utils_main_compute_iterative_boundness",
@@ -48153,7 +48216,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1662",
+      "source_location": "L1702",
       "weight": 1.0,
       "_src": "nbody_streams_utils_main_py",
       "_tgt": "utils_main_iterative_unbinding",
@@ -48585,12 +48648,12 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1311",
+      "source_location": "L1313",
       "weight": 1.0,
-      "_src": "utils_main_rationale_1311",
+      "_src": "utils_main_rationale_1313",
       "_tgt": "utils_main_uniform_spherical_grid",
       "source": "utils_main_uniform_spherical_grid",
-      "target": "utils_main_rationale_1311",
+      "target": "utils_main_rationale_1313",
       "confidence_score": 1.0
     },
     {
@@ -48609,19 +48672,19 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1345",
+      "source_location": "L1371",
       "weight": 1.0,
-      "_src": "utils_main_rationale_1345",
-      "_tgt": "utils_main_spherical_spiral_grid",
-      "source": "utils_main_spherical_spiral_grid",
-      "target": "utils_main_rationale_1345",
+      "_src": "utils_main_rationale_1371",
+      "_tgt": "utils_main_fibonacci_sphere_grid",
+      "source": "utils_main_fibonacci_sphere_grid",
+      "target": "utils_main_rationale_1371",
       "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1591",
+      "source_location": "L1631",
       "weight": 1.0,
       "_src": "utils_main_find_center",
       "_tgt": "utils_main_shrinking_sphere_center",
@@ -48633,19 +48696,19 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1407",
+      "source_location": "L1447",
       "weight": 1.0,
-      "_src": "utils_main_rationale_1407",
+      "_src": "utils_main_rationale_1447",
       "_tgt": "utils_main_shrinking_sphere_center",
       "source": "utils_main_shrinking_sphere_center",
-      "target": "utils_main_rationale_1407",
+      "target": "utils_main_rationale_1447",
       "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1582",
+      "source_location": "L1622",
       "weight": 1.0,
       "_src": "utils_main_find_center",
       "_tgt": "utils_main_density_peak_center",
@@ -48657,19 +48720,19 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1446",
+      "source_location": "L1486",
       "weight": 1.0,
-      "_src": "utils_main_rationale_1446",
+      "_src": "utils_main_rationale_1486",
       "_tgt": "utils_main_density_peak_center",
       "source": "utils_main_density_peak_center",
-      "target": "utils_main_rationale_1446",
+      "target": "utils_main_rationale_1486",
       "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1649",
+      "source_location": "L1689",
       "weight": 1.0,
       "_src": "utils_main_find_center_position",
       "_tgt": "utils_main_find_center",
@@ -48681,12 +48744,12 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1529",
+      "source_location": "L1569",
       "weight": 1.0,
-      "_src": "utils_main_rationale_1529",
+      "_src": "utils_main_rationale_1569",
       "_tgt": "utils_main_find_center",
       "source": "utils_main_find_center",
-      "target": "utils_main_rationale_1529",
+      "target": "utils_main_rationale_1569",
       "confidence_score": 1.0
     },
     {
@@ -48717,19 +48780,19 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1638",
+      "source_location": "L1678",
       "weight": 1.0,
-      "_src": "utils_main_rationale_1638",
+      "_src": "utils_main_rationale_1678",
       "_tgt": "utils_main_find_center_position",
       "source": "utils_main_find_center_position",
-      "target": "utils_main_rationale_1638",
+      "target": "utils_main_rationale_1678",
       "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1660",
+      "source_location": "L1700",
       "weight": 1.0,
       "_src": "utils_main_compute_iterative_boundness",
       "_tgt": "utils_main_iterative_unbinding",
@@ -48741,12 +48804,12 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/utils/main.py",
-      "source_location": "L1682",
+      "source_location": "L1722",
       "weight": 1.0,
-      "_src": "utils_main_rationale_1682",
+      "_src": "utils_main_rationale_1722",
       "_tgt": "utils_main_iterative_unbinding",
       "source": "utils_main_iterative_unbinding",
-      "target": "utils_main_rationale_1682",
+      "target": "utils_main_rationale_1722",
       "confidence_score": 1.0
     },
     {
