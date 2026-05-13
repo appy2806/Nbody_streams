@@ -256,29 +256,47 @@ diagonalises the (optionally reduced/weighted) structure tensor.
 ### `uniform_spherical_grid`
 
 ```python
-uniform_spherical_grid(radius=1.0, num_pts=500)
+uniform_spherical_grid(num_pts, radius=1.0, proj="cart", seed=42)
 ```
 
-Generate uniformly random points on the surface of a sphere.
-
-**Returns** `ndarray, shape (num_pts, 3)` — Cartesian coordinates.
-
----
-
-### `spherical_spiral_grid`
-
-```python
-spherical_spiral_grid(radius=1.0, proj="Cart")
-```
-
-Load a pre-defined spherical spiral grid from
-`nbody_streams/data/spherical_grid_unit.xyz`, scaled to `radius`.
+Generate uniformly random points on the surface of a sphere using rejection
+sampling in cos(theta).
 
 **Parameters**
 
-| `proj` | Output coordinate system: `'Cart'` (Cartesian), `'Sph'` (spherical `(r, theta, phi)`), or `'Cyl'` (cylindrical `(R, phi, z)`). |
+| Name | Type | Description |
+|------|------|-------------|
+| `num_pts` | int | Number of points to generate (required, must be > 0). |
+| `radius` | float | Sphere radius. Default 1.0. |
+| `proj` | str | Output coordinate system (case-insensitive): `'cart'` (x, y, z), `'sph'` (r, theta, phi), or `'cyl'` (R, phi, z). Default `'cart'`. |
+| `seed` | int or None | Random seed for reproducibility. Default 42. |
 
-**Returns** `ndarray, shape (M, 3)`
+**Returns** `ndarray, shape (num_pts, 3)`
+
+---
+
+### `fibonacci_sphere_grid`
+
+```python
+fibonacci_sphere_grid(num_pts, radius=1.0, proj="cart", jittered=False, seed=42)
+```
+
+Generate well-distributed points on a sphere using the Fibonacci spiral.
+Points have near-uniform area density with minimum nearest-neighbour angular
+separation ~sqrt(4*pi / num_pts).  Optional stratified jitter breaks the
+regular spiral pattern for improved isotropy.
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `num_pts` | int | Number of points to generate (required, must be > 0). |
+| `radius` | float | Sphere radius. Default 1.0. |
+| `proj` | str | Output coordinate system (case-insensitive): `'cart'` (x, y, z), `'sph'` (r, theta, phi), or `'cyl'` (R, phi, z). Default `'cart'`. |
+| `jittered` | bool | If True, apply per-point stratified jitter in polar and azimuthal directions. Default False. |
+| `seed` | int or None | Random seed when `jittered=True`. Default 42. |
+
+**Returns** `ndarray, shape (num_pts, 3)`
 
 ---
 

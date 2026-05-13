@@ -47,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dynamical_friction=True` example, `agama_helper` note, and
   `make_df_force_extra` advanced-user note.
 
+### Changed
+
+- **`utils` spherical grid generators** — `spherical_spiral_grid` (file-backed)
+  replaced by `fibonacci_sphere_grid(num_pts, ...)` (fully computed, no data file).
+  `uniform_spherical_grid` signature updated: `num_pts` is now the first required
+  positional argument; `proj` (case-insensitive, default `'cart'`) and `seed`
+  (default 42) added to both functions.  `spherical_grid_unit.xyz` data file removed.
+
 ### Fixed
 
 - `dynamical_friction=True` in `run_simulation` no longer raises
