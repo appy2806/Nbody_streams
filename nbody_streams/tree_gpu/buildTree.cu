@@ -3,7 +3,7 @@
 #define NWARPS_OCTREE2 3
 #define NWARPS2 NWARPS_OCTREE2
 #define NWARPS  (1<<NWARPS2)
-#define MAX_WORK 65536 // default was 65536 (2^16), try to increase if you get "Error: pending work queue overflow, increase MAX_WORK and recompile" message
+#define MAX_WORK 262144 // default was 65536 (2^16), try to increase if you get "Error: pending work queue overflow, increase MAX_WORK and recompile" message
 // 1048576 is 2^20, which should be enough for 10^7 particles, but you can increase it further if you have more particles
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>

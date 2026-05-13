@@ -74,22 +74,24 @@ def _squeeze(arr, single):
 # Base class
 # ---------------------------------------------------------------------------
 
-class _AnalyticBase:
-    """Abstract base --- subclasses implement _phi, _grad, _hess, _rho."""
+# Import _GPUPotBase so that all analytic potentials share the same
+# isinstance-detectable base class as the BFE potentials.
+# _potential.py only imports _analytic_potentials lazily (inside functions),
+# so this top-level import is safe — no circular dependency.
+try:
+    from nbody_streams.agama_helper._potential import _GPUPotBase as _GPUPotBase
+except ImportError:
+    from _potential import _GPUPotBase as _GPUPotBase
 
-    def __add__(self, other):
-        try:
-            from nbody_streams.agama_helper._potential import CompositePotentialGPU
-        except ImportError:
-            from _potential import CompositePotentialGPU
-        from_self  = self._components  if isinstance(self,  CompositePotentialGPU) else [self]
-        from_other = other._components if isinstance(other, CompositePotentialGPU) else [other]
-        return CompositePotentialGPU(from_self + from_other)
 
-    def __radd__(self, other):
-        if other == 0:
-            return self
-        return NotImplemented
+class _AnalyticBase(_GPUPotBase):
+    """Abstract base for analytic GPU potentials.
+
+    Inherits ``__add__`` / ``__radd__`` composition from ``_GPUPotBase`` so that
+    ``isinstance(pot, _GPUPotBase)`` returns True for every GPU potential class —
+    analytic or BFE — enabling a single ``_is_gpu_potential()`` check in run.py
+    and tree_gpu without needing to enumerate both base classes.
+    """
 
     def potential(self, xyz, t: float = 0.0) -> cp.ndarray:
         arr, single = _prep_xyz(xyz)

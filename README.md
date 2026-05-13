@@ -579,6 +579,8 @@ from nbody_streams.utils import (
     fit_plummer_profile,
     fit_double_spheroid_profile,
     fit_iterative_ellipsoid,
+    uniform_spherical_grid,
+    fibonacci_sphere_grid,
     find_center,
     iterative_unbinding,
 )

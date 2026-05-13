@@ -54,6 +54,15 @@ def _to_numpy(arr: "np.ndarray | cp.ndarray") -> np.ndarray:
         return np.asarray(arr)
 
 
+def _is_gpu_potential(pot) -> bool:
+    """True when *pot* is from the PotentialGPU family (nbody_streams.agama_helper)."""
+    try:
+        from .agama_helper._potential import _GPUPotBase
+        return isinstance(pot, _GPUPotBase)
+    except ImportError:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Velocity-dispersion profile
 # ---------------------------------------------------------------------------
@@ -97,8 +106,8 @@ def _jeans_sigma_r(
         np.zeros_like(grid_r),
     ])
 
-    rho = np.asarray(pot.density(xyz, t=t_eval))        # (N,) M_sun/kpc^3
-    forces = np.asarray(pot.force(xyz, t=t_eval))       # (N, 3) (km/s)^2/kpc
+    rho = _to_numpy(pot.density(xyz, t=t_eval))          # (N,) M_sun/kpc^3
+    forces = _to_numpy(pot.force(xyz, t=t_eval))         # (N, 3) (km/s)^2/kpc
     g_r = np.abs(forces[:, 0])                          # radial magnitude
 
     integrand = rho * g_r                               # M_sun (km/s)^2 kpc^-4
@@ -162,7 +171,7 @@ def _sigma_local_circular(pot, r: float, t: float = 0.0) -> float:
         sigma [km/s].
     """
     xyz = np.array([[r, 0.0, 0.0]])
-    g_r = abs(float(np.asarray(pot.force(xyz, t=t))[0, 0]))
+    g_r = abs(float(_to_numpy(pot.force(xyz, t=t))[0, 0]))
     return float(np.sqrt(max(0.5 * r * g_r, 0.0)))
 
 
@@ -486,7 +495,7 @@ def chandrasekhar_friction(
     if r < 1e-6 or v < 1e-6:
         return np.zeros(3)
 
-    rho = float(pot.density(r_com, t=t))
+    rho = float(_to_numpy(pot.density(np.atleast_2d(r_com), t=t)).ravel()[0])
     sigma = float(sigma_func(r))
     X = v / (np.sqrt(2.0) * sigma)
 
@@ -636,10 +645,20 @@ def make_df_force_extra(
     >>> df_force = make_df_force_extra(pot, M_sat=1e9, t_start=0.0, t_end=5.0)
     >>> result = run_nbody_gpu(xv, masses, ..., force_extra=df_force)
     """
-    if not _AGAMA_OK:
+    _gpu_pot = _is_gpu_potential(pot)
+    # Agama is only required for quasispherical sigma (uses Agama DF moments)
+    # or if pot is an agama.Potential itself.  PotentialGPU + jeans/local_circular
+    # works without Agama installed.
+    if not _AGAMA_OK and not _gpu_pot:
         raise ImportError(
-            "Agama is required for make_df_force_extra.  "
+            "Agama is required for make_df_force_extra when pot is an agama.Potential.  "
             "Install it with: pip install agama"
+        )
+    if not _AGAMA_OK and sigma_method == "quasispherical":
+        raise ImportError(
+            "sigma_method='quasispherical' requires Agama (DF moments via "
+            "agama.DistributionFunction).  Use sigma_method='jeans' or "
+            "'local_circular' when Agama is not installed."
         )
     if M_sat <= 0:
         raise ValueError(f"M_sat must be positive, got {M_sat}")
@@ -650,6 +669,15 @@ def make_df_force_extra(
             f"sigma_method must be 'jeans', 'local_circular', or "
             f"'quasispherical', got '{sigma_method}'"
         )
+    if _gpu_pot and sigma_method == "quasispherical":
+        warnings.warn(
+            "sigma_method='quasispherical' requires Agama to introspect the "
+            "potential (agama.DistributionFunction).  PotentialGPU objects are "
+            "not recognised by Agama — falling back to Jeans equation.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        sigma_method = "jeans"
 
     # Build sigma(r) spline once (for jeans / quasispherical paths)
     t_mid = 0.5 * (t_start + t_end)

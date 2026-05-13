@@ -89,7 +89,7 @@ __all__ = [
     "fit_iterative_ellipsoid",
     # grids
     "uniform_spherical_grid",
-    "spherical_spiral_grid",
+    "fibonacci_sphere_grid",
     # centre finding
     "find_center",
     "find_center_position",   # deprecated alias
@@ -1305,91 +1305,131 @@ def fit_iterative_ellipsoid(
 # --- 5. Spherical grid generators ---
 
 def uniform_spherical_grid(
+    num_pts: int,
     radius: float = 1.0,
-    num_pts: int = 500,
+    proj: str = "cart",
+    seed: int | None = 42,
 ) -> np.ndarray:
     """Generate uniformly random points on the surface of a sphere.
 
     Parameters
     ----------
+    num_pts : int
+        Number of points to generate.
     radius : float
         Sphere radius.
-    num_pts : int
-        Number of points.
+    proj : ``'cart'`` | ``'sph'`` | ``'cyl'``  (case-insensitive)
+        Coordinate system of the returned array.
+
+        * ``'cart'`` - Cartesian ``(x, y, z)``.
+        * ``'sph'``  - Spherical ``(r, theta, phi)``.
+        * ``'cyl'``  - Cylindrical ``(R, phi, z)``.
+
+    seed : int or None
+        Random seed for reproducibility.  Default is 42.
 
     Returns
     -------
-    xyz : np.ndarray, shape ``(num_pts, 3)``
-        Cartesian coordinates.
+    grid : np.ndarray, shape ``(num_pts, 3)``
     """
+    proj = proj.lower()
+    if proj not in ("cart", "sph", "cyl"):
+        raise ValueError("proj must be 'cart', 'sph', or 'cyl'.")
     if radius <= 0:
-        raise ValueError("Radius must be positive.")
+        raise ValueError("radius must be positive.")
     if not isinstance(num_pts, (int, np.integer)) or num_pts <= 0:
         raise ValueError("num_pts must be a positive integer.")
 
-    phi = np.random.uniform(0, 2 * np.pi, num_pts)
-    cos_theta = np.random.uniform(-1, 1, num_pts)
-    theta = np.arccos(cos_theta)
+    rng = np.random.default_rng(seed)
+    azimuth = rng.uniform(0, 2 * np.pi, num_pts)
+    polar = np.arccos(rng.uniform(-1, 1, num_pts))
 
-    x = radius * np.sin(theta) * np.cos(phi)
-    y = radius * np.sin(theta) * np.sin(phi)
-    z = radius * np.cos(theta)
+    if proj == "sph":
+        r = np.full(num_pts, radius)
+        return np.column_stack((r, polar, azimuth))
 
-    return np.column_stack((x, y, z))
+    x = radius * np.sin(polar) * np.cos(azimuth)
+    y = radius * np.sin(polar) * np.sin(azimuth)
+    z = radius * np.cos(polar)
+
+    if proj == "cart":
+        return np.column_stack((x, y, z))
+
+    # proj == "cyl"
+    R = np.sqrt(x ** 2 + y ** 2)
+    phi = np.arctan2(y, x)
+    return np.column_stack((R, phi, z))
 
 
-def spherical_spiral_grid(
+def fibonacci_sphere_grid(
+    num_pts: int,
     radius: float = 1.0,
-    proj: str = "Cart",
+    proj: str = "cart",
+    jittered: bool = False,
+    seed: int | None = 42,
 ) -> np.ndarray:
-    """Load a pre-defined spherical spiral grid scaled to a given radius.
+    """Generate num_pts points on a sphere using the Fibonacci spiral.
 
-    The grid data is read from
-    ``nbody_streams/data/spherical_grid_unit.xyz``.
+    Points are well-distributed with near-uniform area density.  Optional
+    stratified jitter breaks the regular spiral pattern for improved isotropy.
 
     Parameters
     ----------
+    num_pts : int
+        Number of points to generate.
     radius : float
-        Radius to scale the unit grid to.
-    proj : ``'Cart'`` | ``'Sph'`` | ``'Cyl'``
+        Radius of the sphere.
+    proj : ``'cart'`` | ``'sph'`` | ``'cyl'``  (case-insensitive)
         Coordinate system of the returned array.
 
-        * ``'Cart'`` - Cartesian ``(x, y, z)``.
-        * ``'Sph'``  - Spherical ``(r, theta, phi)``.
-        * ``'Cyl'``  - Cylindrical ``(R, phi, z)``.
+        * ``'cart'`` - Cartesian ``(x, y, z)``.
+        * ``'sph'``  - Spherical ``(r, theta, phi)``.
+        * ``'cyl'``  - Cylindrical ``(R, phi, z)``.
+
+    jittered : bool
+        If True, apply per-point stratified jitter in both the polar and
+        azimuthal directions.  Reduces long-range coherence of the spiral
+        artifact.  Default is False.
+    seed : int or None
+        Random seed for reproducibility when ``jittered=True``.  Default is 42.
 
     Returns
     -------
-    grid : np.ndarray, shape ``(M, 3)``
+    grid : np.ndarray, shape ``(num_pts, 3)``
     """
-    if proj not in ("Cart", "Sph", "Cyl"):
-        raise ValueError("proj must be 'Cart', 'Sph', or 'Cyl'.")
+    proj = proj.lower()
+    if proj not in ("cart", "sph", "cyl"):
+        raise ValueError("proj must be 'cart', 'sph', or 'cyl'.")
+    if not isinstance(num_pts, (int, np.integer)) or num_pts <= 0:
+        raise ValueError("num_pts must be a positive integer.")
     if radius <= 0:
-        raise ValueError("Radius must be positive.")
+        raise ValueError("radius must be positive.")
 
-    data_dir = Path(__file__).resolve().parent.parent / "data"
-    grid_file = data_dir / "spherical_grid_unit.xyz"
-    if not grid_file.exists():
-        raise FileNotFoundError(
-            f"Spiral grid data not found at {grid_file}. "
-            f"Place the file 'spherical_grid_unit.xyz' in {data_dir}."
-        )
+    indices = np.arange(num_pts) + 0.5
+    golden_angle = np.pi * (1 + 5 ** 0.5)
 
-    XYZ = radius * np.loadtxt(grid_file)
+    if jittered:
+        rng = np.random.default_rng(seed)
+        u = (indices + rng.uniform(-0.5, 0.5, size=num_pts)) / num_pts
+        u = np.clip(u, 0.0, 1.0)
+        polar = np.arccos(1 - 2 * u)
+        azimuth = golden_angle * indices + rng.uniform(-np.pi / num_pts, np.pi / num_pts, size=num_pts)
+    else:
+        polar = np.arccos(1 - 2 * indices / num_pts)
+        azimuth = golden_angle * indices
 
-    if proj == "Cart":
-        return XYZ
+    if proj == "sph":
+        r = np.full(num_pts, radius)
+        return np.column_stack((r, polar, azimuth))
 
-    # Inline coordinate conversions
-    x, y, z = XYZ[:, 0], XYZ[:, 1], XYZ[:, 2]
+    x = radius * np.sin(polar) * np.cos(azimuth)
+    y = radius * np.sin(polar) * np.sin(azimuth)
+    z = radius * np.cos(polar)
 
-    if proj == "Sph":
-        r = np.sqrt(x ** 2 + y ** 2 + z ** 2)
-        theta = np.arccos(np.clip(z / np.maximum(r, 1e-30), -1, 1))
-        phi = np.arctan2(y, x)
-        return np.column_stack((r, theta, phi))
+    if proj == "cart":
+        return np.column_stack((x, y, z))
 
-    # proj == "Cyl"
+    # proj == "cyl"
     R = np.sqrt(x ** 2 + y ** 2)
     phi = np.arctan2(y, x)
     return np.column_stack((R, phi, z))

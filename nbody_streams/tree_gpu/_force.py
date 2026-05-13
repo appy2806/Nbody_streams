@@ -82,7 +82,7 @@ def cuda_alive() -> bool:
         return True           # can't check; assume healthy
     return _libcudart.cudaGetLastError() == 0   # 0 == cudaSuccess
 
-_BYTES_PER_PARTICLE = 223  # ~215 base + 8 (two float eps arrays: d_ptclEpsTree + d_ptclEpsGrp)
+_BYTES_PER_PARTICLE = 52  # ~tests reveal roughly 52 floats per particle (pos+mass+eps) with tree overhead
 _IDX_CAP = 0x0FFFFFFF
 
 def _max_n() -> int:

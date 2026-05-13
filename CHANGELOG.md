@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — feat-dynamicFric
+## [2.3.0] - 2026-05-12
 
 ### Added
 
@@ -46,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `README.md`: "Caveats and known limitations" section updated with working
   `dynamical_friction=True` example, `agama_helper` note, and
   `make_df_force_extra` advanced-user note.
+
+### Changed
+
+- **`utils` spherical grid generators** — `spherical_spiral_grid` (file-backed)
+  replaced by `fibonacci_sphere_grid(num_pts, ...)` (fully computed, no data file).
+  `uniform_spherical_grid` signature updated: `num_pts` is now the first required
+  positional argument; `proj` (case-insensitive, default `'cart'`) and `seed`
+  (default 42) added to both functions.  `spherical_grid_unit.xyz` data file removed.
 
 ### Fixed
 
@@ -364,6 +372,7 @@ package; `agama` is an optional extra; `pandas` is only needed for
 
 ## Version History
 
+- **2.3.0** (2026-05-12): PotentialGPU external_potential integration, Chandrasekhar DF + PotentialGPU compatibility, fibonacci_sphere_grid, utils API refresh
 - **2.2.0** (2026-03-24): agama_helper submodule (Multipole/CylSpline BFE fitting, HDF5 I/O, in-memory filtering, evolving potentials)
 - **2.0.0** (2026-02-28): GPU Barnes-Hut tree-code (`nbody_streams.tree_gpu`), `run_nbody_gpu_tree`, watchdog, `run_simulation` gpu+tree path
 - **1.3.0** (2026-02-24): Multi-species simulation support, `run_simulation` API, ParticleReader rewrite, `make_plummer_sphere` overhaul

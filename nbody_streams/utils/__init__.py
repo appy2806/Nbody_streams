@@ -16,7 +16,7 @@ from .main import (
     fit_iterative_ellipsoid,
     # Grid generators
     uniform_spherical_grid,
-    spherical_spiral_grid,
+    fibonacci_sphere_grid,
     # Centre finding
     find_center,
     find_center_position,   # deprecated alias
@@ -37,7 +37,7 @@ __all__ = [
     "fit_plummer_profile",
     "fit_iterative_ellipsoid",
     "uniform_spherical_grid",
-    "spherical_spiral_grid",
+    "fibonacci_sphere_grid",
     "find_center",
     "find_center_position",
     "compute_iterative_boundness",
