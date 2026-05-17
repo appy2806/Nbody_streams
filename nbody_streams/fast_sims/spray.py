@@ -520,36 +520,39 @@ def create_particle_spray_stream(
             )
         t_lo = time_end - time_total
         t_hi = time_end
-        if np.any(time_stripping < t_lo) or np.any(time_stripping > t_hi):
+        # Half-open interval [t_lo, t_hi): a particle released at t_hi gives
+        # zero integration time in the agama.orbit call below and propagates
+        # NaNs through the spline.
+        if np.any(time_stripping < t_lo) or np.any(time_stripping >= t_hi):
             raise ValueError(
                 f"time_stripping values must lie in "
-                f"[{t_lo:.4f}, {t_hi:.4f}]."
+                f"[{t_lo:.4f}, {t_hi:.4f})."
             )
 
         if np.unique(time_stripping).size != len(time_stripping):
-            # Create a tiny "ramp" 
-            # For N=5001, a step of 1e-11 results in a total shift of 5e-8.
-            # This is physically negligible but mathematically sufficient for splines.   
-            # Enforce strict monotonicity - episodic sampling can produce
-            # duplicate times which would create multi-valued functions.
+            # Enforce strict monotonicity for the cubic spline. For N=5001 a
+            # step of 1e-10 gives a total shift of ~5e-7 Gyr (physically
+            # negligible) while keeping every knot distinct.
             dt_eps = 1e-10
             ramp = np.arange(len(time_stripping)) * dt_eps
-            time_stripping += ramp
+            time_stripping = time_stripping + ramp
 
-            # Safety Check for the Upper Bound (t_hi)
-            # If the ramp pushed the last particle past t_hi, shift the whole array down.
-            overshoot = time_stripping[-1] - t_hi
-            if overshoot > 0:
-                time_stripping -= overshoot
+            # If the ramp pushed the tail at or past t_hi, shift the whole
+            # array down so the last value sits strictly below t_hi.
+            if time_stripping[-1] >= t_hi:
+                time_stripping -= (time_stripping[-1] - t_hi) + dt_eps
 
-            # Safety Check for the Lower Bound (t_lo)
-            # In the extremely rare case that shifting down pushed the start below t_lo
+            # The downshift can only push the head below t_lo if the original
+            # times span essentially the full [t_lo, t_hi] range with many
+            # duplicates -- np.maximum-style clipping would re-introduce
+            # duplicates at the floor, so refuse instead.
             if time_stripping[0] < t_lo:
-                # Just a final clip; if this creates a duplicate at the very start, 
-                # it's usually just two particles out of 5000, but we can nudge the first:
-                time_stripping = np.maximum(time_stripping, t_lo)
-                if time_stripping[1] <= time_stripping[0]:
-                    time_stripping[1:] += dt_eps
+                raise ValueError(
+                    f"Cannot enforce strict monotonicity for "
+                    f"N={len(time_stripping)} stripping times within "
+                    f"[{t_lo:.4f}, {t_hi:.4f}); too many duplicates near "
+                    f"the endpoints."
+                )
 
         # Interpolate the orbit to the custom stripping times so that
         # particle positions are consistent with their release times.
