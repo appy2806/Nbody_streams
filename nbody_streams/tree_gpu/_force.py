@@ -233,7 +233,7 @@ def tree_gravity_gpu(
     level_split: int    = 5,
     verbose: bool       = False,
     tree: TreeGPU | None = None,
-):
+) -> tuple[cp.ndarray, cp.ndarray]:
     """
     Compute gravitational accelerations and potential using the GPU tree code
     (Barnes-Hut with monopole + quadrupole moments).
