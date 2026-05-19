@@ -383,7 +383,7 @@ def plot_density(
 
         ob = _AnchoredHScaleBar(
             size=scale_size,
-            label=f'{{\\bf {int(scale_size)} kpc}}',
+            label=f'{{\\bf {scale_size:g} kpc}}',
             loc=3, frameon=False, pad=0.2, sep=0.3, borderpad=0.7,
             color="white", linewidth=2.0, ax=ax,
         )
