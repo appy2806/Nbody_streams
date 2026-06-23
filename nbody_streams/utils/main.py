@@ -215,6 +215,11 @@ def empirical_circular_velocity_profile(
 ) -> tuple[np.ndarray, np.ndarray]:
     r"""Compute the circular velocity profile :math:`v_{\rm circ}(r) = \sqrt{G\,M(<r)/r}`.
 
+    The enclosed mass :math:`M(<r)` is evaluated exactly at each sampled
+    radius by sorting the particles once and reading off the cumulative mass,
+    rather than from a cumulative histogram whose bin edges and bin centres
+    are misaligned.  Mass interior to *rmin* is included.
+
     Parameters
     ----------
     pos : array_like, shape ``(N, 3)`` or ``(N,)``
@@ -222,7 +227,7 @@ def empirical_circular_velocity_profile(
     mass : scalar or array_like, shape ``(N,)``
         Particle masses.
     nbins : int
-        Number of radial bins.
+        Number of radial sampling points.
     rmin, rmax : float
         Inner / outer grid nodes.
     G : float, optional
@@ -232,18 +237,32 @@ def empirical_circular_velocity_profile(
     Returns
     -------
     radius : np.ndarray
-        Bin centres.
+        Radii at which the profile is sampled (bin centres).
     v_circ : np.ndarray
-        Circular velocity in each bin.
+        Circular velocity at each sampled radius.
+
+    Notes
+    -----
+    :math:`M(<r)` is the Poisson-sampled enclosed mass, so the innermost
+    radii carry shot noise set by the local particle count.  This is a
+    sampling limit, not a binning artifact.
     """
     _, r_p = validate_positions(pos)
     mass_arr = validate_masses(mass, r_p.shape[0])
     validate_nbins(nbins)
 
     bins = make_uneven_grid(rmin, rmax, nbins=nbins + 1)
-    mass_in_bins, _ = np.histogram(r_p, bins=bins, weights=mass_arr)
-    M_enclosed = np.cumsum(mass_in_bins)
     radius = 0.5 * (bins[1:] + bins[:-1])
+
+    # Exact enclosed mass M(<r) at every sampled radius.  Sort particles by
+    # radius, then prepend a zero to the cumulative mass so searchsorted
+    # indices map directly onto M(<r) with no clipping or off-by-one handling.
+    order = np.argsort(r_p)
+    r_sorted = r_p[order]
+    m_cumsum = np.concatenate(([0.0], np.cumsum(mass_arr[order])))
+
+    idx = np.searchsorted(r_sorted, radius, side="right")
+    M_enclosed = m_cumsum[idx]
 
     with np.errstate(divide="ignore", invalid="ignore"):
         v_circ = np.sqrt(G * M_enclosed / radius)
