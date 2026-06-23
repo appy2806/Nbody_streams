@@ -254,15 +254,16 @@ def empirical_circular_velocity_profile(
     bins = make_uneven_grid(rmin, rmax, nbins=nbins + 1)
     radius = 0.5 * (bins[1:] + bins[:-1])
 
-    # Exact enclosed mass M(<r) at every sampled radius.  Sort particles by
-    # radius, then prepend a zero to the cumulative mass so searchsorted
-    # indices map directly onto M(<r) with no clipping or off-by-one handling.
-    order = np.argsort(r_p)
-    r_sorted = r_p[order]
-    m_cumsum = np.concatenate(([0.0], np.cumsum(mass_arr[order])))
-
-    idx = np.searchsorted(r_sorted, radius, side="right")
-    M_enclosed = m_cumsum[idx]
+    # Exact enclosed mass M(<r) at every sampled radius.  The sample radii are
+    # already sorted ascending, so locate each particle within them rather
+    # than sorting all N particles: ``start`` is a particle's first enclosing
+    # bin (smallest sample radius >= r_p), bincount tallies mass by that bin,
+    # and cumsum turns it into M(<r).  O(N log nbins) with no full sort or
+    # fancy-index gather; particles beyond radius[-1] land at index nbins and
+    # are dropped by the slice.
+    start = np.searchsorted(radius, r_p, side="left")
+    mass_per_bin = np.bincount(start, weights=mass_arr, minlength=radius.size + 1)
+    M_enclosed = np.cumsum(mass_per_bin)[: radius.size]
 
     with np.errstate(divide="ignore", invalid="ignore"):
         v_circ = np.sqrt(G * M_enclosed / radius)
