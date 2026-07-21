@@ -244,7 +244,9 @@ def run_restricted_nbody(
     time_list = []
 
     try:
-        from tqdm.auto import trange
+        # Plain tqdm (not tqdm.auto): the auto backend picks a notebook widget
+        # that often renders nothing on JupyterHub-over-browser sessions.
+        from tqdm import trange
         loop_iter = trange(num_steps + 1, desc="Simulating Restricted N-body", disable=not verbose)
     except ImportError:
         loop_iter = range(num_steps + 1)

@@ -48,7 +48,10 @@ except ImportError:
     _AGAMA_OK = False
 
 try:
-    from tqdm.auto import trange as _trange, tqdm as _tqdm_cls
+    # Plain tqdm (not tqdm.auto): the auto backend picks a notebook widget that
+    # often renders nothing on JupyterHub-over-browser sessions. The terminal
+    # bar works reliably everywhere.
+    from tqdm import trange as _trange, tqdm as _tqdm_cls
     _TQDM_OK = True
 except ImportError:
     _TQDM_OK = False

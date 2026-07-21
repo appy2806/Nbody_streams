@@ -43,7 +43,12 @@ from typing import Literal, Optional, Tuple
 import numpy as np
 from numba import cuda, njit, prange
 from scipy.spatial import KDTree
-from tqdm import tqdm
+
+try:  # tqdm is optional; fall back to a no-op passthrough when absent
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(iterable=None, *args, **kwargs):  # type: ignore[misc]
+        return iterable if iterable is not None else []
 
 # ---------------------------------------------------------------------------
 # Optional CuPy imports -- graceful degradation when CUDA is absent
