@@ -119,7 +119,7 @@ result = run_simulation(
 | `dynamical_friction` | `bool` | `False` | Apply Chandrasekhar DF to the satellite centre of mass. Requires `external_potential` (raises `ValueError` otherwise). When enabled, builds a DF closure via `_chandrasekhar.make_df_force_extra` and passes it as `force_extra`. Tunable via the `df_*` kwargs below |
 | `output_dir` | `str` | `'./output'` | Directory for snapshot and restart files |
 | `save_snapshots` | `bool` | `True` | Write HDF5 snapshots to disk |
-| `snapshots` | `int` | `100` | Number of evenly-spaced output snapshots |
+| `snapshots` | `int` | `100` | Number of evenly-spaced output snapshots. Every backend (`gpu`/`cpu` x `direct`/`tree`) writes exactly this many datasets with 0-based ids `snap.000`..`snap.{snapshots-1:03d}`, the first at `time_start` and the last at `time_end` |
 | `num_files_to_write` | `int` | `1` | Split snapshots across this many HDF5 files |
 | `restart_interval` | `int` | `1000` | Save a restart checkpoint every N steps |
 | `continue_run` | `bool` | `False` | Resume from existing restart file |
