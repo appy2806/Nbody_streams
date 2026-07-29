@@ -221,7 +221,12 @@ def run_nbody_gpu_tree(
     save_snapshots : bool, optional
         Whether to write HDF5 snapshots.  Default True.
     snapshots : int, optional
-        Number of snapshots to write.  Default 100.
+        Number of snapshots to write.  Default 100.  Output steps are
+        ``np.round(np.linspace(0, n_steps, snapshots))`` — the same schedule
+        used by ``run_nbody_gpu`` / ``run_nbody_cpu`` — so exactly
+        ``snapshots`` datasets are written with 0-based ids
+        ``000..snapshots-1``, the first at ``time_start`` and the last at
+        ``time_end``, even when ``snapshots`` does not divide the step count.
     num_files_to_write : int, optional
         Distribute snapshots across this many HDF5 files.  Default 1.
     restart_interval : int, optional
@@ -269,7 +274,16 @@ def run_nbody_gpu_tree(
 
     N          = phase_space.shape[0]
     n_steps    = max(1, round((time_end - time_start) / dt))
-    snap_every = max(1, n_steps // snapshots) if save_snapshots and snapshots > 0 else 0
+
+    # Snapshot schedule — must stay identical to the direct-sum backend
+    # (``run_nbody_gpu`` in nbody_streams/run.py).  Evenly spaced step indices
+    # from 0 to n_steps inclusive, so exactly ``snapshots`` datasets are
+    # written with ids 000..snapshots-1 and the last one lands on n_steps
+    # (i.e. time_end) even when snapshots does not divide n_steps.
+    if snapshots > 1:
+        snapshot_steps = np.round(np.linspace(0, n_steps, snapshots)).astype(int)
+    else:
+        snapshot_steps = np.array([n_steps], dtype=int)
 
     # Progress printed every ~5% of steps (matches run_nbody_gpu cadence)
     progress_every = max(1, n_steps // 20)
@@ -323,7 +337,7 @@ def run_nbody_gpu_tree(
 
     # ── Resume from restart ───────────────────────────────────────────────────
     start_step = 0
-    snap_idx   = 0
+    snap_idx   = None
     if continue_run and _load_restart is not None:
         restart_data = _load_restart(output_dir)
         if restart_data is not None:
@@ -335,6 +349,10 @@ def run_nbody_gpu_tree(
             snap_idx   = int(snapctr_rest)
             if verbose:
                 print(f"Resuming from step {start_step}, snap_idx={snap_idx}")
+
+    # Not resuming (or no restart file found): derive the counter from start_step
+    if snap_idx is None:
+        snap_idx = int(np.searchsorted(snapshot_steps, start_step, side="left"))
 
     remaining_steps = n_steps - start_step
 
@@ -354,7 +372,8 @@ def run_nbody_gpu_tree(
         print(f"External potential: {'Yes' if external_potential is not None else 'No'}")
         if external_potential is not None:
             print(f"  Update interval: every {external_update_interval} steps")
-        print(f"Snapshots: {snapshots}  (every ~{snap_every:,} steps)")
+        print(f"Snapshots: {len(snapshot_steps)}  "
+              f"(steps {snapshot_steps[0]:,}..{snapshot_steps[-1]:,})")
         print(f"Restart files: every {restart_interval} steps")
         print(f"Watchdog timeout: {step_timeout_s:.0f} s/step")
         print(f"debug_energy: {debug_energy}")
@@ -447,11 +466,13 @@ def run_nbody_gpu_tree(
         KE0, PE0 = _energy(vel, phi)
         E_ref = KE0 + PE0
 
-    # Initial snapshot
-    if start_step == 0 and save_snapshots:
-        _save_snap_now(t_now)
-        if verbose:
-            print(f"Saved snapshot id={snap_idx:03d} at step 0, time {t_now:.4e}")
+    # Initial snapshot (only when the schedule actually starts at start_step)
+    if snap_idx < len(snapshot_steps) and snapshot_steps[snap_idx] == start_step:
+        if save_snapshots:
+            _save_snap_now(t_now)
+            if verbose:
+                print(f"Saved snapshot id={snap_idx:03d} at step "
+                      f"{start_step}, time {t_now:.4e}")
         snap_idx += 1
 
     if verbose:
@@ -533,14 +554,18 @@ def run_nbody_gpu_tree(
                     _vprint(line)
 
             # ── Snapshot ──────────────────────────────────────────────────────
-            if snap_every > 0 and current_step % snap_every == 0:
-                if _nan_gate(step, "snap"):
-                    aborted = True;  break
-                _save_snap_now(t_now)
-                if verbose:
-                    _vprint(f"Saved snapshot id={snap_idx:03d} at step "
-                            f"{current_step}, time {t_now:.4e}")
+            while (snap_idx < len(snapshot_steps)
+                   and current_step >= snapshot_steps[snap_idx]):
+                if save_snapshots:
+                    if _nan_gate(step, "snap"):
+                        aborted = True;  break
+                    _save_snap_now(t_now)
+                    if verbose:
+                        _vprint(f"Saved snapshot id={snap_idx:03d} at step "
+                                f"{current_step}, time {t_now:.4e}")
                 snap_idx += 1
+            if aborted:
+                break
 
             # ── Restart checkpoint ────────────────────────────────────────────
             if current_step % restart_interval == 0:

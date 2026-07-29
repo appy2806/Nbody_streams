@@ -216,7 +216,7 @@ evaluations through `tree_gravity_gpu`.
 | `external_update_interval` | int | Evaluate external potential every N steps. Default 1. |
 | `output_dir` | str | Snapshot output directory. Default `'./output'`. |
 | `save_snapshots` | bool | Write HDF5 snapshots. Default True. |
-| `snapshots` | int | Number of snapshots to write. Default 100. |
+| `snapshots` | int | Number of snapshots to write. Exactly this many datasets are produced, ids `000`..`snapshots-1`, the last one at `time_end`. Default 100. |
 | `num_files_to_write` | int | Distribute snapshots across this many HDF5 files. Default 1. |
 | `restart_interval` | int | Save restart checkpoint every N steps. Default 1000. |
 | `continue_run` | bool | Resume from an existing restart file. Default False. |
@@ -234,6 +234,17 @@ evaluations through `tree_gravity_gpu`.
 - `ImportError` if CuPy is not installed.
 - `FileExistsError` if snapshot files already exist and `overwrite=False`.
 - `NotImplementedError` if an external potential is requested but Agama is not installed.
+
+**Snapshot schedule**
+
+Identical to `run_nbody_gpu` / `run_nbody_cpu`. With `n_steps = round((time_end - time_start) / dt)`, the output steps are
+
+```python
+snapshot_steps = np.round(np.linspace(0, n_steps, snapshots)).astype(int)   # snapshots > 1
+snapshot_steps = np.array([n_steps])                                       # snapshots == 1
+```
+
+so `snapshots=N` always yields exactly `N` datasets with 0-based ids `snap.000` … `snap.{N-1:03d}`, the first at `time_start` (for `N > 1`) and the last at `time_end` — including when `snapshots` does not divide `n_steps`. Snapshot ids and times therefore match the direct-sum backends step for step for the same `(time_start, time_end, dt, snapshots)`, and `ParticleReader` can be pointed at either backend's output interchangeably.
 
 **Example**
 

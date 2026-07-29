@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **GPU-tree snapshot schedule now matches the direct/CPU backends.**
+  `run_nbody_gpu_tree` derived its output cadence from
+  `snap_every = max(1, n_steps // snapshots)` and saved whenever
+  `current_step % snap_every == 0`.  When `snapshots` did not divide the step
+  count this wrote the wrong number of datasets and stopped short of
+  `time_end` — e.g. `time_start=7.90065004, time_end=13.799, dt=5e-4`
+  (`n_steps=11797`) with `snapshots=300` gave `snap_every=39`, **303**
+  datasets, and a last snapshot at step 11778 instead of 11797.  The tree
+  backend now builds the same `snapshot_steps =
+  np.round(np.linspace(0, n_steps, snapshots))` array as `run_nbody_gpu`
+  (`nbody_streams/run.py`) and drains it with the same
+  `while snapshot_counter < len(snapshot_steps) and current_step >=
+  snapshot_steps[snapshot_counter]` loop, including the initial-step save and
+  `np.searchsorted(..., side="left")` resume for `continue_run=True`.
+  Result: exactly `snapshots` datasets, 0-based ids `000..snapshots-1`
+  (unchanged — `ParticleReader` depends on 0-based ids), last snapshot at
+  `time_end`, and snapshot ids/times identical to the direct-sum backend for
+  the same `(time_start, time_end, dt, snapshots)`.  `snap_every` is gone and
+  the verbose banner no longer reports it.
+- New regression test `tests/test_snapshot_schedule.py` runs both GPU
+  backends over the same interval and asserts identical ids, exact count, and
+  matching `snap_time` attributes — covering the non-dividing 11797/300 case
+  and `snapshots=1`.
+
 ## [2.3.0] - 2026-05-12
 
 ### Added
