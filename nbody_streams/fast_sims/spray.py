@@ -133,6 +133,7 @@ def create_ic_particle_spray_chen2025(
     rj: np.ndarray,
     R: np.ndarray,
     G: float | None = None,
+    seed: int | None = 0,
 ) -> np.ndarray:
     """Create spray ICs using the Chen+2025 correlated phase-space model.
 
@@ -148,7 +149,8 @@ def create_ic_particle_spray_chen2025(
         Rotation matrices to the satellite frame.
     G : float, optional
         Gravitational constant (defaults to ``agama.G``).
-
+    seed : int or None, optional
+        Random seed for reproducibility.  If *None*, do not set the seed.
     Returns
     -------
     ic_stream : np.ndarray, shape ``(2N, 6)``
@@ -182,7 +184,11 @@ def create_ic_particle_spray_chen2025(
     ]) # Units: [kpc, deg, deg, km/s, deg, deg]
 
     # Generate correlated offsets
-    rng = np.random.default_rng(0)
+    if seed is not None:
+        rng = np.random.default_rng(seed)
+    else:
+        rng = np.random.default_rng()
+
     posvel = rng.multivariate_normal(mean, cov, size=2 * N)
 
     # Convert to physical quantities
@@ -230,6 +236,7 @@ def create_ic_particle_spray_fardal2015(
     vj: np.ndarray,
     R: np.ndarray,
     gala_modified: bool = True,
+    seed: int | None = 0,
 ) -> np.ndarray:
     """Create spray ICs using the Fardal+2015 method.
 
@@ -245,6 +252,8 @@ def create_ic_particle_spray_fardal2015(
         Rotation matrices to the satellite frame.
     gala_modified : bool
         Use Gala's modified dispersion parameters.
+    seed : int or None, optional
+        Random seed for reproducibility.  If *None*, do not set the seed.
 
     Returns
     -------
@@ -274,7 +283,12 @@ def create_ic_particle_spray_fardal2015(
     }
 
     # Generate offsets in satellite frame
-    rng = np.random.default_rng(0)
+    if seed is not None:
+        rng = np.random.default_rng(seed)
+    else:
+        rng = np.random.default_rng()
+
+    # Generate correlated offsets
     rx = rng.normal(loc=params['mean_x'], scale=params['disp_x'], size=2 * N)
     rz = rng.normal(scale=params['disp_z'], size=2 * N) * rj
     rvy = (
@@ -391,7 +405,17 @@ def create_particle_spray_stream(
     eigenvalue_method : bool
         Tidal-tensor eigenvalue method for Jacobi radius.
     **kwargs
-        Extra arguments for the progenitor potential (e.g. ``W0``, ``trunc``).
+        Extra keyword arguments.  The following key is consumed here:
+
+        - ``seed`` : int or None — random seed forwarded to
+          ``create_ic_method`` so the spray offsets are reproducible.
+          Pass *None* for non-deterministic ICs.  If omitted, the IC
+          method's own default is used (0 for both bundled methods).
+          Ignored if ``create_ic_method`` does not accept a ``seed``
+          argument.
+
+        All remaining arguments are passed to the progenitor potential
+        (e.g. ``W0``, ``trunc`` for King profiles).
 
     Returns
     -------
@@ -448,6 +472,11 @@ def create_particle_spray_stream(
         raise ValueError("save_rate must be >= 1.")
     if accuracy_integ <= 0:
         raise ValueError("accuracy_integ must be positive.")
+
+    # ``seed`` belongs to the IC generator, not the progenitor potential, so
+    # take it out of kwargs before the latter is built.  Omitting it entirely
+    # leaves create_ic_method's own default in place.
+    seed_kwarg = {'seed': kwargs.pop('seed')} if 'seed' in kwargs else {}
 
     if add_perturber is None:
         add_perturber = {'mass': 0, 'scaleRadius': 0.05}
@@ -578,6 +607,7 @@ def create_particle_spray_stream(
     method_args = {
         'orbit_sat': orbit_strip, 'mass_sat': initmass,
         'rj': rj, 'vj': vj, 'R': R, 'gala_modified': gala_modified,
+        **seed_kwarg,
     }
 
     # Filter to only the parameters the IC method expects

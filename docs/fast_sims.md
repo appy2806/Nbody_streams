@@ -26,20 +26,18 @@ create_particle_spray_stream(
     scaleradius,
     num_particles=10000,
     prog_pot_kind="King",
+    dissolve_progenitor=False,
     time_total=3.0,
     time_end=13.78,
     time_stripping=None,
     save_rate=1,
-    dynFric=False,
-    pot_for_dynFric_sigma=None,
     gala_modified=True,
     add_perturber=None,
     create_ic_method=create_ic_particle_spray_chen2025,
-    dissolve_progenitor=False,
     verbose=False,
     accuracy_integ=1e-7,
     eigenvalue_method=True,
-    **kwargs,
+    **kwargs,   # e.g. seed=..., W0=..., trunc=...
 )
 ```
 
@@ -63,8 +61,6 @@ released at the tidal radius as the satellite evolves forward to `time_end`.
 | `time_end` | float | Present-day epoch (Gyr). Default 13.78. |
 | `time_stripping` | ndarray `(N,)` or None | Custom particle-release times. `N = num_particles // 2 + 1`. Values must lie in `[time_end - time_total, time_end]`. If None, uniform stripping along the orbit. |
 | `save_rate` | int | Number of output snapshots (1 = final only). |
-| `dynFric` | bool | Enable Chandrasekhar dynamical friction on the progenitor orbit. Default False. |
-| `pot_for_dynFric_sigma` | `agama.Potential` or None | Potential for velocity-dispersion computation (DF friction). |
 | `gala_modified` | bool | Use Gala-modified dispersion parameters (Fardal method only). Default True. |
 | `add_perturber` | dict or None | Perturber properties. Required keys: `'mass'` (M_sun), `'scaleRadius'` (kpc), `'w_subhalo_impact'` (shape `(6,)`), `'time_impact'` (Gyr). Optional keys: `'time_window'` (Gyr, full width of mass-on window centred on `time_impact` — default: mass on for entire integration), `'trunc_nfw'` (bool, default True). Set to None to disable. |
 | `create_ic_method` | Callable | IC generator function. Defaults to `create_ic_particle_spray_chen2025`. Can be replaced with `create_ic_particle_spray_fardal2015`. |
@@ -72,7 +68,28 @@ released at the tidal radius as the satellite evolves forward to `time_end`.
 | `verbose` | bool | Print progress messages. Default False. |
 | `accuracy_integ` | float | Orbit integrator accuracy. Default 1e-7. |
 | `eigenvalue_method` | bool | Use tidal-tensor eigenvalues for Jacobi radius (more accurate). Default True. |
-| `**kwargs` | | Extra arguments for the progenitor potential (e.g. `W0`, `trunc` for King profiles). |
+| `**kwargs` | | `seed` (see below), plus extra arguments for the progenitor potential (e.g. `W0`, `trunc` for King profiles). |
+
+**Reproducibility (`seed`)**
+
+`seed` is accepted as a keyword argument and forwarded to `create_ic_method`
+rather than to the progenitor potential:
+
+```python
+result = fast_sims.create_particle_spray_stream(
+    pot_host, initmass=5e8, sat_cen_present=[20, 0, 5, -30, 200, 10],
+    scaleradius=0.3, seed=42,      # reproducible spray offsets
+)
+```
+
+- `seed=<int>` — deterministic ICs.
+- `seed=None` — fresh entropy on every call (non-deterministic ICs).
+- Omitted — the IC method's own default is used, which is `0` for both
+  `create_ic_particle_spray_chen2025` and `create_ic_particle_spray_fardal2015`.
+  **Streams are therefore reproducible by default.**
+
+The argument is silently ignored if a custom `create_ic_method` does not
+declare a `seed` parameter.
 
 **Returns**
 
@@ -118,6 +135,7 @@ create_ic_particle_spray_chen2025(
     rj,
     R,
     G=None,
+    seed=0,
 )
 ```
 
@@ -134,6 +152,7 @@ simulations.
 | `rj` | ndarray `(N,)` | Jacobi radii (kpc). |
 | `R` | ndarray `(N, 3, 3)` | Rotation matrices to the satellite frame (rows: radial, azimuthal, angular-momentum). |
 | `G` | float or None | Gravitational constant. Defaults to `agama.G`. |
+| `seed` | int or None | Seed for the offset RNG. Default 0 (reproducible); None draws fresh entropy. |
 
 **Returns**
 
@@ -150,6 +169,7 @@ create_ic_particle_spray_fardal2015(
     vj,
     R,
     gala_modified=True,
+    seed=0,
 )
 ```
 
@@ -168,6 +188,7 @@ Reference: Fardal, M. A., et al. 2015, MNRAS, 452, 301.
 | `vj` | ndarray `(N,)` | Velocity scales (km/s). |
 | `R` | ndarray `(N, 3, 3)` | Rotation matrices to the satellite frame. |
 | `gala_modified` | bool | Use Gala's modified dispersion parameters. Default True. |
+| `seed` | int or None | Seed for the offset RNG. Default 0 (reproducible); None draws fresh entropy. |
 
 **Returns**
 
