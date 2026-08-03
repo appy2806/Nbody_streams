@@ -109,6 +109,49 @@ def _source_to_lines(
     return _resolve_coef_string(source, group_name, dataset_name).splitlines()
 
 
+#: Section markers an Agama CylSpline export may carry, keyed by the lower-cased
+#: marker text.  A CylSpline written by ``Potential.export()`` always carries all
+#: three; older or hand-made files may carry ``#Phi`` alone.
+_CYLSPL_SECTIONS: dict[str, str] = {
+    "#phi": "phi",
+    "#dphi/dr": "dphi_dR",
+    "#dphi/dz": "dphi_dz",
+}
+
+
+def _split_cylspl_sections(lines: list[str]) -> dict[str, tuple[int, int]]:
+    """
+    Split a CylSpline line stream into ``#Phi`` / ``#dPhi/dR`` / ``#dPhi/dz`` blocks.
+
+    Returns
+    -------
+    dict
+        Maps ``"phi"``/``"dphi_dR"``/``"dphi_dz"`` to a ``(start, stop)`` pair of
+        line indices bounding that section's body (marker line excluded).
+
+    Notes
+    -----
+    ``#dPhi/dR`` and ``#dPhi/dz`` differ only in their final character, so the
+    lower-cased comparison in :data:`_CYLSPL_SECTIONS` stays unambiguous.  If no
+    marker is present at all, the whole stream is reported as the ``phi``
+    section — this keeps hand-made single-section files readable.
+    """
+    marks: list[tuple[str, int]] = []
+    for i, line in enumerate(lines):
+        key = _CYLSPL_SECTIONS.get(line.strip().lower())
+        if key is not None:
+            marks.append((key, i))
+
+    if not marks:
+        return {"phi": (0, len(lines))}
+
+    bounds: dict[str, tuple[int, int]] = {}
+    for j, (key, idx) in enumerate(marks):
+        stop = marks[j + 1][1] if j + 1 < len(marks) else len(lines)
+        bounds[key] = (idx + 1, stop)
+    return bounds
+
+
 def _detect_expansion_type(coef_string: str) -> str:
     """Return 'Multipole' or 'CylSpline' from a coef string header, or '' if unknown."""
     for line in coef_string.splitlines()[:15]:
@@ -343,6 +386,12 @@ class CylSplineCoefs:
     metadata : dict
         Header parameters: ``mmax``, ``gridSizeR``, ``gridSizez``,
         ``symmetry``, ``type``.
+    dphi_dR : dict[int, ndarray] or None
+        ``∂Φ_m/∂R`` tables from the file's ``#dPhi/dR`` section, same shapes as
+        *phi*.  ``None`` when the source carried no such section.
+    dphi_dz : dict[int, ndarray] or None
+        ``∂Φ_m/∂z`` tables from the file's ``#dPhi/dz`` section.  ``None`` when
+        the source carried no such section.
     """
 
     m_values: list[int]
@@ -350,6 +399,8 @@ class CylSplineCoefs:
     z_grid: np.ndarray
     phi: dict[int, np.ndarray]
     metadata: dict = field(default_factory=dict)
+    dphi_dR: dict[int, np.ndarray] | None = None
+    dphi_dz: dict[int, np.ndarray] | None = None
 
     # --- modification -----------------------------------------------------
 
@@ -377,16 +428,23 @@ class CylSplineCoefs:
         keep_set: set[int] = set(keep_m)
         if include_negative:
             keep_set |= {-m for m in keep_m if m != 0}
-        new_phi = {
-            m: (table.copy() if m in keep_set else np.zeros_like(table))
-            for m, table in self.phi.items()
-        }
+
+        def _mask(tables: dict[int, np.ndarray] | None):
+            if tables is None:
+                return None
+            return {
+                m: (table.copy() if m in keep_set else np.zeros_like(table))
+                for m, table in tables.items()
+            }
+
         return CylSplineCoefs(
             m_values=self.m_values,
             R_grid=self.R_grid,
             z_grid=self.z_grid,
-            phi=new_phi,
+            phi=_mask(self.phi),
             metadata=self.metadata,
+            dphi_dR=_mask(self.dphi_dR),
+            dphi_dz=_mask(self.dphi_dz),
         )
 
     # --- serialisation ----------------------------------------------------
@@ -400,6 +458,13 @@ class CylSplineCoefs:
         str
             Full text suitable for writing to a ``.coef_cylsp`` file or
             passing to :func:`~agama_helper._io._write_tmp_coef`.
+
+        Notes
+        -----
+        The ``#dPhi/dR`` and ``#dPhi/dz`` sections are emitted only when the
+        corresponding attributes are populated.  A ``#Phi``-only file is a legal
+        CylSpline export — Agama reconstructs the derivatives from the spline —
+        but writing all three sections keeps the round-trip lossless.
         """
         meta = self.metadata
         lines: list[str] = [
@@ -410,16 +475,24 @@ class CylSplineCoefs:
             f"mmax={meta.get('mmax', max(abs(m) for m in self.m_values) if self.m_values else 0)}",
             f"symmetry={meta.get('symmetry', 'None')}",
             "Coefficients",
-            "#Phi",
         ]
         z_header = "\t".join(f"{z:.14g}" for z in self.z_grid)
-        for m in sorted(self.m_values):
-            lines.append(f"{m}\t#m")
-            lines.append(f"#R(row)\\z(col)\t{z_header}")
-            table = self.phi[m]
-            for ri, r in enumerate(self.R_grid):
-                row_vals = " ".join(f"{v:.14g}" for v in table[ri])
-                lines.append(f"{r:.14g} {row_vals}")
+
+        def _emit(marker: str, tables: dict[int, np.ndarray]) -> None:
+            lines.append(marker)
+            for m in sorted(self.m_values):
+                lines.append(f"{m}\t#m")
+                lines.append(f"#R(row)\\z(col)\t{z_header}")
+                table = tables[m]
+                for ri, r in enumerate(self.R_grid):
+                    row_vals = " ".join(f"{v:.14g}" for v in table[ri])
+                    lines.append(f"{r:.14g} {row_vals}")
+
+        _emit("#Phi", self.phi)
+        for marker, tables in (("#dPhi/dR", self.dphi_dR), ("#dPhi/dz", self.dphi_dz)):
+            if tables is not None:
+                lines.append("")
+                _emit(marker, tables)
         return "\n".join(lines) + "\n"
 
 
@@ -548,11 +621,20 @@ def read_cylspl_coefs(
     -------
     CylSplineCoefs
 
+    Notes
+    -----
+    An Agama CylSpline export written by ``Potential.export()`` carries three
+    sections — ``#Phi``, ``#dPhi/dR`` and ``#dPhi/dz`` — each repeating the full
+    set of ``m`` blocks.  The sections are split *before* the ``#m`` blocks are
+    scanned, so ``phi`` always comes from ``#Phi``; *dphi_dR* / *dphi_dz* are
+    populated from their own sections and are ``None`` when absent.
+
     Raises
     ------
     ValueError
         If ``gridSizeR``, ``gridSizez``, or ``mmax`` cannot be found in the
-        header, or if no m-blocks are detected.
+        header, if no m-blocks are detected, or if a derivative section covers a
+        different set of ``m`` values than ``#Phi``.
     """
     lines = _source_to_lines(source, group_name, dataset_name)
 
@@ -574,45 +656,69 @@ def read_cylspl_coefs(
             f"Parsed metadata: {meta}"
         )
 
-    # Locate m-block start lines (lines containing "\t#m")
-    m_values: list[int] = []
-    m_start: dict[int, int] = {}
-    for i, line in enumerate(lines):
-        if "\t#m" in line:
-            m_val = int(line.split("\t")[0].strip())
-            m_values.append(m_val)
-            m_start[m_val] = i
+    # Split into #Phi / #dPhi/dR / #dPhi/dz sections *before* scanning m-blocks:
+    # each section repeats every m, so a section-blind scan would silently keep
+    # only the last section's tables.
+    sections = _split_cylspl_sections(lines)
+    if "phi" not in sections:
+        raise ValueError(
+            "Could not locate a #Phi section in CylSpline coefficient data."
+        )
 
-    if not m_values:
-        raise ValueError("No azimuthal m-blocks found in CylSpline coefficient data.")
+    def _parse_section(lo: int, hi: int) -> tuple[list[int], dict[int, np.ndarray], np.ndarray, np.ndarray]:
+        """Parse every ``\\t#m`` block within ``lines[lo:hi]``."""
+        m_start: dict[int, int] = {}
+        for i in range(lo, hi):
+            if "\t#m" in lines[i]:
+                m_start[int(lines[i].split("\t")[0].strip())] = i
+        if not m_start:
+            raise ValueError(
+                "No azimuthal m-blocks found in CylSpline coefficient data."
+            )
 
-    # Parse z-grid from first m-block header
-    first_m = m_values[0]
-    z_header_line = lines[m_start[first_m] + 1]
-    z_tokens = z_header_line.strip().split("\t")[1:]   # skip "#R(row)\z(col)" label
-    z_grid = np.array([float(z) for z in z_tokens])
+        ordered_m = sorted(m_start)
 
-    # Parse R-grid and phi tables for every m
-    R_grid: np.ndarray | None = None
-    phi_dict: dict[int, np.ndarray] = {}
-    for m in m_values:
-        start = m_start[m]
-        rows = []
-        R_vals = []
-        for row_line in lines[start + 2: start + 2 + gridSizeR]:
-            vals = row_line.strip().split()
-            R_vals.append(float(vals[0]))
-            rows.append([float(v) for v in vals[1: 1 + gridSizez]])
-        phi_dict[m] = np.array(rows)
-        if R_grid is None:
-            R_grid = np.array(R_vals)
+        # z-grid comes from the first m-block header of this section
+        z_tokens = lines[m_start[ordered_m[0]] + 1].strip().split("\t")[1:]
+        z_vals = np.array([float(z) for z in z_tokens])
+
+        tables: dict[int, np.ndarray] = {}
+        R_vals: np.ndarray | None = None
+        for m in ordered_m:
+            start = m_start[m]
+            rows, R_list = [], []
+            for row_line in lines[start + 2: start + 2 + gridSizeR]:
+                vals = row_line.strip().split()
+                R_list.append(float(vals[0]))
+                rows.append([float(v) for v in vals[1: 1 + gridSizez]])
+            tables[m] = np.array(rows)
+            if R_vals is None:
+                R_vals = np.array(R_list)
+
+        return ordered_m, tables, R_vals if R_vals is not None else np.array([]), z_vals
+
+    m_values, phi_dict, R_grid, z_grid = _parse_section(*sections["phi"])
+
+    deriv: dict[str, dict[int, np.ndarray] | None] = {"dphi_dR": None, "dphi_dz": None}
+    for key in ("dphi_dR", "dphi_dz"):
+        if key not in sections:
+            continue
+        d_m, d_tables, _, _ = _parse_section(*sections[key])
+        if d_m != m_values:
+            raise ValueError(
+                f"The {key} section covers m={d_m}, which differs from the #Phi "
+                f"section's m={m_values}. Refusing to guess a correspondence."
+            )
+        deriv[key] = d_tables
 
     return CylSplineCoefs(
-        m_values=sorted(m_values),
-        R_grid=R_grid if R_grid is not None else np.array([]),
+        m_values=m_values,
+        R_grid=R_grid,
         z_grid=z_grid,
         phi=phi_dict,
         metadata=meta,
+        dphi_dR=deriv["dphi_dR"],
+        dphi_dz=deriv["dphi_dz"],
     )
 
 
