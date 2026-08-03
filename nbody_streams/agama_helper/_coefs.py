@@ -25,6 +25,7 @@ from an HDF5 archive.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence, Union
@@ -176,6 +177,40 @@ def _as_times(times) -> np.ndarray:
     return arr
 
 
+def _is_source_sequence(obj) -> bool:
+    """
+    Is *obj* a sequence of coefficient sources rather than a single one?
+
+    ``str`` and :class:`Path` are single sources.  A coefficient object is
+    iterable (``__getitem__`` walks its snapshots), so it is excluded explicitly.
+    Lists, tuples, NumPy arrays — ``np.sort(glob(...))`` is a natural way to
+    build an ordered path list — and one-shot iterators all count.
+    """
+    if isinstance(obj, (str, Path, bytes)):
+        return False
+    if isinstance(obj, _CoefTimeAxisMixin):
+        return False
+    return isinstance(obj, (list, tuple, np.ndarray, Iterator))
+
+
+def _reject_group_name(group_name, what: str) -> None:
+    """Refuse a non-default *group_name* where it has no meaning."""
+    if isinstance(group_name, str) and group_name == "snap_000":
+        return
+    raise ValueError(
+        f"group_name={group_name!r} has no meaning for {what}, which selects "
+        "its own snapshots. Drop the argument; pass times=... if you need to "
+        "override the timestamps."
+    )
+
+
+def _wants_many_groups(group_name) -> bool:
+    """Does *group_name* select more than one HDF5 group?"""
+    if isinstance(group_name, str):
+        return group_name == "all"
+    return _is_source_sequence(group_name)
+
+
 def _as_existing_path(source) -> Path | None:
     """Return *source* as a :class:`Path` when it names a filesystem entry."""
     if isinstance(source, Path):
@@ -188,6 +223,16 @@ def _as_existing_path(source) -> Path | None:
         return p if p.exists() else None
     except (OSError, ValueError):
         return None
+
+
+def _check_unique_names(names: list[str], arg: str, fmt: str) -> None:
+    """Refuse a name/group template that collapses several times onto one target."""
+    if len(set(names)) != len(names):
+        raise ValueError(
+            f"{arg}={fmt!r} produced {len(set(names))} distinct name(s) for "
+            f"{len(names)} time samples, so later times would overwrite earlier "
+            f"ones. Include '{{i}}' in {arg} (e.g. 'snap_{{i:04d}}')."
+        )
 
 
 class _CoefTimeAxisMixin:
@@ -277,9 +322,13 @@ class _CoefTimeAxisMixin:
         """
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
+        coef_strings = self.to_coef_strings()
+        names = [name_fmt.format(i=i, ext=self._COEF_EXT) for i in range(len(coef_strings))]
+        _check_unique_names(names, "name_fmt", name_fmt)
+
         paths: list[str] = []
-        for i, coef_str in enumerate(self.to_coef_strings()):
-            p = out / name_fmt.format(i=i, ext=self._COEF_EXT)
+        for name, coef_str in zip(names, coef_strings):
+            p = out / name
             p.write_text(coef_str, encoding="utf-8")
             paths.append(str(p.resolve()))
         return paths
@@ -303,7 +352,10 @@ class _CoefTimeAxisMixin:
         Parameters
         ----------
         path : str or Path
-            Destination archive.  Opened in append mode when it already exists.
+            Destination archive.  Opened in **append** mode when it already
+            exists, so groups from an earlier, longer write survive and would be
+            picked up by a later ``read_coefs(..., group_name="all")``.  Delete
+            the file first if you want a clean archive.
         group_fmt : str, optional
             ``str.format`` template receiving the time index ``i``.
         dataset_name : str, optional
@@ -322,11 +374,15 @@ class _CoefTimeAxisMixin:
         from ._io import write_coef_to_h5
 
         path = Path(path)
-        for i, coef_str in enumerate(self.to_coef_strings()):
+        coef_strings = self.to_coef_strings()
+        groups = [group_fmt.format(i=i) for i in range(len(coef_strings))]
+        _check_unique_names(groups, "group_fmt", group_fmt)
+
+        for group, coef_str in zip(groups, coef_strings):
             write_coef_to_h5(
                 path,
                 coef_str,
-                group_name=group_fmt.format(i=i),
+                group_name=group,
                 dataset_name=dataset_name,
                 overwrite=overwrite,
             )
@@ -556,7 +612,7 @@ class MultipoleCoefs(_CoefTimeAxisMixin):
         -------
         MultipoleCoefs
             New instance; *R_grid*, *lm_labels*, *metadata* are shared
-            references; *phi* and *dphi_dr* are new arrays.
+            references; *phi*, *dphi_dr* and *times* are new arrays.
         """
         import warnings
 
@@ -599,7 +655,7 @@ class MultipoleCoefs(_CoefTimeAxisMixin):
             phi=new_phi,
             dphi_dr=new_dphi,
             metadata=self.metadata,
-            times=self.times,
+            times=None if self.times is None else np.array(self.times, copy=True),
         )
 
     def copy(self) -> "MultipoleCoefs":
@@ -643,8 +699,10 @@ class MultipoleCoefs(_CoefTimeAxisMixin):
         """
         Time-less view at time index *i*.
 
-        The returned object shares memory with *self* (``phi[..., i]`` is a
-        NumPy view); call :meth:`copy` on it for an independent object.
+        The returned object shares memory with *self*: ``phi[..., i]`` is a NumPy
+        view, and *R_grid*, *lm_labels* and *metadata* are the very same objects,
+        so writing through the snapshot edits the parent.  Call :meth:`copy` on
+        the result for an independent object.
         """
         ti = self._time_index(i)
         return MultipoleCoefs(
@@ -979,7 +1037,7 @@ class CylSplineCoefs(_CoefTimeAxisMixin):
             metadata=self.metadata,
             dphi_dR=_mask(self.dphi_dR),
             dphi_dz=_mask(self.dphi_dz),
-            times=self.times,
+            times=None if self.times is None else np.array(self.times, copy=True),
         )
 
     def copy(self) -> "CylSplineCoefs":
@@ -1005,8 +1063,10 @@ class CylSplineCoefs(_CoefTimeAxisMixin):
         """
         Time-less view at time index *i*.
 
-        Every table is a NumPy view into *self*; call :meth:`copy` on the result
-        for an independent object.
+        The returned object shares memory with *self*: every table is a NumPy
+        view, and *m_values*, *R_grid*, *z_grid* and *metadata* are the very same
+        objects, so writing through the snapshot edits the parent.  Call
+        :meth:`copy` on the result for an independent object.
         """
         ti = self._time_index(i)
 
@@ -1187,6 +1247,12 @@ class CylSplineCoefs(_CoefTimeAxisMixin):
         ):
             if tables is None:
                 continue
+            if not isinstance(tables, dict):
+                raise TypeError(
+                    f"CylSplineCoefs.{name} must be a dict keyed by m; got "
+                    f"{type(tables).__name__}. CylSpline tables are never a single "
+                    "stacked array — one (nR, nz[, nt]) entry per azimuthal order."
+                )
             if sorted(tables) != expected_keys:
                 raise ValueError(
                     f"CylSplineCoefs.{name} is keyed by m={sorted(tables)}, which "
@@ -1511,10 +1577,12 @@ def _resolve_snapshot_strings(
     is never invented.
     """
     # 1. An explicit sequence of sources — always a time series.
-    if isinstance(source, (list, tuple)):
-        if not source:
+    if _is_source_sequence(source):
+        _reject_group_name(group_name, "a sequence of coefficient sources")
+        items = list(source)
+        if not items:
             raise ValueError("An empty sequence of coefficient sources was given.")
-        strings = [_resolve_coef_string(s, group_name, dataset_name) for s in source]
+        strings = [_resolve_coef_string(s, dataset_name=dataset_name) for s in items]
         if times is None:
             raise ValueError(
                 "A sequence of coefficient sources always produces a time axis, "
@@ -1533,6 +1601,7 @@ def _resolve_snapshot_strings(
 
     # 2. An Agama Evolving .ini — group_name is ignored, time axis always present.
     if path is not None and path.suffix.lower() == ".ini":
+        _reject_group_name(group_name, "an Evolving .ini")
         from ._load import _parse_evolving_ini
 
         ini_times, coef_paths, _ = _parse_evolving_ini(path)
@@ -1550,8 +1619,7 @@ def _resolve_snapshot_strings(
         return strings, t
 
     # 3. Multiple HDF5 groups — "all", or an explicit ordered sequence.
-    wants_many_groups = group_name == "all" or isinstance(group_name, (list, tuple))
-    if wants_many_groups:
+    if _wants_many_groups(group_name):
         if path is None or path.suffix.lower() not in (".h5", ".hdf5"):
             raise ValueError(
                 f"group_name={group_name!r} selects multiple HDF5 groups, but the "
@@ -1564,12 +1632,12 @@ def _resolve_snapshot_strings(
             canonical = sorted(
                 (k for k in f.keys() if k != "times"), key=_extract_int_from_group
             )
-            if group_name == "all":
+            if isinstance(group_name, str):          # the "all" form
                 groups = canonical
                 if not groups:
                     raise ValueError(f"{path} contains no snapshot groups.")
             else:
-                groups = list(group_name)
+                groups = [str(g) for g in group_name]
                 missing = [g for g in groups if g not in f]
                 if missing:
                     raise KeyError(f"groups {missing} are not present in {path}.")

@@ -725,3 +725,80 @@ def test_materialize_potential_series_scaling_cylsp(cylsp3_base, cylsp3_series):
     for k, t in zip(SCALES, TIMES):
         got = series_pot.potential(xyz, t=t)
         np.testing.assert_allclose(got, k * base_phi, rtol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# 16. Hardening: source/group dispatch and template collisions
+# ---------------------------------------------------------------------------
+
+def test_zeroed_does_not_share_times_with_parent(mult_series):
+    """A caller relabelling the filtered copy must not rewrite the parent."""
+    z = mult_series.zeroed([0])
+    assert z.times is not mult_series.times
+    z.times[0] = -999.0
+    assert mult_series.times[0] == TIMES[0]
+
+
+def test_zeroed_does_not_share_times_with_parent_cylsp(cylsp3_series):
+    z = cylsp3_series.zeroed([0])
+    assert z.times is not cylsp3_series.times
+    z.times[0] = -999.0
+    assert cylsp3_series.times[0] == TIMES[0]
+
+
+def test_validate_names_the_field_when_cylsp_phi_is_not_a_dict(cylsp3_series):
+    """A stacked array in place of the per-m dict used to raise a bare NumPy error."""
+    damaged = cylsp3_series.copy()
+    damaged.phi = list(damaged.phi.values())
+    with pytest.raises(TypeError, match=r"CylSplineCoefs\.phi must be a dict"):
+        damaged.validate()
+
+
+@pytest.mark.parametrize("wrap", [np.array, iter, list, tuple], ids=["ndarray", "iterator", "list", "tuple"])
+def test_sequence_sources_accept_any_ordered_container(mult_series, tmp_path, wrap):
+    """np.sort(glob(...)) and generators are natural ways to build an ordered list."""
+    files = mult_series.to_coef_files(tmp_path / "cf")
+    back = read_coefs(wrap(files), times=TIMES)
+    assert back.n_times == len(TIMES)
+    np.testing.assert_allclose(back.phi, mult_series.phi, rtol=1e-10)
+
+
+@pytest.mark.parametrize("wrap", [np.array, list, tuple], ids=["ndarray", "list", "tuple"])
+def test_group_name_accepts_any_ordered_container(mult_series, tmp_path, wrap):
+    path = tmp_path / f"groups_{wrap.__name__}.h5"
+    mult_series.to_h5(path)
+    back = read_coefs(path, group_name=wrap(["snap_0001", "snap_0000"]))
+    np.testing.assert_allclose(back.times, [TIMES[1], TIMES[0]])
+    np.testing.assert_allclose(
+        back.snapshot(0).phi, mult_series.snapshot(1).phi, rtol=1e-10
+    )
+
+
+def test_group_name_rejected_for_sequence_source(mult_series, tmp_path):
+    files = mult_series.to_coef_files(tmp_path / "cf")
+    with pytest.raises(ValueError, match="has no meaning for a sequence"):
+        read_coefs(files, group_name="all", times=TIMES)
+
+
+def test_group_name_rejected_for_ini_source(mult_series, tmp_path):
+    ini = mult_series.to_evolving_ini(tmp_path / "s.ini")
+    with pytest.raises(ValueError, match="has no meaning for an Evolving .ini"):
+        read_coefs(ini, group_name="all")
+
+
+def test_to_coef_files_rejects_a_name_fmt_without_the_index(mult_series, tmp_path):
+    """Without {i} every time would overwrite the last -- a silent data loss."""
+    with pytest.raises(ValueError, match=r"name_fmt.*distinct name"):
+        mult_series.to_coef_files(tmp_path / "collide", name_fmt="snap{ext}")
+
+
+def test_to_h5_rejects_a_group_fmt_without_the_index(mult_series, tmp_path):
+    with pytest.raises(ValueError, match=r"group_fmt.*distinct name"):
+        mult_series.to_h5(tmp_path / "collide.h5", group_fmt="snap")
+
+
+def test_timeless_to_coef_files_still_accepts_a_constant_name(mult_base, tmp_path):
+    """One time sample cannot collide, so a fixed name stays legal."""
+    paths = mult_base.to_coef_files(tmp_path / "one", name_fmt="only{ext}")
+    assert len(paths) == 1
+    assert Path(paths[0]).name == "only.coef_mult"
