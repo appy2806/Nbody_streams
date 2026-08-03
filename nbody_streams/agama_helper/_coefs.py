@@ -1312,6 +1312,21 @@ def _check_stackable(items: list) -> None:
             )
 
 
+def _describe_grid_mismatch(name: str, a, b) -> str:
+    """Explain how grid *a* differs from reference *b* — shape, or first value."""
+    sa, sb = np.shape(a), np.shape(b)
+    if sa != sb:
+        return f"shapes {sa} vs {sb}"
+    diff = np.flatnonzero(np.asarray(a) != np.asarray(b))
+    if diff.size == 0:
+        return f"shapes {sa} vs {sb}"
+    i = int(diff[0])
+    return (
+        f"same shape {sa} but differing values, first at index {i}: "
+        f"{np.asarray(a)[i]!r} vs {np.asarray(b)[i]!r} ({diff.size} of {sa[0]} differ)"
+    )
+
+
 def _check_presence(items: list, attr: str) -> bool:
     """Return whether *attr* is populated, requiring all-or-nothing across items."""
     have = [getattr(it, attr) is not None for it in items]
@@ -1337,9 +1352,9 @@ def _stack_mult(items: list["MultipoleCoefs"], times: np.ndarray) -> "MultipoleC
             )
         if not np.array_equal(it.R_grid, ref.R_grid):
             raise ValueError(
-                f"item {i} has an R_grid differing from item 0 (shapes "
-                f"{np.shape(it.R_grid)} vs {np.shape(ref.R_grid)}). Grids are "
-                "never interpolated across a time series."
+                f"item {i} has an R_grid differing from item 0 "
+                f"({_describe_grid_mismatch('R_grid', it.R_grid, ref.R_grid)}). "
+                "Grids are never interpolated across a time series."
             )
     has_dphi = _check_presence(items, "dphi_dr")
 
@@ -1371,8 +1386,8 @@ def _stack_cylspl(items: list["CylSplineCoefs"], times: np.ndarray) -> "CylSplin
                            ("z_grid", it.z_grid, ref.z_grid)):
             if not np.array_equal(a, b):
                 raise ValueError(
-                    f"item {i} has a {name} differing from item 0 (shapes "
-                    f"{np.shape(a)} vs {np.shape(b)}). Grids are never "
+                    f"item {i} has a {name} differing from item 0 "
+                    f"({_describe_grid_mismatch(name, a, b)}). Grids are never "
                     "interpolated across a time series."
                 )
     has_dR = _check_presence(items, "dphi_dR")
@@ -1543,10 +1558,14 @@ def _resolve_snapshot_strings(
                 f"source is not an existing .h5/.hdf5 archive (got {source!r})."
             )
         with h5py.File(path, "r") as f:
+            # The root "times" dataset is written co-indexed with the archive's
+            # numerically sorted group order, so keep that order around to map
+            # an explicitly requested subset or reordering back onto it.
+            canonical = sorted(
+                (k for k in f.keys() if k != "times"), key=_extract_int_from_group
+            )
             if group_name == "all":
-                groups = sorted(
-                    (k for k in f.keys() if k != "times"), key=_extract_int_from_group
-                )
+                groups = canonical
                 if not groups:
                     raise ValueError(f"{path} contains no snapshot groups.")
             else:
@@ -1565,7 +1584,22 @@ def _resolve_snapshot_strings(
         if times is not None:
             t = _as_times(times)
         elif stored_times is not None:
-            t = _as_times(stored_times)
+            stored = _as_times(stored_times)
+            if groups is canonical:
+                t = stored
+            else:
+                # An explicit group_name may subset or reorder the archive.  Take
+                # each group's stored time from its canonical position rather than
+                # assuming the caller's order matches the file's.
+                if len(stored) != len(canonical):
+                    raise ValueError(
+                        f"{path} has {len(canonical)} snapshot groups but its root "
+                        f"'times' dataset has {len(stored)} entries, so a stored "
+                        "time cannot be matched to each requested group. Pass "
+                        "times=... explicitly."
+                    )
+                pos = {g: i for i, g in enumerate(canonical)}
+                t = stored[[pos[g] for g in groups]]
         else:
             raise ValueError(
                 f"A time axis was requested (group_name={group_name!r}) but no "
@@ -1898,6 +1932,10 @@ def read_coefs(
         When a time axis is requested and none of those yield times, a
         :exc:`ValueError` is raised — an index-based axis is never invented.
         Supplying *times* for a single-snapshot read is an error.
+
+        The root ``"times"`` dataset is co-indexed with the archive's
+        numerically sorted group order, so an explicit *group_name* that
+        subsets or reorders the archive still gets each group's own time.
 
     Returns
     -------
