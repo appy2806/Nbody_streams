@@ -52,6 +52,13 @@ Quick start
 >>> times = np.linspace(6.0, 14.0, 101)
 >>> pot_ev = ah.load_agama_evolving_potential("MW_mult.h5", times)          # HDF5
 >>> pot_ev = ah.load_agama_evolving_potential("potential/MW_mult.ini")       # .ini (times embedded)
+>>>
+>>> # --- Coefficient time series: same class, same reader, trailing time axis ---
+>>> ser = ah.read_coefs("MW_mult.h5", group_name="all")   # times from the archive
+>>> ser.phi.shape, ser.n_times                            # (nR, n_lm, nt), nt
+>>> ser.phi[:, ser.column(2, 2), :] *= 1.5                # arbitrary manual surgery
+>>> pot_ev = ser.materialize_potential()                  # picks up the live arrays
+>>> ser.to_h5("edited.h5")                                # round-trips via group_name="all"
 """
 
 # Set Agama units (Msol, kpc, km/s) at import time.
