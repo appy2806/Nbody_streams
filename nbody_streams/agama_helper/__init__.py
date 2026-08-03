@@ -77,6 +77,9 @@ from ._coefs import (
     MultipoleCoefs,
     CylSplineCoefs,
     read_coefs,
+    read_mult_coefs,
+    read_cylspl_coefs,
+    stack_coefs,
     generate_lmax_pairs,
 )
 from ._fire import (
@@ -98,11 +101,14 @@ __all__ = [
     "write_coef_to_h5",
     "write_snapshot_coefs_to_h5",
     # reading coef dataclasses or raw strings
-    "read_coefs",           # unified: auto-detects Multipole vs CylSpline
+    "read_coefs",           # unified: auto-detects type; single snapshot or series
+    "read_mult_coefs",      # Multipole only, same signature
+    "read_cylspl_coefs",    # CylSpline only, same signature
     "read_coef_string",     # raw text (file or h5)
     # coef dataclasses
     "MultipoleCoefs",
     "CylSplineCoefs",
+    "stack_coefs",          # time-less snapshots -> one time series
     "generate_lmax_pairs",
     # loading Agama potential objects
     "load_agama_potential",           # single snapshot, any source
