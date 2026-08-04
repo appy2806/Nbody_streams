@@ -1,7 +1,7 @@
 # Graph Report - Nbody_streams  (2026-08-03)
 
 ## Corpus Check
-- 95 files · ~187,289 words
+- 95 files · ~187,265 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `44435012`
+- Built from commit: `fe2c3e8c`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -344,8 +344,8 @@ Cohesion: 0.21
 Nodes (12): create_snapshot_dict(), fit_potential(), ndarray, Path, agama_helper._fit ~~~~~~~~~~~~~~~~~ Fit Agama Multipole and CylSpline potential, Fit Agama Multipole and CylSpline potentials from a multi-species snapshot., Sample *n* positions from a spherically declining density profile., Sample *n* positions from a thin exponential disk. (+4 more)
 
 ### Community 18 - "test_phase2_analytic.py"
-Cohesion: 0.14
-Nodes (21): get_gpu_info(), Get information about available GPU(s).          Returns     -------     info :, nbody_streams - lightweight direct N-body utilities., _compute_accelerations_cpu(), _compute_accelerations_gpu(), _compute_accelerations_tree(), _is_gpu_potential(), make_plummer_sphere() (+13 more)
+Cohesion: 0.13
+Nodes (23): get_gpu_info(), Get information about available GPU(s).          Returns     -------     info :, nbody_streams - lightweight direct N-body utilities., _compute_accelerations_cpu(), _compute_accelerations_gpu(), _compute_accelerations_tree(), _is_gpu_potential(), make_plummer_sphere() (+15 more)
 
 ### Community 19 - "test_advanced.py"
 Cohesion: 0.28
@@ -416,8 +416,8 @@ Cohesion: 0.08
 Nodes (20): MultipoleCoefs, Parse **one** Agama Multipole snapshot into a :class:`MultipoleCoefs`.      Inte, Dispatch one coef string to the parser named by its ``type=`` header., Read one or many Agama Multipole snapshots into a :class:`MultipoleCoefs`., Structured representation of a Multipole (spherical harmonic BFE) potential., Maximum l order present in *lm_labels*., Sorted unique l values., Sorted unique m values (includes negatives). (+12 more)
 
 ### Community 44 - "_force.py"
-Cohesion: 0.10
-Nodes (23): CDLL, _coerce_eps(), cuda_alive(), _find_cudart(), _gpu_ptr(), ndarray, _force.py  --  ctypes interface to the GPU tree-code gravity shared library.  Su, Return a contiguous float32 CuPy array of length n for eps.      Accepts: (+15 more)
+Cohesion: 0.11
+Nodes (21): CDLL, _coerce_eps(), _find_cudart(), _gpu_ptr(), ndarray, _force.py  --  ctypes interface to the GPU tree-code gravity shared library.  Su, Return a contiguous float32 CuPy array of length n for eps.      Accepts:, Load libcudart; try versioned names as fallback. (+13 more)
 
 ### Community 45 - "buildTree.cu"
 Cohesion: 0.08
