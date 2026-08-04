@@ -1,0 +1,467 @@
+{
+  "nbody_streams/__init__.py": {
+    "mtime": 1775024926.8820093,
+    "ast_hash": "98e03efae904c23b0d27b28dce415b84",
+    "semantic_hash": ""
+  },
+  "nbody_streams/__version__.py": {
+    "mtime": 1778643789.471568,
+    "ast_hash": "edb37bfe92d8c51e6d6bc34f9bb52b27",
+    "semantic_hash": ""
+  },
+  "nbody_streams/_chandrasekhar.py": {
+    "mtime": 1778643789.471568,
+    "ast_hash": "8a0f3e288d65690bd609a1848e2b6145",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/__init__.py": {
+    "mtime": 1777526379.5901608,
+    "ast_hash": "f251e6305decb9f46d8d4d4fcdef6e57",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/_analytic_potentials.py": {
+    "mtime": 1778643789.4758162,
+    "ast_hash": "a30d4d2aba7842f0662116e757eeb189",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/_coefs.py": {
+    "mtime": 1774340311.7348287,
+    "ast_hash": "e9763fbf83bf882ee2bb107b7a2ae079",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/_cylspl_potential_kernel.cu": {
+    "mtime": 1777526379.5901608,
+    "ast_hash": "411908b3e7094a08216dbc0c960e15e1",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/_fire.py": {
+    "mtime": 1774340311.7348287,
+    "ast_hash": "3059ce9d7259745c5163d096590a8bf5",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/_fit.py": {
+    "mtime": 1774340311.7348287,
+    "ast_hash": "1aa69e59539492bc6c3bc052b0d92530",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/_io.py": {
+    "mtime": 1774340311.7348287,
+    "ast_hash": "98381ca718ec17c636e6352823d3a070",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/_load.py": {
+    "mtime": 1777526379.5901608,
+    "ast_hash": "8f0976252c34b62c4a9b1163375ea9f4",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/_multipole_potential_kernel.cu": {
+    "mtime": 1777526379.5901608,
+    "ast_hash": "32c4c68f4c93dd753cd5f269116ffcf6",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/_potential.py": {
+    "mtime": 1777526379.5901608,
+    "ast_hash": "ed5d2cc3bcc7780440e843ab2ff67295",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/tests/test_load_paths.py": {
+    "mtime": 1777526379.5941434,
+    "ast_hash": "7e4516381f235f4a6028b449ce834fd0",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/tests/test_phase1_multipole.py": {
+    "mtime": 1777526379.5941434,
+    "ast_hash": "5a843cf110fadc7823571ee3cdf99baf",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/tests/test_phase2_analytic.py": {
+    "mtime": 1777526379.5941434,
+    "ast_hash": "4b48c62d7697df7c9899ed81bcf4c6ba",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/tests/test_phase3_cylspline.py": {
+    "mtime": 1777526379.5941434,
+    "ast_hash": "a63870079a305226df3b78004a06cac5",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/tests/test_zero_pruning.py": {
+    "mtime": 1777526379.5941434,
+    "ast_hash": "5096984425b81615dc165f6ce344995a",
+    "semantic_hash": ""
+  },
+  "nbody_streams/coords/__init__.py": {
+    "mtime": 1775024926.8820093,
+    "ast_hash": "2cf877fe861b579fc5944ad435389548",
+    "semantic_hash": ""
+  },
+  "nbody_streams/coords/streams.py": {
+    "mtime": 1775024926.8820093,
+    "ast_hash": "5b4529e09c2320ccabfd69169d31bb42",
+    "semantic_hash": ""
+  },
+  "nbody_streams/coords/transforms.py": {
+    "mtime": 1775002937.2878063,
+    "ast_hash": "efc00b74ecf99b3f51c5de8969211894",
+    "semantic_hash": ""
+  },
+  "nbody_streams/cuda_kernels.py": {
+    "mtime": 1771876453.7981343,
+    "ast_hash": "9202917ea5d48d6fdaac734e505eb778",
+    "semantic_hash": ""
+  },
+  "nbody_streams/fast_sims/__init__.py": {
+    "mtime": 1773127094.487441,
+    "ast_hash": "e25e0dd2ae5e676553519ab4179282e3",
+    "semantic_hash": ""
+  },
+  "nbody_streams/fast_sims/_common.py": {
+    "mtime": 1775699315.051438,
+    "ast_hash": "6871b37c4b76b780fda86ae617a1d2fa",
+    "semantic_hash": ""
+  },
+  "nbody_streams/fast_sims/restricted.py": {
+    "mtime": 1784604915.9507983,
+    "ast_hash": "0c94f9a295d569a98e6c5bc5d7c1d82c",
+    "semantic_hash": ""
+  },
+  "nbody_streams/fast_sims/spray.py": {
+    "mtime": 1778986457.2696087,
+    "ast_hash": "412b85f5757cd755fb857c4934b96f67",
+    "semantic_hash": ""
+  },
+  "nbody_streams/fields.py": {
+    "mtime": 1774322474.0321243,
+    "ast_hash": "684c0be89ffd9dba4916fdc08eb4a46c",
+    "semantic_hash": ""
+  },
+  "nbody_streams/nbody_io.py": {
+    "mtime": 1773127094.487441,
+    "ast_hash": "020628857724c803c929bf63b3e66952",
+    "semantic_hash": ""
+  },
+  "nbody_streams/run.py": {
+    "mtime": 1784604915.9511008,
+    "ast_hash": "3230df12dacbc8494b4573239ea5d96e",
+    "semantic_hash": ""
+  },
+  "nbody_streams/sim.py": {
+    "mtime": 1778643789.4758162,
+    "ast_hash": "c660b06956615d078c5fd09a64eaa2cb",
+    "semantic_hash": ""
+  },
+  "nbody_streams/species.py": {
+    "mtime": 1773127094.4915366,
+    "ast_hash": "cba8c3179f6f709391026d50c3b56082",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/Particle4.h": {
+    "mtime": 1773127094.4915366,
+    "ast_hash": "ade05dfa438c85f11959f111768912af",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/Treecode.h": {
+    "mtime": 1773977289.8098555,
+    "ast_hash": "c30ef6e0d3f68680160508c71f27cfdb",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/TreecodeInstances.h": {
+    "mtime": 1773127094.4915366,
+    "ast_hash": "49d423e922aff8e935a3213292b08c2e",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/__init__.py": {
+    "mtime": 1773127094.4915366,
+    "ast_hash": "6b77491c02db408b6e0f5dc8bbc2266a",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/_build.py": {
+    "mtime": 1773127094.4915366,
+    "ast_hash": "7fffe3b71fe5b0d79a71312c3bbbd1d2",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/_force.py": {
+    "mtime": 1779156957.1447122,
+    "ast_hash": "79b3b3c45a8e1ea3f72917de6fa09a7e",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/buildTree.cu": {
+    "mtime": 1778643789.4758162,
+    "ast_hash": "5e7e0f5dfe9f6c3f8db5c5cb7eff5548",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/computeForces.cu": {
+    "mtime": 1773977289.8138227,
+    "ast_hash": "8955b71c6487dbc79ad8ac53e0b65fb1",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/computeMultipoles.cu": {
+    "mtime": 1773127094.4915366,
+    "ast_hash": "460ec5245be4c2ee761fdacb80b88a5c",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/cuda_primitives.h": {
+    "mtime": 1773127094.4956322,
+    "ast_hash": "552f85bcf759729ed685d4e7a092e5a7",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/cudamem.h": {
+    "mtime": 1773127094.4956322,
+    "ast_hash": "2814ea5c4fba30213df1dcaf8806e9bf",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/cutil.h": {
+    "mtime": 1773127094.4956322,
+    "ast_hash": "3a0864877fe45803ebf5c95824209d16",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/makeGroups.cu": {
+    "mtime": 1773977289.8138227,
+    "ast_hash": "835444ea33b08c80b0d1bad61dc8ac55",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/rtc.h": {
+    "mtime": 1773127094.4956322,
+    "ast_hash": "87f540bdd80aeccb92e24e6df30bf4c4",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/run_gpu_tree.py": {
+    "mtime": 1785356271.3619158,
+    "ast_hash": "d6cc312b72108930b3184071d3b8578b",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/tests/__init__.py": {
+    "mtime": 1773127094.4956322,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/tests/test_accuracy.py": {
+    "mtime": 1774322474.0361586,
+    "ast_hash": "2ad005ceaa43e08879743c9849e44824",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/tests/test_api.py": {
+    "mtime": 1773127094.4956322,
+    "ast_hash": "c084caa260a99ba95b4e1f4915c48770",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/tests/test_compare.py": {
+    "mtime": 1773127094.4997277,
+    "ast_hash": "d9c3e69cb3582601c3fe93bbd1dd5e46",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/tests/test_comprehensive.py": {
+    "mtime": 1774322474.0361586,
+    "ast_hash": "25cfefef964b38badc5fc2d1d64dc203",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/tests/test_timing.py": {
+    "mtime": 1773127094.4997277,
+    "ast_hash": "b12cd661e6447dce2e34a63acf21a1a0",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/tests/test_tree.py": {
+    "mtime": 1774322474.0361586,
+    "ast_hash": "9618e0ffd94916fbe34884b3f83db36c",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/treeGPU_interface.cu": {
+    "mtime": 1773977289.8138227,
+    "ast_hash": "d169ad56f85d412f5f365bd1845f599e",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/vector3.h": {
+    "mtime": 1773127094.4997277,
+    "ast_hash": "f2eaa64d3297f7d7f23e2ed280941b4b",
+    "semantic_hash": ""
+  },
+  "nbody_streams/utils/__init__.py": {
+    "mtime": 1778643789.4758162,
+    "ast_hash": "dbcf677bc51a421e06344db396b1295b",
+    "semantic_hash": ""
+  },
+  "nbody_streams/utils/_validation.py": {
+    "mtime": 1773127094.4997277,
+    "ast_hash": "4c62d231ee8955333ea41890b9b72063",
+    "semantic_hash": ""
+  },
+  "nbody_streams/utils/main.py": {
+    "mtime": 1782237573.657116,
+    "ast_hash": "c03ffe745e6f6f5356b620797a4043c6",
+    "semantic_hash": ""
+  },
+  "nbody_streams/viz/__init__.py": {
+    "mtime": 1773127094.4997277,
+    "ast_hash": "772d79facfc565a71bf24b20c4f41d58",
+    "semantic_hash": ""
+  },
+  "nbody_streams/viz/plots.py": {
+    "mtime": 1779155679.3623161,
+    "ast_hash": "c2fa4c04751f9b1f3d6fbd4433b185fa",
+    "semantic_hash": ""
+  },
+  "nbody_streams/viz/sph_kernels.py": {
+    "mtime": 1784604915.9514532,
+    "ast_hash": "6588b7d732e622f4fb97ca93b873c71c",
+    "semantic_hash": ""
+  },
+  "pyproject.toml": {
+    "mtime": 1770592189.125919,
+    "ast_hash": "17ce80ea1b4d9f2940c28df562f15739",
+    "semantic_hash": ""
+  },
+  "tests/test_advanced.py": {
+    "mtime": 1771876360.175018,
+    "ast_hash": "6fa5006d7b886e3df5f3b920618642b3",
+    "semantic_hash": ""
+  },
+  "tests/test_basic.py": {
+    "mtime": 1771876360.175018,
+    "ast_hash": "a00bd23e1f00fb268c2f1eb311764319",
+    "semantic_hash": ""
+  },
+  "tests/test_chandrasekhar.py": {
+    "mtime": 1775024926.8860962,
+    "ast_hash": "40971ff6de57780612314019cae7c2ff",
+    "semantic_hash": ""
+  },
+  "tests/test_coords.py": {
+    "mtime": 1771876360.175018,
+    "ast_hash": "9833f0dd6b4e986307cff57daa66418e",
+    "semantic_hash": ""
+  },
+  "tests/test_fast_sims.py": {
+    "mtime": 1771876360.175018,
+    "ast_hash": "4deca063b65ec13c9c5c7b9ce9070d04",
+    "semantic_hash": ""
+  },
+  "tests/test_forces_versus_cpu.py": {
+    "mtime": 1771876360.175018,
+    "ast_hash": "7aea1119ad4f8fad9f7d123ff775f075",
+    "semantic_hash": ""
+  },
+  "tests/test_multi_species.py": {
+    "mtime": 1773127094.503823,
+    "ast_hash": "884f0405bfaf85887f737fbcff93ef94",
+    "semantic_hash": ""
+  },
+  "tests/test_newtons_third_law.py": {
+    "mtime": 1774322474.0361586,
+    "ast_hash": "f557dcc66b81e9caa473f30e47e0e10b",
+    "semantic_hash": ""
+  },
+  "tests/test_physics.py": {
+    "mtime": 1773127094.503823,
+    "ast_hash": "4b19ab16384be710f71aaf4722e8a33b",
+    "semantic_hash": ""
+  },
+  "tests/test_utils.py": {
+    "mtime": 1774322474.0361586,
+    "ast_hash": "2797ddccd63928325e8f50c5cf3e36bf",
+    "semantic_hash": ""
+  },
+  "tests/test_viz.py": {
+    "mtime": 1773127094.5079186,
+    "ast_hash": "9f0f0e5cf69031a2379b8c20932b3c1c",
+    "semantic_hash": ""
+  },
+  "CHANGELOG.md": {
+    "mtime": 1785356271.3608832,
+    "ast_hash": "423b778046eba94f616d9c4ff51f66b9",
+    "semantic_hash": ""
+  },
+  "CLAUDE.md": {
+    "mtime": 1777526379.5821955,
+    "ast_hash": "8ee39dcfe68a23b3797b02648930d699",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1778643789.463072,
+    "ast_hash": "76c51220f1f45fa12cb9834063885acf",
+    "semantic_hash": ""
+  },
+  "docs/agama_helper.md": {
+    "mtime": 1777526379.5821955,
+    "ast_hash": "87241a3f2f5dc51f3ca4f34e12527a52",
+    "semantic_hash": ""
+  },
+  "docs/coords.md": {
+    "mtime": 1775024926.8779223,
+    "ast_hash": "71fa57ceb4d2d135e4c8e92a791e5b7a",
+    "semantic_hash": ""
+  },
+  "docs/dynamical_friction.md": {
+    "mtime": 1775024926.8779223,
+    "ast_hash": "9bfbbbf8b3c3314c413cda6f6d871261",
+    "semantic_hash": ""
+  },
+  "docs/fast_sims.md": {
+    "mtime": 1777531671.585322,
+    "ast_hash": "f5515d91653d7dd651ae50aa6e039765",
+    "semantic_hash": ""
+  },
+  "docs/fields.md": {
+    "mtime": 1774393581.7049232,
+    "ast_hash": "1b425332e9c01b14af56224066044cfe",
+    "semantic_hash": ""
+  },
+  "docs/index.md": {
+    "mtime": 1777526379.5821955,
+    "ast_hash": "bcae418f91abc8ab45adf4356aad65e6",
+    "semantic_hash": ""
+  },
+  "docs/io.md": {
+    "mtime": 1774393581.7049232,
+    "ast_hash": "7e11adbe26c0784e71a1b6671303f89f",
+    "semantic_hash": ""
+  },
+  "docs/main.md": {
+    "mtime": 1785356271.361264,
+    "ast_hash": "28e68d43b7e311d141458f439d8eb481",
+    "semantic_hash": ""
+  },
+  "docs/quickstart.md": {
+    "mtime": 1774393581.7049232,
+    "ast_hash": "86b2e2f3ced0bc2d248545440671b3e2",
+    "semantic_hash": ""
+  },
+  "docs/run.md": {
+    "mtime": 1774418988.3285418,
+    "ast_hash": "a0f98b12b422fc2cec1ac3d435ca213c",
+    "semantic_hash": ""
+  },
+  "docs/tree_gpu.md": {
+    "mtime": 1785356271.3615625,
+    "ast_hash": "d80bb413111aff59e2df24617c1db653",
+    "semantic_hash": ""
+  },
+  "docs/utils.md": {
+    "mtime": 1778643789.463072,
+    "ast_hash": "7f1f979e35c90fc898648f68761a17f7",
+    "semantic_hash": ""
+  },
+  "docs/viz.md": {
+    "mtime": 1774393581.7049232,
+    "ast_hash": "6ef613ec81151b7fa0ead5749560beed",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/README.md": {
+    "mtime": 1777526379.5901608,
+    "ast_hash": "43e9094bc01c4a89cd81600658f849ea",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/tech_err.md": {
+    "mtime": 1777526379.5901608,
+    "ast_hash": "9bc9fd047a79d5b93ce44eae62addb95",
+    "semantic_hash": ""
+  },
+  "requirements.txt": {
+    "mtime": 1771056584.6010969,
+    "ast_hash": "fdd1a2f6bfceef408132b95bd38b206f",
+    "semantic_hash": ""
+  },
+  "plots/acceleration_timings.png": {
+    "mtime": 1773127094.503823,
+    "ast_hash": "f060af1f3abec6409fa228be61fe4c0a",
+    "semantic_hash": ""
+  }
+}

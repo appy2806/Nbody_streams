@@ -52,6 +52,13 @@ Quick start
 >>> times = np.linspace(6.0, 14.0, 101)
 >>> pot_ev = ah.load_agama_evolving_potential("MW_mult.h5", times)          # HDF5
 >>> pot_ev = ah.load_agama_evolving_potential("potential/MW_mult.ini")       # .ini (times embedded)
+>>>
+>>> # --- Coefficient time series: same class, same reader, trailing time axis ---
+>>> ser = ah.read_coefs("MW_mult.h5", group_name="all")   # times from the archive
+>>> ser.phi.shape, ser.n_times                            # (nR, n_lm, nt), nt
+>>> ser.phi[:, ser.column(2, 2), :] *= 1.5                # arbitrary manual surgery
+>>> pot_ev = ser.materialize_potential()                  # picks up the live arrays
+>>> ser.to_h5("edited.h5")                                # round-trips via group_name="all"
 """
 
 # Set Agama units (Msol, kpc, km/s) at import time.
@@ -77,12 +84,17 @@ from ._coefs import (
     MultipoleCoefs,
     CylSplineCoefs,
     read_coefs,
+    read_mult_coefs,
+    read_cylspl_coefs,
+    stack_coefs,
     generate_lmax_pairs,
 )
 from ._fire import (
     load_fire_pot,
     read_snapshot_times,
     create_fire_evolving_ini,
+    refine_times,
+    spline_resample_coefs,
 )
 
 from ._potential import (
@@ -98,11 +110,14 @@ __all__ = [
     "write_coef_to_h5",
     "write_snapshot_coefs_to_h5",
     # reading coef dataclasses or raw strings
-    "read_coefs",           # unified: auto-detects Multipole vs CylSpline
+    "read_coefs",           # unified: auto-detects type; single snapshot or series
+    "read_mult_coefs",      # Multipole only, same signature
+    "read_cylspl_coefs",    # CylSpline only, same signature
     "read_coef_string",     # raw text (file or h5)
     # coef dataclasses
     "MultipoleCoefs",
     "CylSplineCoefs",
+    "stack_coefs",          # time-less snapshots -> one time series
     "generate_lmax_pairs",
     # loading Agama potential objects
     "load_agama_potential",           # single snapshot, any source
@@ -112,4 +127,7 @@ __all__ = [
     "load_fire_pot",
     "read_snapshot_times",
     "create_fire_evolving_ini",
+    # cubic-spline resampling of a coefficient time series (needs agama.Spline)
+    "refine_times",
+    "spline_resample_coefs",
 ]

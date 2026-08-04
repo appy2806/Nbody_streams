@@ -106,6 +106,95 @@ All filtering (`keep_lm_mult`, `keep_m_cylspl`) is applied before building the G
 
 ---
 
+## Coefficient objects — one snapshot or a whole time series
+
+`MultipoleCoefs` and `CylSplineCoefs` hold either a single snapshot or a time
+series, in the *same* class. Time is always the **last** array axis and is
+always optional. There is no separate series reader and no separate series class.
+
+| field | no time axis | with time axis |
+|---|---|---|
+| `MultipoleCoefs.phi` | `(nR, n_lm)` | `(nR, n_lm, nt)` |
+| `MultipoleCoefs.dphi_dr` | `(nR, n_lm)` or `None` | `(nR, n_lm, nt)` or `None` |
+| `CylSplineCoefs.phi[m]` | `(nR, nz)` | `(nR, nz, nt)` |
+| `CylSplineCoefs.dphi_dR[m]`, `.dphi_dz[m]` | `(nR, nz)` or `None` | `(nR, nz, nt)` or `None` |
+| `times` | `None` | `(nt,)` |
+
+### Reading
+
+```python
+import numpy as np
+from nbody_streams import agama_helper as ah
+
+# single snapshot -- unchanged, times is None
+mc = ah.read_coefs("potential/600.dark.none_8.coef_mul_DR")
+
+# whole archive, numerically sorted; times from the .h5 root "times" dataset
+ser = ah.read_coefs("MW_mult.h5", group_name="all")
+
+# specific groups, in the given order
+ser = ah.read_coefs("MW_mult.h5", group_name=["snap_090", "snap_095"], times=[6.0, 6.5])
+
+# an Agama Evolving .ini (times come from the file), or a plain list of sources
+ser = ah.read_coefs("potential/MW_mult.ini")
+ser = ah.read_coefs(sorted(glob("potential/*.coef_mult")), times=t_gyr)
+
+# or stack snapshots you already have
+ser = ah.stack_coefs([ah.read_coefs(p) for p in paths], times=t_gyr)
+```
+
+`times` resolves in the order: explicit argument, then the `.h5` root `times`
+dataset, then the `.ini` timestamps. If a time axis is requested and none of
+those yield times, this **raises** — an index-based axis is never invented.
+
+### Manipulating
+
+```python
+ser.has_time_axis, ser.n_times      # True, 11
+ser.snapshot(3)                     # time-less view at index 3; same as ser[3]
+ser.column(2, 0)                    # Multipole: index of (l=2, m=0) in lm_labels
+ser.radial_power(2).shape           # (nR, nt)   -- (nR,) without a time axis
+ser.total_power(2).shape            # (nt,)      -- a float without a time axis
+ser.zeroed([0, 2])                  # works with or without a time axis
+
+# Direct field assignment is legal -- do whatever surgery you like.
+ser.phi[:, ser.column(2, 2), :] *= 1.5
+ser.validate()                      # names the offending field and both shapes
+```
+
+Nothing is ever interpolated or resampled here. Compute your own time
+resampling and attach it with `with_times` — the number of times may change
+freely:
+
+```python
+new_phi = my_spline(ser.phi, ser.times, t_new)     # your code, any nt
+ser2 = ser.with_times(t_new, phi=new_phi, dphi_dr=new_dphi)
+```
+
+Grids and labels are never reconciled: stacking snapshots whose `R_grid`,
+`z_grid`, `lm_labels`, `m_values` or header `metadata` differ is a hard error,
+as is mixing Multipole and CylSpline.
+
+### Materialising and writing
+
+```python
+pot = ser.materialize_potential()                  # -> agama.Potential (Evolving)
+pot = ser.materialize_potential(gpu=True)          # -> EvolvingPotentialGPU
+pot = mc.materialize_potential()                   # no time axis -> single snapshot
+
+ser.to_coef_string(t=3)          # one snapshot; t is required with a time axis
+ser.to_coef_strings()            # every time; 1-element list if time-less
+ser.to_coef_files("out/")        # one plain-text file per time
+ser.to_h5("series.h5")           # round-trips via read_coefs(group_name="all")
+ser.to_evolving_ini("series.ini")
+```
+
+`materialize_potential` serialises from the *live* arrays, so manual surgery is
+picked up automatically. `validate()` runs at the top of every write and
+materialise entry point.
+
+---
+
 ## API
 
 All methods accept CuPy or NumPy arrays, shape `(N,3)` or `(3,)` (scalar squeezed):
@@ -155,11 +244,17 @@ agama_helper/
   _*.cu                             <- CUDA kernels for multipole and cylspl (potential, force, density, hessian)
   _analytic_potentials.py           <- analytic GPU potentials
   _load.py                          <- load_agama_potential / load_agama_evolving_potential (cpu + gpu= flag)
+  _coefs.py                         <- MultipoleCoefs / CylSplineCoefs (optional time axis), readers, stack_coefs
+  _io.py                            <- HDF5 archive I/O, temp-file helpers, source resolution
+  _fit.py                           <- BFE fitting from an N-body snapshot
+  _fire.py                          <- FIRE-specific loaders and Evolving .ini generation
   tests/
     test_phase1_multipole.py        <- MultipolePotentialGPU correctness + benchmarks vs Agama CPU
     test_phase2_analytic.py         <- analytic GPU potential tests
     test_phase3_cylspline.py        <- CylSplinePotentialGPU correctness + benchmarks
     test_zero_pruning.py            <- zero-coefficient pruning correctness + speedup
+    test_cylspl_sections.py         <- section-aware CylSpline parsing (#Phi / #dPhi/dR / #dPhi/dz)
+    test_series.py                  <- coefficient time axis: stacking, round-trips, validation
   tech_err.md                       <- architecture decisions and precision notes
 ```
 
@@ -171,3 +266,6 @@ agama_helper/
 - **`from_agama()` raises for pure analytic types**: Agama does not export NFW/Plummer/etc. parameters programmatically; these must be constructed directly by keyword.
 - **EvolvingPotential interpolation**: GPU `interpolate=True` is linear lerp. Agama default (`interpLinear=False`) is nearest-neighbor. The INI parser maps `interpLinear=True` → GPU linear lerp.
 - **lmax limit**: Kernel supports lmax <= 32. Python raises `ValueError` if exceeded.
+- **CylSpline files carry three sections**: a real `Potential.export()` writes `#Phi`, `#dPhi/dR` and `#dPhi/dz`, each repeating the full set of `\t#m` blocks. `read_cylspl_coefs` splits on the section markers before scanning `#m` blocks; before that fix it was section-blind and returned `dPhi/dz` as `phi` with a duplicated `m_values`. Anything cached from an older run should be re-read.
+- **The coef text format truncates float64**: `to_coef_string` writes `%.13g` (Multipole) / `%.14g` (CylSpline), so a value -> text -> value round-trip loses roughly the last digit (~1e-13 relative). `materialize_potential(gpu=True)` on a coef object feeds the arrays straight to `_build_multipole_data` / `_build_cylspline_data` and skips the text round-trip, which is why it is *more* precise than the string path, not merely faster.
+- **A Multipole file needs `#dPhi/dr`**: Agama fails with `RuntimeError: Error loading Multipole potential` on a `#Phi`-only Multipole file, so `MultipoleCoefs.to_coef_string()` raises when `dphi_dr is None` rather than writing an unloadable file. A `#Phi`-only *CylSpline* file does load (Agama reconstructs the derivatives, at ~7e-5 relative error on `Phi`), so that stays a legal fallback.

@@ -117,7 +117,9 @@ class TestCreateParticleSprayStream:
 
         num_particles = 100
         N = num_particles // 2 + 1
-        t_strip = np.linspace(TIME_END - TIME_TOTAL, TIME_END, N)
+        # Half-open [t_lo, t_hi): a particle released exactly at time_end would
+        # integrate for zero time and NaN through the spline (see d3943ae).
+        t_strip = np.linspace(TIME_END - TIME_TOTAL, TIME_END, N, endpoint=False)
 
         result = create_particle_spray_stream(
             pot_host=pot_host,

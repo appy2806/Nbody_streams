@@ -232,7 +232,7 @@ def load_agama_potential(
 # ---------------------------------------------------------------------------
 
 def load_agama_evolving_potential(
-    source: Union[str, Path],
+    source: Union[str, Path, "MultipoleCoefs", "CylSplineCoefs", Sequence],
     times: Optional[Sequence[float]] = None,
     *,
     group_names: Optional[Sequence[str]] = None,
@@ -248,8 +248,16 @@ def load_agama_evolving_potential(
     Build a time-evolving Agama potential from an HDF5 archive or a native
     Agama ``Evolving`` ``.ini`` config file.
 
-    Accepts two source types:
+    Accepts four source types:
 
+    * **Coefficient object with a time axis** — a
+      :class:`~agama_helper._coefs.MultipoleCoefs` or
+      :class:`~agama_helper._coefs.CylSplineCoefs` whose ``times`` is set.  Its
+      *live* arrays are serialised, so any manual surgery is picked up.  Times
+      come from the object unless *times* overrides them.  A time-less object is
+      a :exc:`TypeError` — use :func:`load_agama_potential` for that.
+    * **Sequence of coef objects, file paths, or raw coef strings** — read in
+      the given order; *times* is required.
     * **HDF5 archive** (``.h5``/``.hdf5``) — groups contain coefficient
       strings written by :func:`~agama_helper._io.write_snapshot_coefs_to_h5`.
       Times can be embedded in the archive (``"times"`` dataset) or supplied
@@ -272,13 +280,16 @@ def load_agama_evolving_potential(
 
     Parameters
     ----------
-    source : str or Path
-        Path to an HDF5 archive or an Agama Evolving ``.ini`` file.
+    source : str, Path, coef object, or sequence
+        An HDF5 archive, an Agama Evolving ``.ini`` file, a coefficient object
+        carrying a time axis, or a sequence of coef objects / paths / raw coef
+        strings.
     times : sequence of float, optional
         Simulation times [Gyr or internal units].  For HDF5 sources, if
         omitted the embedded ``"times"`` dataset is used.  For ``.ini``
-        sources, if omitted the timestamps in the file are used.  An explicit
-        value always overrides stored/parsed times.
+        sources, if omitted the timestamps in the file are used.  For a coef
+        object, if omitted its own ``times`` is used.  For a sequence it is
+        required.  An explicit value always overrides stored/parsed times.
     group_names : sequence of str, optional
         **HDF5 only.** Explicit group ordering.  If ``None`` (default), all
         groups are used, sorted numerically (``"snap_042"`` → 42).
@@ -320,68 +331,123 @@ def load_agama_evolving_potential(
     """
     agama = _require_agama()
 
-    source = Path(source)
-    is_h5 = source.suffix.lower() in (".h5", ".hdf5")
-
     # ------------------------------------------------------------------
     # Resolve coef sources and times depending on source type
     # ------------------------------------------------------------------
-    if is_h5:
-        with h5py.File(source, "r") as f:
-            all_groups = [k for k in f.keys() if k != "times"]
-            stored_times = np.asarray(f["times"]) if "times" in f else None
+    #: Set when the source is a coef object carrying a time axis — lets the GPU
+    #: branch below skip the text round-trip entirely.
+    coef_series: Union["MultipoleCoefs", "CylSplineCoefs", None] = None
 
-        if group_names is None:
-            group_names = sorted(all_groups, key=_extract_int_from_group)
-        else:
-            group_names = list(group_names)
-
-        if times is not None:
-            resolved_times = list(times)
-        elif stored_times is not None:
-            resolved_times = stored_times.tolist()
-        else:
-            raise ValueError(
-                "times was not provided and no 'times' dataset was found in "
-                f"{source}. Pass times explicitly or embed them when writing "
-                "with write_snapshot_coefs_to_h5(times=...)."
+    if isinstance(source, (MultipoleCoefs, CylSplineCoefs)):
+        if not source.has_time_axis:
+            raise TypeError(
+                "The supplied coefficient object has no time axis (times is "
+                "None). Use load_agama_potential() for a single snapshot, or "
+                "attach a time axis with with_times() / stack_coefs() / "
+                "read_coefs(..., group_name='all')."
             )
-
-        if len(group_names) != len(resolved_times):
+        source.validate()
+        coef_series = source
+        resolved_times = (
+            list(times) if times is not None
+            else np.asarray(source.times, dtype=float).tolist()
+        )
+        if len(resolved_times) != source.n_times:
             raise ValueError(
-                f"len(group_names)={len(group_names)} does not match "
+                f"len(times)={len(resolved_times)} does not match the "
+                f"coefficient object's n_times={source.n_times}."
+            )
+        is_h5 = False
+        ini_interp_linear = interp_linear
+
+        def _iter_coef_strings():
+            for i in range(coef_series.n_times):
+                yield coef_series.to_coef_string(t=i)
+
+    elif isinstance(source, (list, tuple)):
+        items = list(source)
+        if not items:
+            raise ValueError("An empty sequence of coefficient sources was given.")
+        if times is None:
+            raise ValueError(
+                "times must be supplied when source is a sequence of coefficient "
+                "sources — a bare sequence carries no timestamps."
+            )
+        resolved_times = list(times)
+        if len(items) != len(resolved_times):
+            raise ValueError(
+                f"len(source)={len(items)} does not match "
                 f"len(times)={len(resolved_times)}."
             )
+        is_h5 = False
+        ini_interp_linear = interp_linear
 
         def _iter_coef_strings():
-            # Keep the HDF5 file open for the entire iteration — avoids 301
-            # separate open/close cycles on slow filesystems (e.g. WSL /mnt/).
-            with h5py.File(source, "r") as _f:
-                for grp in group_names:
-                    raw = _f[grp][dataset_name][()]
-                    yield raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
-
-        ini_interp_linear = interp_linear  # no override from file for H5
+            for it in items:
+                if isinstance(it, (MultipoleCoefs, CylSplineCoefs)):
+                    yield it.to_coef_string()
+                else:
+                    yield _resolve_coef_string(it, dataset_name=dataset_name)
 
     else:
-        # Native Agama .ini file
-        ini_times, coef_paths, ini_interp_linear = _parse_evolving_ini(source)
+        source = Path(source)
+        is_h5 = source.suffix.lower() in (".h5", ".hdf5")
+        if is_h5:
+            with h5py.File(source, "r") as f:
+                all_groups = [k for k in f.keys() if k != "times"]
+                stored_times = np.asarray(f["times"]) if "times" in f else None
 
-        resolved_times = list(times) if times is not None else ini_times
-        if not resolved_times:
-            raise ValueError(
-                f"No timestamps found in {source}. "
-                "Check that the file has a 'Timestamps' section."
-            )
-        if len(coef_paths) != len(resolved_times):
-            raise ValueError(
-                f"len(coef_paths)={len(coef_paths)} does not match "
-                f"len(times)={len(resolved_times)} parsed from {source}."
-            )
+            if group_names is None:
+                group_names = sorted(all_groups, key=_extract_int_from_group)
+            else:
+                group_names = list(group_names)
 
-        def _iter_coef_strings():
-            for p in coef_paths:
-                yield Path(p).read_text(encoding="utf-8")
+            if times is not None:
+                resolved_times = list(times)
+            elif stored_times is not None:
+                resolved_times = stored_times.tolist()
+            else:
+                raise ValueError(
+                    "times was not provided and no 'times' dataset was found in "
+                    f"{source}. Pass times explicitly or embed them when writing "
+                    "with write_snapshot_coefs_to_h5(times=...)."
+                )
+
+            if len(group_names) != len(resolved_times):
+                raise ValueError(
+                    f"len(group_names)={len(group_names)} does not match "
+                    f"len(times)={len(resolved_times)}."
+                )
+
+            def _iter_coef_strings():
+                # Keep the HDF5 file open for the entire iteration — avoids 301
+                # separate open/close cycles on slow filesystems (e.g. WSL /mnt/).
+                with h5py.File(source, "r") as _f:
+                    for grp in group_names:
+                        raw = _f[grp][dataset_name][()]
+                        yield raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+
+            ini_interp_linear = interp_linear  # no override from file for H5
+
+        else:
+            # Native Agama .ini file
+            ini_times, coef_paths, ini_interp_linear = _parse_evolving_ini(source)
+
+            resolved_times = list(times) if times is not None else ini_times
+            if not resolved_times:
+                raise ValueError(
+                    f"No timestamps found in {source}. "
+                    "Check that the file has a 'Timestamps' section."
+                )
+            if len(coef_paths) != len(resolved_times):
+                raise ValueError(
+                    f"len(coef_paths)={len(coef_paths)} does not match "
+                    f"len(times)={len(resolved_times)} parsed from {source}."
+                )
+
+            def _iter_coef_strings():
+                for p in coef_paths:
+                    yield Path(p).read_text(encoding="utf-8")
 
     # Use ini_interp_linear only as a fallback when caller didn't touch the default
     # (we always honour the caller's explicit interp_linear kwarg)
@@ -440,27 +506,45 @@ def load_agama_evolving_potential(
             MultipolePotentialGPU, CylSplinePotentialGPU,
             _build_multipole_data, _build_cylspline_data,
         )
-        from ._coefs import MultipoleCoefs, CylSplineCoefs, read_coefs as _rc
+        from ._coefs import read_coefs as _rc
 
-        # Materialise all coef strings up-front (generator can only be iterated once).
-        all_cs: list[str] = []
-        for cs in _iter_coef_strings():
-            if _filter_fn is not None:
-                cs = _filter_fn(cs)
-            all_cs.append(cs)
-
-        def _cpu_build(cs: str):
-            """Parse coef string and run spline construction — CPU only, no GPU."""
-            mc = _rc(cs)
+        def _cpu_build_obj(mc):
+            """Run spline construction on a coef object — CPU only, no GPU."""
             if isinstance(mc, MultipoleCoefs):
                 return ('mul', _build_multipole_data(mc))
-            else:
-                return ('cyl', _build_cylspline_data(mc))
+            return ('cyl', _build_cylspline_data(mc))
+
+        if coef_series is not None:
+            # Fast path: the coefficients are already in memory as arrays, so
+            # skip the to_coef_string/read_coefs round-trip.  This is
+            # precision-preserving, not merely faster — the text format is
+            # written at %.13g / %.14g, which truncates float64.
+            snaps = [coef_series.snapshot(i) for i in range(coef_series.n_times)]
+            if keep_lm_mult is not None:
+                snaps = [s.zeroed(keep_lm_mult) for s in snaps]
+            elif keep_m_cylspl is not None:
+                snaps = [
+                    s.zeroed(keep_m_cylspl, include_negative=include_negative_m)
+                    for s in snaps
+                ]
+            work = snaps
+        else:
+            # Materialise all coef strings up-front (a generator can only be
+            # iterated once), then parse each back into a coef object.
+            all_cs: list[str] = []
+            for cs in _iter_coef_strings():
+                if _filter_fn is not None:
+                    cs = _filter_fn(cs)
+                all_cs.append(cs)
+            work = all_cs
+
+        def _cpu_build(item):
+            return _cpu_build_obj(item if not isinstance(item, str) else _rc(item))
 
         # Parallel CPU spline construction across snapshots.
-        n_workers = min(len(all_cs), _os.cpu_count() or 4)
+        n_workers = min(len(work), _os.cpu_count() or 4)
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
-            built = list(pool.map(_cpu_build, all_cs))
+            built = list(pool.map(_cpu_build, work))
 
         # GPU upload — sequential in main thread (safe, no context issues).
         gpu_pots: list = []

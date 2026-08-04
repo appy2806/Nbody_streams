@@ -7,7 +7,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Optional trailing time axis on the coefficient dataclasses.**
+  `MultipoleCoefs` and `CylSplineCoefs` now hold either a single snapshot or a
+  whole time series in the *same* class.  Time is always the last array axis
+  and always optional; the new `times` field is appended last with default
+  `None`, so every existing positional construction and every existing call
+  keeps working unchanged.  `phi` becomes `(nR, n_lm, nt)` / `(nR, nz, nt)`
+  when a time axis is present.
+
+  There is no separate series reader and no separate series class:
+  `read_coefs` / `read_mult_coefs` / `read_cylspl_coefs` gained a `times=`
+  argument and a `group_name` that accepts a plain `str` (one snapshot,
+  unchanged), `"all"`, or an explicit sequence of group names.  `source`
+  additionally accepts an Agama Evolving `.ini` and a sequence of paths or raw
+  coef strings.  Times resolve as: explicit argument, then the `.h5` root
+  `times` dataset, then the `.ini` timestamps — never an invented index axis.
+
+  New on both classes: `has_time_axis`, `n_times`, `copy`, `snapshot(i)` /
+  `__getitem__`, `validate`, `with_times`, `to_coef_strings`, `to_coef_files`,
+  `to_h5`, `to_evolving_ini`, `materialize_potential`; `column(l, m)` on
+  Multipole.  New module-level `stack_coefs(items, times)`.
+  `load_agama_evolving_potential` accepts a coef object carrying a time axis
+  and a `Sequence[Coefs | str]`.
+
+  Grids and labels are never interpolated: stacking snapshots whose `R_grid`,
+  `z_grid`, `lm_labels`, `m_values` or header `metadata` differ is a hard
+  error, as is mixing expansion types.  Direct field assignment stays legal and
+  `validate()` catches the damage, naming the offending field and both shapes;
+  it runs at the top of every write and materialize entry point.
+
+- **`refine_times` and `spline_resample_coefs`** (`agama_helper._fire`) —
+  opt-in cubic-spline resampling of a coefficient time series onto an arbitrary
+  new time grid, built on `agama.Spline`.  The package itself never
+  interpolates coefficients; these are a convenience wrapper around
+  `with_times`.  `agama.Spline` is a *natural* cubic spline:
+  `scipy.interpolate.CubicSpline` matches it to ~4e-16 only with
+  `bc_type="natural"`, while scipy's default `"not-a-knot"` differs by up to
+  ~6e-3 relative near the endpoints on real coefficient series, so no scipy
+  fallback is applied.  `refine_times` subdivides each interval rather than
+  using a global `linspace`, which keeps the original nodes — FIRE snapshot
+  cadence is uneven (~12x spread on m12i).
+
+- **`examples/coef_time_axis.ipynb`** — end-to-end walkthrough on a
+  301-snapshot potential: reading, round-trips, materialization, the GPU fast
+  path, zeroing across a series, and spline resampling.  Point `POT_DIR` (or
+  `NBODY_STREAMS_POT_DIR`) at your own coefficient archives; the models are not
+  shipped with the package.
+
+### Changed
+
+- **`MultipoleCoefs.to_coef_string()` raises when `dphi_dr is None`.**  Agama
+  fails with `RuntimeError: Error loading Multipole potential` on a
+  `#Phi`-only Multipole file, so writing one is now refused up front rather
+  than deferred to load time.  A `#Phi`-only *CylSpline* file does load (Agama
+  reconstructs the derivatives, ~7e-5 relative error on `Phi`) and stays a
+  legal fallback.
+
+- **`load_agama_evolving_potential(..., gpu=True)` skips the text round-trip**
+  when the source is already a coefficient object, feeding the arrays straight
+  to `_build_multipole_data` / `_build_cylspline_data`.  This is
+  precision-preserving, not merely faster: the text format writes `%.13g` /
+  `%.14g`, which truncates float64.  Verified bit-identical potential and force
+  against the string path on fixtures quantised to the text format.
+
 ### Fixed
+
+- **`read_cylspl_coefs` was section-blind.**  An Agama CylSpline export carries
+  three sections — `#Phi`, `#dPhi/dR` and `#dPhi/dz` — each repeating the full
+  set of `\t#m` blocks.  The parser scanned every `#m` line across the whole
+  file and overwrote `m_start[m]` each time, so it landed on the *last*
+  section: `phi` silently held the `dPhi/dz` table and `m_values` came back
+  duplicated (`[0,0,0,2,2,2,4,4,4]` on a real `mmax=4` export), with no
+  exception raised.  The stream is now split on the section markers before the
+  `#m` blocks are scanned, and the new `dphi_dR` / `dphi_dz` fields hold their
+  own sections.
+
+  **This changes existing CylSpline results** for any file with more than one
+  section — i.e. anything produced by `fit_potential` via `Potential.export()`.
+  `#Phi`-only files (including the 2021-era FIRE archives) parse exactly as
+  before and give `dphi_dR is None` / `dphi_dz is None`.
+
+- **`read_coefs` mis-paired stored times with an explicit `group_name`.**  The
+  fallback to the archive's root `times` dataset used file order, so an
+  explicit group list that reordered the archive silently paired every snapshot
+  with the wrong time (lengths matched, so nothing raised).  Each requested
+  group's time is now taken from its canonical sorted position, and subsetting
+  works too.
+
+- **`zeroed()` shared the `times` array with its parent**, so relabelling the
+  filtered copy rewrote the original's time labels.
+
+- **`to_coef_files` / `to_h5` silently collapsed a series** when `name_fmt` /
+  `group_fmt` did not vary with the time index — every time overwrote the last,
+  and `to_coef_files` returned N identical paths.  A collapsing template is now
+  a hard error.
 
 - **GPU-tree snapshot schedule now matches the direct/CPU backends.**
   `run_nbody_gpu_tree` derived its output cadence from
