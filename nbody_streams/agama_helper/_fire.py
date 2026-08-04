@@ -427,3 +427,173 @@ def load_fire_pot(
     if kind == "bar":
         return bar_pot
     return agama.Potential(dark_pot, bar_pot)
+
+
+# ---------------------------------------------------------------------------
+# Cubic-spline resampling of a coefficient time series
+# ---------------------------------------------------------------------------
+
+def refine_times(times, factor: int = 10) -> np.ndarray:
+    """
+    Subdivide every interval of *times* by *factor*, keeping the original nodes.
+
+    FIRE snapshot cadence is uneven — on ``m12i`` the spacing varies by ~12x
+    across the run — so a plain ``np.linspace`` over the full range would *not*
+    land on the original sample times.  Refining interval-by-interval keeps every
+    original node, at indices ``0, factor, 2*factor, ...``, which makes node
+    preservation directly checkable after a resample.
+
+    Parameters
+    ----------
+    times : array-like, shape (nt,)
+        Original sample times, strictly increasing.
+    factor : int, optional
+        Sub-intervals per original interval, by default 10.
+
+    Returns
+    -------
+    ndarray, shape (factor * (nt - 1) + 1,)
+
+    Examples
+    --------
+    >>> refine_times([0.0, 1.0, 3.0], factor=2)
+    array([0. , 0.5, 1. , 2. , 3. ])
+    """
+    times = np.asarray(times, dtype=float)
+    if times.ndim != 1 or times.size < 2:
+        raise ValueError(
+            f"times must be a 1-D array of at least 2 samples; got shape {times.shape}."
+        )
+    if not np.all(np.diff(times) > 0):
+        raise ValueError("times must be strictly increasing to be refined.")
+    factor = int(factor)
+    if factor < 1:
+        raise ValueError(f"factor must be >= 1; got {factor}.")
+
+    pieces = [
+        np.linspace(times[i], times[i + 1], factor + 1)[:-1]
+        for i in range(len(times) - 1)
+    ]
+    return np.concatenate(pieces + [times[-1:]])
+
+
+def _spline_block(block, times: np.ndarray, times_new: np.ndarray) -> np.ndarray:
+    """Cubic-spline every coefficient series along the trailing time axis."""
+    import agama
+
+    lead, nt = np.shape(block)[:-1], np.shape(block)[-1]
+    flat = np.asarray(block, dtype=float).reshape(-1, nt)
+    out = np.empty((flat.shape[0], times_new.size), dtype=float)
+    for k in range(flat.shape[0]):
+        out[k] = agama.Spline(times, flat[k])(times_new)
+    return out.reshape(lead + (times_new.size,))
+
+
+def spline_resample_coefs(coefs, times_new):
+    """
+    Resample a coefficient time series onto a new time grid with cubic splines.
+
+    Builds one ``agama.Spline`` per coefficient series along the time axis and
+    evaluates it on *times_new*.  Grids and labels are untouched — only the
+    trailing time axis changes — and the result is an ordinary coefficient object,
+    so it materialises and writes like any other.
+
+    Works for both expansion types.  Derivative blocks (``dphi_dr`` for Multipole,
+    ``dphi_dR`` / ``dphi_dz`` for CylSpline) are resampled alongside ``phi`` when
+    present; Agama cannot load a Multipole file without a ``#dPhi/dr`` section, so
+    dropping it is never the right default.
+
+    Parameters
+    ----------
+    coefs : MultipoleCoefs or CylSplineCoefs
+        Must already carry a time axis.
+    times_new : array-like, shape (nt_new,)
+        New sample times.  Any length; see :func:`refine_times` for a grid that
+        contains the original nodes.
+
+    Returns
+    -------
+    MultipoleCoefs or CylSplineCoefs
+        New object with ``n_times == len(times_new)``.
+
+    Raises
+    ------
+    ImportError
+        If agama is unavailable.
+    ValueError
+        If *coefs* has no time axis.
+
+    Notes
+    -----
+    ``agama.Spline`` is a **natural** cubic spline.  ``scipy.interpolate.CubicSpline``
+    agrees with it to machine precision *only* with ``bc_type="natural"``; its
+    default ``"not-a-knot"`` differs by up to ~6e-3 relative near the endpoints on
+    real FIRE coefficient series.  This helper therefore requires agama rather than
+    silently falling back to a spline with different boundary conditions.
+
+    Because the spline passes through every input node, resampling onto a grid that
+    contains the original times reproduces those times' coefficients exactly.
+
+    Examples
+    --------
+    >>> ser = read_coefs("mult_halo.h5", group_name="all")
+    >>> fine = spline_resample_coefs(ser, refine_times(ser.times, 10))
+    >>> fine.n_times, np.allclose(fine.phi[..., ::10], ser.phi)
+    (3001, True)
+    >>> pot = fine.materialize_potential()
+    """
+    from ._coefs import CylSplineCoefs, MultipoleCoefs
+
+    try:
+        import agama  # noqa: F401
+    except ImportError:
+        raise ImportError(
+            "spline_resample_coefs requires agama for agama.Spline. "
+            "scipy.interpolate.CubicSpline is equivalent only with "
+            "bc_type='natural' — its default 'not-a-knot' gives a different "
+            "spline near the endpoints — so no fallback is applied here."
+        ) from None
+
+    if not isinstance(coefs, (MultipoleCoefs, CylSplineCoefs)):
+        raise TypeError(
+            f"spline_resample_coefs expects MultipoleCoefs or CylSplineCoefs; got "
+            f"{type(coefs).__name__}."
+        )
+
+    if not coefs.has_time_axis:
+        raise ValueError(
+            f"{type(coefs).__name__} has no time axis (times is None); there is "
+            "nothing to resample. Build a series with read_coefs(group_name='all') "
+            "or stack_coefs() first."
+        )
+
+    times = np.asarray(coefs.times, dtype=float)
+    times_new = np.asarray(times_new, dtype=float)
+    if times_new.ndim != 1:
+        raise ValueError(
+            f"times_new must be 1-D; got an array of shape {times_new.shape}."
+        )
+
+    if isinstance(coefs, MultipoleCoefs):
+        return coefs.with_times(
+            times_new,
+            phi=_spline_block(coefs.phi, times, times_new),
+            dphi_dr=(
+                None if coefs.dphi_dr is None
+                else _spline_block(coefs.dphi_dr, times, times_new)
+            ),
+        )
+
+    if isinstance(coefs, CylSplineCoefs):
+        extra = {}
+        for name in ("dphi_dR", "dphi_dz"):
+            tables = getattr(coefs, name)
+            if tables is not None:
+                extra[name] = {
+                    m: _spline_block(v, times, times_new) for m, v in tables.items()
+                }
+        return coefs.with_times(
+            times_new,
+            phi={m: _spline_block(v, times, times_new) for m, v in coefs.phi.items()},
+            **extra,
+        )

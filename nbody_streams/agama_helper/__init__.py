@@ -93,6 +93,8 @@ from ._fire import (
     load_fire_pot,
     read_snapshot_times,
     create_fire_evolving_ini,
+    refine_times,
+    spline_resample_coefs,
 )
 
 from ._potential import (
@@ -125,4 +127,7 @@ __all__ = [
     "load_fire_pot",
     "read_snapshot_times",
     "create_fire_evolving_ini",
+    # cubic-spline resampling of a coefficient time series (needs agama.Spline)
+    "refine_times",
+    "spline_resample_coefs",
 ]
