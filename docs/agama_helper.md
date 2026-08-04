@@ -13,6 +13,10 @@ potentials — specifically Multipole (spherical harmonic BFE) and CylSpline
 from nbody_streams import agama_helper as ah
 ```
 
+> **Example notebook** — `examples/coef_time_axis.ipynb` walks through the
+> coefficient time axis end to end (reading, manipulating, writing, FIRE
+> resampling) against real FIRE fixtures.
+
 ---
 
 ## Contents
@@ -23,6 +27,8 @@ from nbody_streams import agama_helper as ah
 - [Coefficient dataclasses](#coefficient-dataclasses)
   - [MultipoleCoefs](#multipolecoefs)
   - [CylSplineCoefs](#cylsplinecoefs)
+- [Coefficient time axis](#coefficient-time-axis)
+- [Writers and materialization](#writers-and-materialization)
 - [Reading API](#reading-api)
 - [HDF5 I/O](#hdf5-io)
 - [Loading Agama potentials](#loading-agama-potentials)
@@ -30,6 +36,7 @@ from nbody_streams import agama_helper as ah
 - [Center parameter](#center-parameter)
 - [FIRE helpers](#fire-helpers)
 - [Potential fitting](#potential-fitting)
+- [Gotchas](#gotchas)
 
 ---
 
@@ -130,10 +137,15 @@ Detection is automatic — no need to specify the type.
 class MultipoleCoefs:
     R_grid   : np.ndarray          # (nR,)      radial grid [kpc]
     lm_labels: list[tuple[int,int]]# [(l,m)...] ordered column labels
-    phi      : np.ndarray          # (nR, n_lm) Phi_{l,m}(r)
-    dphi_dr  : np.ndarray | None   # (nR, n_lm) dPhi/dr  (None if absent)
-    metadata : dict                # header key/value pairs
+    phi      : np.ndarray          # (nR, n_lm) or (nR, n_lm, nt)  Phi_{l,m}(r)
+    dphi_dr  : np.ndarray | None   # same shape as phi (None if absent)
+    metadata : dict = field(default_factory=dict)   # header key/value pairs
+    times    : np.ndarray | None = None             # (nt,); None = no time axis
 ```
+
+`times` is the last field, defaulting to `None`, so every existing positional
+construction (`MultipoleCoefs(R_grid, lm_labels, phi, dphi_dr, metadata)`)
+keeps working unchanged. See [Coefficient time axis](#coefficient-time-axis).
 
 **Properties:**
 
@@ -192,12 +204,20 @@ Serialise back to Agama's plain-text Multipole format.  Round-trippable:
 ```python
 @dataclass
 class CylSplineCoefs:
-    m_values : list[int]           # azimuthal orders present (sorted)
-    R_grid   : np.ndarray          # (nR,)    cylindrical R grid [kpc]
-    z_grid   : np.ndarray          # (nz,)    vertical grid [kpc]
-    phi      : dict[int, ndarray]  # phi[m] shape (nR, nz)
-    metadata : dict
+    m_values : list[int]                  # azimuthal orders present (sorted)
+    R_grid   : np.ndarray                 # (nR,) cylindrical R grid [kpc]
+    z_grid   : np.ndarray                 # (nz,) vertical grid [kpc]
+    phi      : dict[int, ndarray]         # phi[m] shape (nR, nz) or (nR, nz, nt)
+    metadata : dict = field(default_factory=dict)
+    dphi_dR  : dict[int, ndarray] | None = None   # same shapes as phi; None if absent
+    dphi_dz  : dict[int, ndarray] | None = None   # same shapes as phi; None if absent
+    times    : np.ndarray | None = None           # (nt,); None = no time axis
 ```
+
+A real `Potential.export()` carries `#Phi`, `#dPhi/dR` and `#dPhi/dz`
+sections; `dphi_dR`/`dphi_dz` are populated from those and are `None` when the
+source only had `#Phi` (see [Gotchas](#gotchas)). `times` is the last field,
+defaulting to `None` — see [Coefficient time axis](#coefficient-time-axis).
 
 #### `zeroed(keep_m, include_negative=True) -> CylSplineCoefs`
 
@@ -215,11 +235,211 @@ Serialise back to Agama's CylSpline text format.
 
 ---
 
+## Coefficient time axis
+
+`MultipoleCoefs` and `CylSplineCoefs` hold **either a single snapshot or a
+whole time series**, in the same class. Time, when present, is always the
+**last** array axis, and is always **optional**. There is no separate series
+class and no separate series reader — a single-snapshot read behaves exactly
+as it always has (`times is None`), and every multi-snapshot form (see
+[Reading API](#reading-api)) returns the same dataclass with a trailing time
+axis attached.
+
+| field | no time axis | with time axis |
+|---|---|---|
+| `MultipoleCoefs.phi` | `(nR, n_lm)` | `(nR, n_lm, nt)` |
+| `MultipoleCoefs.dphi_dr` | `(nR, n_lm)` or `None` | `(nR, n_lm, nt)` or `None` |
+| `CylSplineCoefs.phi[m]` | `(nR, nz)` | `(nR, nz, nt)` |
+| `CylSplineCoefs.dphi_dR[m]` | `(nR, nz)` or `None` | `(nR, nz, nt)` or `None` |
+| `CylSplineCoefs.dphi_dz[m]` | `(nR, nz)` or `None` | `(nR, nz, nt)` or `None` |
+| `times` | `None` | `(nt,)` |
+
+`times` is the **last** dataclass field, defaulting to `None`, so existing
+positional construction of either class is unaffected.
+
+### Introspection properties
+
+| Property | Type | Description |
+|---|---|---|
+| `.has_time_axis` | `bool` | `True` iff `times is not None` |
+| `.n_times` | `int \| None` | `len(times)`, or `None` without a time axis |
+
+### Methods (both classes unless noted)
+
+#### `copy() -> MultipoleCoefs \| CylSplineCoefs`
+
+Deep copy — no array, list or dict is shared with the original (including
+`times`).
+
+#### `snapshot(i) -> MultipoleCoefs \| CylSplineCoefs`  (alias: `obj[i]`)
+
+Time-less view at time index *i* (negative indices allowed). The result
+**shares memory** with the parent — every returned array is a NumPy view — so
+writing through it edits the parent. Call `.copy()` on the result for an
+independent object. Raises if the object has no time axis.
+
+```python
+s3 = ser.snapshot(3)     # == ser[3]
+s3.phi.base is ser.phi   # True -- a view, not a copy
+```
+
+#### `column(l, m) -> int`  (Multipole only)
+
+Index of the `(l, m)` column in `phi`, `dphi_dr` and `lm_labels`. Raises
+`KeyError` if the pair is absent.
+
+```python
+idx = ser.column(2, 2)
+ser.phi[:, idx, :] *= 1.5     # arbitrary manual surgery on one harmonic
+```
+
+#### `validate() -> None`
+
+Assert internal shape consistency between the grids/labels, `phi`,
+`dphi_dr`/`dphi_dR`/`dphi_dz` and `times`, naming the offending field on
+failure. **Direct field assignment is legal** — `validate()` is what catches
+the damage afterwards, and it runs automatically at the top of every write and
+materialize entry point (`to_coef_string`, `to_coef_strings`, `to_coef_files`,
+`to_h5`, `to_evolving_ini`, `materialize_potential`).
+
+```python
+ser.phi = ser.phi[:, :-1]   # drop a column by hand -- now inconsistent
+ser.validate()              # ValueError naming MultipoleCoefs.phi and its shape
+```
+
+#### `with_times(times, *, phi=None, dphi_dr=None) -> MultipoleCoefs`
+#### `with_times(times, *, phi=None, dphi_dR=None, dphi_dz=None) -> CylSplineCoefs`
+
+Attach or relabel the time axis. **Nothing is interpolated, smoothed or
+resampled here** — compute your own time-resampled arrays (or use
+[`spline_resample_coefs`](#fire-helpers)) and attach the result.
+
+- Omitting `phi` only **relabels** an existing time axis: `len(times)` must
+  equal the current `n_times`.
+- Supplying `phi` **attaches or replaces** the time axis: `len(times)` may
+  differ freely from the current `n_times`.
+- `MultipoleCoefs.phi` must be `(nR, n_lm, nt)` — the leading two axes must
+  match the existing `R_grid`/`lm_labels` exactly; grids are never
+  interpolated.
+- `CylSplineCoefs.phi`/`dphi_dR`/`dphi_dz` are **dicts keyed by exactly the
+  existing `m_values`** (not a stacked array), each entry `(nR, nz, nt)`.
+- `dphi_dr` (or `dphi_dR`/`dphi_dz`) is required alongside `phi` whenever the
+  object already carries one — there is no way to silently drop a derivative
+  block via `with_times`.
+
+```python
+new_phi = my_spline(mc.phi, old_times, new_times)      # your resampling code
+new_dphi = my_spline(mc.dphi_dr, old_times, new_times)
+ser2 = mc.with_times(new_times, phi=new_phi, dphi_dr=new_dphi)
+```
+
+### Module-level: `stack_coefs(items, times) -> MultipoleCoefs | CylSplineCoefs`
+
+Stack time-less snapshots into one object carrying a time axis.
+
+```python
+c0 = mc.copy()
+c1 = mc.copy()
+c1.phi = c1.phi * 2.0
+c1.dphi_dr = c1.dphi_dr * 2.0
+ser = ah.stack_coefs([c0, c1], times=[0.0, 1.0])
+ser.phi.shape   # (nR, n_lm, 2)
+```
+
+**Grids and labels are never interpolated or reconciled.** Stacking snapshots
+whose `R_grid`, `z_grid`, `lm_labels`, `m_values` or header `metadata` differ
+is a hard `ValueError`, and mixing `MultipoleCoefs` with `CylSplineCoefs` is a
+hard `TypeError`. Each item must itself be time-less; stacking an
+already-series object raises.
+
+### `radial_power` / `total_power` with a time axis
+
+The **meaning** of the quantity is unchanged — only a trailing time axis is
+appended when present:
+
+```python
+mc.radial_power(2).shape    # (nR,)       -- no time axis
+mc.total_power(2)           # float       -- no time axis
+
+ser.radial_power(2).shape   # (nR, nt)    -- with a time axis
+ser.total_power(2).shape    # (nt,)       -- with a time axis
+```
+
+---
+
+## Writers and materialization
+
+Both coefficient classes can turn themselves back into live potentials or
+on-disk files, iterating over every time sample when a time axis is present.
+
+### `materialize_potential(*, center=None, interp_linear=True, gpu=False)`
+
+Build a live potential from the *current* (possibly hand-edited) arrays.
+Without a time axis this delegates to `load_agama_potential` (see
+[Loading Agama potentials](#loading-agama-potentials)); with one it delegates
+to `load_agama_evolving_potential` using `times=self.times`. Either way
+`validate()` runs first.
+
+```python
+pot = ser.materialize_potential()                 # agama.Potential (Evolving)
+pot = ser.materialize_potential(gpu=True)          # EvolvingPotentialGPU
+pot = mc.materialize_potential()                   # no time axis -> single snapshot
+```
+
+### `to_coef_string(t=None) -> str`
+
+Serialise one snapshot. `t` is **required** when the object carries a time
+axis and **rejected** (`ValueError`) when it does not.
+
+```python
+s3 = ser.to_coef_string(t=3)     # one time index
+mc.to_coef_string()              # time-less object, no t=
+```
+
+### `to_coef_strings() -> list[str]`
+
+Serialise every time sample — a one-element list when there is no time axis.
+
+### `to_coef_files(out_dir, name_fmt="snap_{i:04d}{ext}") -> list[str]`
+
+Write one plain-text coefficient file per time sample. `name_fmt` receives
+`i` (time index) and `ext` (`.coef_mult` or `.coef_cylsp`); it must produce a
+distinct name per sample or a `ValueError` is raised (a fixed name is fine for
+a time-less object, since there is only one sample).
+
+### `to_h5(path, group_fmt="snap_{i:04d}", dataset_name="coefs", overwrite=True, write_times=True) -> str`
+
+Write every time sample into one HDF5 archive, in the layout produced by
+`write_snapshot_coefs_to_h5` — round-trips through
+`read_coefs(path, group_name="all")`. **Appends** to an existing archive
+(groups from an earlier, longer write survive); delete the file first for a
+clean archive. `group_fmt` must contain `{i}` or raises, same as `name_fmt`
+above. `write_times=False` skips the root `"times"` dataset (ignored without
+a time axis).
+
+### `to_evolving_ini(ini_path, out_dir=None, interp_linear=True) -> str`
+
+Write the per-snapshot coefficient files plus an Agama `Evolving` `.ini`.
+Requires a time axis (`ValueError` otherwise — an Evolving config is a list of
+`(time, file)` pairs). `out_dir` defaults to `ini_path`'s parent; file names
+are prefixed with the `.ini` stem.
+
+```python
+ser.to_h5("series.h5")                 # round-trips via group_name="all"
+ser.to_evolving_ini("series.ini")      # native Agama Evolving config
+```
+
+---
+
 ## Reading API
 
-### `read_coefs(source, group_name="snap_000", dataset_name="coefs")`
+### `read_coefs(source, group_name="snap_000", dataset_name="coefs", times=None)`
 
 Unified entry point.  Auto-detects expansion type from the file header.
+`read_mult_coefs` and `read_cylspl_coefs` share this exact signature — only
+the expansion type is fixed instead of auto-detected. A single-group read
+returns exactly what it always has (`times is None`); any multi-snapshot form
+returns the same dataclass with a trailing time axis attached.
 
 ```python
 mc  = ah.read_coefs("potential/090.dark.none_8.coef_mult")
@@ -230,6 +450,37 @@ mc  = ah.read_coefs(mc.to_coef_string())   # from raw string
 ```
 
 Returns `MultipoleCoefs` or `CylSplineCoefs`.
+
+**`group_name`** selects HDF5 groups:
+
+| Form | Result |
+|---|---|
+| plain `str` (default `"snap_000"`) | **one** group; no time axis (unchanged default behaviour) |
+| `"all"` | every group in the archive, numerically sorted (`"snap_0042"` sorts as 42); time axis present |
+| sequence of `str` | exactly those groups, in the given order; time axis present |
+
+**`source`** additionally accepts two more forms, for which `group_name` is
+**refused** (a `ValueError`, not silently ignored) since it has no meaning:
+
+- An Agama Evolving `.ini` path — every listed snapshot is read.
+- A sequence of file paths / raw coef strings / coef objects, in the given
+  order — `np.sort(glob(...))` or a generator both work.
+
+```python
+ser = ah.read_coefs("MW_mult.h5", group_name="all")                # whole archive
+ser = ah.read_coefs("MW_mult.h5", group_name=["snap_090", "snap_095"],
+                     times=[6.0, 6.5])
+ser = ah.read_coefs("potential/MW_mult.ini")                        # times from the .ini
+ser = ah.read_coefs(sorted(glob("potential/*.coef_mult")), times=t_gyr)
+```
+
+**`times`** resolves in this order: the explicit argument, then the `.h5`
+root `"times"` dataset, then the `.ini` timestamps. If a time axis is
+requested and none of those yield times, this **raises** — an index-based
+axis is never invented. The root `"times"` dataset is co-indexed with the
+archive's numerically sorted group order, so an explicit `group_name` that
+subsets or reorders the archive still gets each group's own time, not the
+time at its position in the request.
 
 ### `read_coef_string(source, group_name="snap_000", dataset_name="coefs") -> str`
 
@@ -253,7 +504,7 @@ ah.write_coef_to_h5(
 )
 ```
 
-### `write_snapshot_coefs_to_h5(snapshot_ids, coef_file_patterns, h5_output_paths, group_fmt="snap_{snap:03d}", dataset_name="coefs", overwrite=True, times=None)`
+### `write_snapshot_coefs_to_h5(snapshot_ids, coef_file_patterns, h5_output_paths, group_fmt="snap_{snap:03d}", dataset_name="coefs", overwrite=True, encoding="utf-8", times=None)`
 
 Batch-write many snapshots.  One HDF5 file per entry in `coef_file_patterns`.
 
@@ -341,8 +592,9 @@ All temporary files are removed in a `finally` block (even on failure).
 
 ### `load_agama_evolving_potential(source, times=None, *, group_names=None, dataset_name="coefs", center=None, interp_linear=True, keep_lm_mult=None, keep_m_cylspl=None, include_negative_m=True, gpu=False)`
 
-Build a **time-evolving** potential from an HDF5 archive or a native Agama
-Evolving `.ini` file.
+Build a **time-evolving** potential from an HDF5 archive, a native Agama
+Evolving `.ini` file, a coefficient object that already carries a time axis,
+or a sequence of coef objects / paths / raw coef strings.
 
 ```python
 # --- CPU (agama.Potential) ---
@@ -353,16 +605,30 @@ pot_ev = ah.load_agama_evolving_potential("potential/MW_mult.ini")
 pot_ev = ah.load_agama_evolving_potential("MW_mult.h5", keep_lm_mult=[0])
 pot_ev = ah.load_agama_evolving_potential("MW_cylsp.h5", keep_m_cylspl=[0, 2])
 
+# --- From a coefficient object carrying a time axis ---
+ser = ah.read_coefs("MW_mult.h5", group_name="all")
+pot_ev = ah.load_agama_evolving_potential(ser)          # times taken from ser.times
+pot_ev = ah.load_agama_evolving_potential(ser, times=my_times)  # overrides ser.times
+
 # --- GPU (EvolvingPotentialGPU) ---
 pot_ev = ah.load_agama_evolving_potential("MW_mult.h5", gpu=True)
 pot_ev = ah.load_agama_evolving_potential("MW_mult.h5",
                                            times=np.linspace(6, 14, 11),
                                            keep_lm_mult=[0, 2], gpu=True)
+pot_ev = ah.load_agama_evolving_potential(ser, gpu=True)   # skips the text round-trip
 ```
 
 With `gpu=True` the function builds one `PotentialGPU` per snapshot and
 returns an `EvolvingPotentialGPU` with linear time-interpolation (controlled
-by `interp_linear`).  All filtering is applied before GPU construction.
+by `interp_linear`).  All filtering is applied before GPU construction.  When
+`source` is a coefficient object, the GPU path feeds its arrays straight to
+the GPU builders (`_build_multipole_data`/`_build_cylspline_data`), skipping
+the text round-trip entirely — more precise than the string path (which
+truncates through `%.13g`/`%.14g`), not merely faster.
+
+A coefficient object with **no** time axis (`times is None`) raises
+`TypeError` — use `load_agama_potential` for that, or attach one first with
+`with_times()` / `stack_coefs()` / `read_coefs(..., group_name="all")`.
 
 **Agama `.ini` format** (parsed automatically):
 
@@ -572,7 +838,7 @@ ini = ah.create_fire_evolving_ini(
 )
 ```
 
-### `load_fire_pot(sim_dir, nsnap, sym="n", lmax=4, kind="whole", keep_lm_mult=None, keep_m_cylspl=None, include_negative_m=True, file_ext="DR", halo=None, verbose=True, return_coefs=False, save_modified=False, save_dir=None)`
+### `load_fire_pot(sim_dir, nsnap, sym="n", lmax=4, kind="whole", keep_lm_mult=None, keep_m_cylspl=None, include_negative_m=True, file_ext="DR", out_acc=False, halo=None, verbose=True, return_coefs=False, save_modified=False, save_dir=None)`
 
 Load a FIRE potential snapshot as an `agama.Potential`.
 
@@ -601,6 +867,50 @@ When `return_coefs=True`:
 - `kind="dark"` -> `MultipoleCoefs`
 - `kind="bar"` -> `CylSplineCoefs`
 - `kind="whole"` -> `(MultipoleCoefs, CylSplineCoefs)`
+
+### `refine_times(times, factor=10) -> ndarray`
+
+Subdivide every interval of *times* by *factor*, keeping the original nodes.
+
+FIRE snapshot cadence is **uneven** — on `m12i` the spacing between snapshots
+varies by ~12x across the run — so a plain `np.linspace` over the full time
+range would not land back on the original sample times. `refine_times`
+subdivides interval-by-interval instead, which keeps every original node at
+indices `0, factor, 2*factor, ...`.
+
+```python
+ah.refine_times([0.0, 1.0, 3.0], factor=2)
+# array([0. , 0.5, 1. , 2. , 3. ])
+```
+
+### `spline_resample_coefs(coefs, times_new) -> MultipoleCoefs | CylSplineCoefs`
+
+Resample a coefficient time series onto a new time grid with cubic splines,
+using one `agama.Spline` per coefficient series along the time axis. Grids
+and labels are untouched — only the trailing time axis changes — and
+derivative blocks (`dphi_dr`, or `dphi_dR`/`dphi_dz`) are resampled alongside
+`phi` whenever present.
+
+**The `agama_helper` package itself never interpolates coefficients** —
+`with_times()`, `stack_coefs()` and every reader leave that entirely to the
+caller. `spline_resample_coefs` is an **opt-in helper** for exactly that job,
+built on top of the same `with_times()` hand-off.
+
+```python
+ser = ah.read_coefs("mult_halo.h5", group_name="all")
+fine = ah.spline_resample_coefs(ser, ah.refine_times(ser.times, factor=10))
+fine.n_times                                    # 10 * (ser.n_times - 1) + 1
+np.allclose(fine.phi[..., ::10], ser.phi)        # True -- original nodes preserved exactly
+pot = fine.materialize_potential()
+```
+
+> **Why agama and not scipy:** `agama.Spline` is a **natural** cubic spline.
+> `scipy.interpolate.CubicSpline` matches it to ~4e-16 relative **only** with
+> `bc_type="natural"` — its **default** `"not-a-knot"` differs by up to ~6e-3
+> relative near the endpoints on real coefficient series. `spline_resample_coefs`
+> therefore requires `agama` and has no scipy fallback: a silent
+> `not-a-knot` fallback would be a materially different spline, not merely a
+> less-precise one.
 
 ---
 
@@ -631,6 +941,34 @@ paths = ah.fit_potential(
 
 Dark matter and hot gas are fitted with a Multipole expansion; stars and cold
 gas are fitted with a CylSpline expansion.
+
+---
+
+## Gotchas
+
+- **A real CylSpline export carries three sections.** `Potential.export()`
+  writes `#Phi`, `#dPhi/dR` and `#dPhi/dz`, each repeating the full set of
+  `\t#m` blocks. `read_cylspl_coefs` splits on the section markers *before*
+  scanning `#m` blocks, so `phi` always comes from `#Phi` regardless of how
+  many sections follow it. Older `#Phi`-only files (e.g. the 2021-era FIRE
+  archives) still parse exactly as before, with `dphi_dR is None` and
+  `dphi_dz is None`.
+
+- **The coef text format truncates float64.** `to_coef_string` writes
+  `%.13g` (Multipole) / `%.14g` (CylSpline), so a value -> text -> value
+  round-trip loses roughly the last digit (~1e-13 relative).
+  `materialize_potential(gpu=True)` (and `load_agama_evolving_potential(gpu=True)`)
+  on a coef object feed the arrays straight into the GPU builders and skip this
+  round-trip entirely, which is why that path is *more* precise, not merely
+  faster.
+
+- **A Multipole file needs `#dPhi/dr`; a CylSpline file does not.** Agama
+  fails with `RuntimeError: Error loading Multipole potential` when asked to
+  load a `#Phi`-only Multipole file, so `MultipoleCoefs.to_coef_string()`
+  raises `ValueError` when `dphi_dr is None` rather than writing a file Agama
+  can't load. A `#Phi`-only **CylSpline** file *does* load — Agama
+  reconstructs the derivatives from the spline, at ~7e-5 relative error on
+  `Phi` — so that stays a legal (if slightly less accurate) fallback.
 
 ---
 

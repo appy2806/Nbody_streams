@@ -1,16 +1,16 @@
-# Graph Report - Nbody_streams  (2026-08-03)
+# Graph Report - Nbody_streams  (2026-08-01)
 
 ## Corpus Check
-- 95 files · ~187,289 words
+- 92 files · ~172,738 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2481 nodes · 4451 edges · 285 communities (171 shown, 114 thin omitted)
-- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 335 edges (avg confidence: 0.59)
+- 2242 nodes · 4018 edges · 270 communities (157 shown, 113 thin omitted)
+- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 326 edges (avg confidence: 0.59)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `44435012`
+- Built from commit: `1e5c52de`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -75,41 +75,28 @@
 - computeMultipoles.cu
 - TreeGPU
 - test_chandrasekhar.py
-- vec<3,double>
-- vec<2,float>
+- compute_nbody_forces_gpu
+- vec<4,float>
 - _find_cudart
-- .alloc
 - make_df_force_extra
 - .test_circular_orbit_decays
-- computeMultipoles.cu
-- _validate_species
-- TreeGPU
+- vec<3,double>
 - transforms.py
 - _jeans_sigma_r
-- Treecode.h
 - main.py
-- vec<4,float>
 - plot_density
-- computeGridAndBlockSize
-- minmax_block
-- Writers and materialization
 - run_nbody_gpu
 - Load a pre-defined spherical spiral grid scaled to a given radius.      The grid
-- GPU potential evaluation (PotentialGPU)
-- FIRE helpers
 - Dynamical friction
 - cuda_primitives.h
-- Quick-start workflow
 - validate_masses
 - _io.py
 - TestBoundCenterPhi
-- test_newtons_third_law.py
 - AGAMA_GPU
 - Quadrupole
 - vector3
-- Loading Agama potentials
+- load_agama_potential
 - test_phase1_multipole.py
-- Physics and formulae
 - plots.py
 - Quick start
 - convert_to_vel_los
@@ -121,11 +108,10 @@
 - test_phase3_cylspline.py
 - cuda_mem
 - plot_stream_evolution
-- vec<3,double>
+- host_mem
 - get_smoothing_lengths
 - test_tree.py
 - Public API
-- vec<3,float>
 - _multipole_potential_kernel.cu
 - make_uneven_grid
 - __init__.py
@@ -133,8 +119,7 @@
 - empirical_density_profile
 - Potential
 - Chandrasekhar dynamical friction
-- Potential fitting
-- HDF5 I/O
+- vec<2,float>
 - empirical_velocity_rms_profile
 - CoM galactocentric radius vs time chart
 - nbody_streams — Documentation
@@ -250,13 +235,13 @@
 1. `Treecode` - 68 edges
 2. `Species` - 58 edges
 3. `MultipolePotentialGPU` - 55 edges
-4. `read_coefs()` - 47 edges
-5. `CylSplinePotentialGPU` - 41 edges
-6. `MultipoleCoefs` - 40 edges
-7. `CompositePotentialGPU` - 40 edges
-8. `CylSplineCoefs` - 38 edges
-9. `tree_gravity_gpu()` - 38 edges
-10. `ShiftedPotentialGPU` - 36 edges
+4. `CylSplinePotentialGPU` - 41 edges
+5. `CompositePotentialGPU` - 40 edges
+6. `tree_gravity_gpu()` - 38 edges
+7. `ShiftedPotentialGPU` - 36 edges
+8. `EvolvingPotentialGPU` - 34 edges
+9. `NFWPotentialGPU` - 33 edges
+10. `load_agama_potential()` - 33 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Backend dispatch table` --references--> `Acceleration timing benchmark: CPU direct vs GPU direct vs FMM/Tree across N particles`  [INFERRED]
@@ -273,23 +258,23 @@
 ## Import Cycles
 - 1-file cycle: `nbody_streams/__init__.py -> nbody_streams/__init__.py`
 
-## Communities (285 total, 114 thin omitted)
+## Communities (270 total, 113 thin omitted)
 
 ### Community 0 - "_make_ic"
-Cohesion: 0.07
-Nodes (42): _com(), _ke(), _make_ic(), _pe(), ndarray, Path, tests/test_physics.py ===================== Physics-level validation tests for n, KE = (1/2) sum_i m_i |v_i|^2. (+34 more)
+Cohesion: 0.06
+Nodes (44): _com(), _ke(), _make_ic(), _pe(), ndarray, Path, tests/test_physics.py ===================== Physics-level validation tests for n, KE = (1/2) sum_i m_i |v_i|^2. (+36 more)
 
 ### Community 1 - "MultipolePotentialGPU"
 Cohesion: 0.05
-Nodes (32): DiskAnsatzPotentialGPU, LogHaloPotentialGPU, DiskAnsatz separable disk potential: Phi(R,z) = f(r) * H(z)     where r = sqrt(R, LogHalo: Phi = (v0^2/2) * ln(rc^2 + x^2 + y^2/p^2 + z^2/q^2)      Constructor ma, CompositePotentialGPU, MultipolePotentialGPU, Sum of GPU potential components : mirrors agama.Potential composite.      Each c, GPU evaluator for an Agama Multipole BFE potential.      Replicates Agama's ``Mu (+24 more)
+Nodes (31): DiskAnsatzPotentialGPU, LogHaloPotentialGPU, MiyamotoNagaiPotentialGPU, DiskAnsatz separable disk potential: Phi(R,z) = f(r) * H(z)     where r = sqrt(R, Miyamoto-Nagai disk: Phi = -GM / sqrt(R^2 + (sqrt(z^2+b^2)+a)^2)     where R^2 =, LogHalo: Phi = (v0^2/2) * ln(rc^2 + x^2 + y^2/p^2 + z^2/q^2)      Constructor ma, MultipolePotentialGPU, GPU evaluator for an Agama Multipole BFE potential.      Replicates Agama's ``Mu (+23 more)
 
 ### Community 2 - "sph_kernels.py"
 Cohesion: 0.13
 Nodes (21): _argsort_morton_2d(), _cubic_spline_2d_gpu(), _cubic_spline_2d_scalar(), _get_smoothing_lengths_cpu(), _get_smoothing_lengths_gpu(), ndarray, sph_kernels.py ============== SPH smoothing-length computation and 2-D surface-d, GPU smoothing-length computation via CuPy KDTree (internal). (+13 more)
 
 ### Community 3 - "_load.py"
-Cohesion: 0.24
-Nodes (4): Definition of a particle species in an N-body simulation.      Parameters     --, Species, TestSpeciesDataclass, TestSplitBySpecies
+Cohesion: 0.12
+Nodes (26): _add_negative_m(), CylSplineCoefs, _detect_expansion_type(), Path, agama_helper._coefs ~~~~~~~~~~~~~~~~~~~ Structured representations of Agama expa, Return lines from any coef source: file path, HDF5 path, or raw string.      Del, Return 'Multipole' or 'CylSpline' from a coef string header, or '' if unknown., Structured representation of a CylSpline (azimuthal harmonic BFE) potential. (+18 more)
 
 ### Community 4 - "_nfw_potential"
 Cohesion: 0.15
@@ -300,8 +285,8 @@ Cohesion: 0.11
 Nodes (21): empirical_circular_velocity_profile(), Generate uniformly random points on the surface of a sphere.      Parameters, r"""Compute the circular velocity profile :math:`v_{\rm circ}(r) = \sqrt{G\,M(<r, uniform_spherical_grid(), plummer_enclosed_mass(), plummer_v_circ(), tests/test_utils.py ===================  Tests for ``nbody_streams.utils`` using, Circular velocity should match analytic Plummer. (+13 more)
 
 ### Community 6 - "__init__.py"
-Cohesion: 0.11
-Nodes (30): ArrayLike, float32, KERNEL_TYPES, nbody_streams.cuda_kernels CUDA kernels for N-body force and potential computati, _compute_forces_cpu(), compute_nbody_forces_cpu(), compute_nbody_forces_gpu(), compute_nbody_potential_cpu() (+22 more)
+Cohesion: 0.10
+Nodes (32): ArrayLike, float32, KERNEL_TYPES, nbody_streams.cuda_kernels CUDA kernels for N-body force and potential computati, _compute_forces_cpu(), compute_nbody_forces_cpu(), compute_nbody_forces_gpu(), compute_nbody_potential_cpu() (+24 more)
 
 ### Community 7 - "`nbody_streams.viz` — Visualization"
 Cohesion: 0.22
@@ -317,11 +302,11 @@ Nodes (44): _compute_vel_disp_from_Potential(), _create_perturber_potential(), _
 
 ### Community 10 - "CylSplinePotentialGPU"
 Cohesion: 0.09
-Nodes (23): CylSplinePotentialGPU, _get_cylspl_kernel(), _get_cylspl_module(), _get_kernel(), _get_module(), _prep_xyz(), ndarray, GPU evaluator for an Agama CylSpline potential.      Replicates Agama's CylSplin (+15 more)
+Nodes (26): _build_cylspline_data(), _clamped_left_cubic_deriv_batch(), CylSplinePotentialGPU, _determine_asympt_cylspline(), _get_cylspl_kernel(), _natural_cubic_deriv_batch(), _prep_xyz(), ndarray (+18 more)
 
 ### Community 11 - "ShiftedPotentialGPU"
-Cohesion: 0.11
-Nodes (8): Agama-compatible eval : see ``MultipolePotentialGPU.eval`` for details., Agama-compatible eval : see ``MultipolePotentialGPU.eval`` for details., Shifted modifier: evaluates ``inner`` at ``xyz - center(t)``.      Parameters, Scaled modifier: ``Phi_s(x,t) = a(t)*s(t) * Phi(x*s(t))`` where ``s(t) = 1/scale, Return (s, a) = (1/scale(t), ampl(t)) with linear extrapolation., Agama-compatible eval : returns any combination of potential, acceleration,, ScaledPotentialGPU, ShiftedPotentialGPU
+Cohesion: 0.10
+Nodes (10): _apply_modifiers(), Agama-compatible eval : see ``MultipolePotentialGPU.eval`` for details., Agama-compatible eval : see ``MultipolePotentialGPU.eval`` for details., Shifted modifier: evaluates ``inner`` at ``xyz - center(t)``.      Parameters, Scaled modifier: ``Phi_s(x,t) = a(t)*s(t) * Phi(x*s(t))`` where ``s(t) = 1/scale, Return (s, a) = (1/scale(t), ampl(t)) with linear extrapolation., Wrap *pot* with Shifted/Scaled modifiers if requested.      ``scale`` may be:, Agama-compatible eval : returns any combination of potential, acceleration, (+2 more)
 
 ### Community 12 - "run_simulation"
 Cohesion: 0.06
@@ -340,32 +325,32 @@ Cohesion: 0.16
 Nodes (22): Compute gravitational accelerations and potential using the GPU tree code     (B, tree_gravity_gpu(), generate_plummer(), Net force = sum(m_i * a_i) should be ~0 for an isolated system., Net torque = sum(r x (m*a)) should be small., Compare 0.5*sum(m*phi_tree) against 0.5*sum(m*phi_direct)., For a spherically symmetric distribution, forces should point inward., Error should not degrade significantly as N grows (same distribution). (+14 more)
 
 ### Community 17 - "__init__.py"
-Cohesion: 0.21
-Nodes (12): create_snapshot_dict(), fit_potential(), ndarray, Path, agama_helper._fit ~~~~~~~~~~~~~~~~~ Fit Agama Multipole and CylSpline potential, Fit Agama Multipole and CylSpline potentials from a multi-species snapshot., Sample *n* positions from a spherically declining density profile., Sample *n* positions from a thin exponential disk. (+4 more)
+Cohesion: 0.12
+Nodes (22): generate_lmax_pairs(), Generate (l, m) pairs for a spherical harmonic expansion.      Parameters     --, create_fire_evolving_ini(), Path, Write an Agama ``Evolving`` ``.ini`` file from a FIRE simulation directory., r"""     Read ``snapshot_times.txt`` from a FIRE simulation directory.      Retu, read_snapshot_times(), create_snapshot_dict() (+14 more)
 
 ### Community 18 - "test_phase2_analytic.py"
-Cohesion: 0.14
-Nodes (21): get_gpu_info(), Get information about available GPU(s).          Returns     -------     info :, nbody_streams - lightweight direct N-body utilities., _compute_accelerations_cpu(), _compute_accelerations_gpu(), _compute_accelerations_tree(), _is_gpu_potential(), make_plummer_sphere() (+13 more)
+Cohesion: 0.09
+Nodes (34): _load_restart(), ndarray, Path, nbody_streams.nbody_io  I/O utilities for N-body snapshots and restart data.  Pr, Append or update snapshot.times in output_dir.     Ensures unique snap_index ent, Worker for N-species parallel extraction.      Args (tuple):         snap_index, Worker executed in a separate process. Reads one snapshot from disk and writes, Extract orbits for selected particle types across snapshots,         using paral (+26 more)
 
 ### Community 19 - "test_advanced.py"
 Cohesion: 0.28
 Nodes (8): Checks which high-performance features are actually active., Runs a tiny GPU simulation and verifies snapshot output., Quick helper to generate test particles (Plummer-like spread)., Runs a tiny CPU simulation and verifies snapshot output., setup_dummy_data(), test_cpu_integration(), test_environment_summary(), test_gpu_integration()
 
 ### Community 21 - "CellData"
-Cohesion: 0.25
-Nodes (8): PendingWork, box, cellFirstChildIndex, cellParentIndex, mempool_offset, nCellmax, nSubNodes_y, octant_mask
+Cohesion: 0.16
+Nodes (11): level, shuffle_cells(), Treecode<real_t>::buildTree(), computeCellMultipoles(), __out, CellData, __device__, packed_data (+3 more)
 
 ### Community 22 - "test_newtons_third_law.py"
-Cohesion: 0.12
-Nodes (29): ndarray, Subdivide every interval of *times* by *factor*, keeping the original nodes., Cubic-spline every coefficient series along the trailing time axis., Resample a coefficient time series onto a new time grid with cubic splines., refine_times(), _spline_block(), spline_resample_coefs(), Tests for cubic-spline resampling of a coefficient time series.  ``spline_resamp (+21 more)
+Cohesion: 0.50
+Nodes (4): _newtons_third_law(), Test that net force is ~0 for isolated system.          Returns:         bool: T, Test all precision modes., test_all_precisions()
 
 ### Community 23 - "_build.py"
 Cohesion: 0.67
 Nodes (3): main(), nbody_streams.tree_gpu._build Console-script entry point: nbody-build-tree  Comp, _tree_gpu_dir()
 
 ### Community 24 - ".radial_power"
-Cohesion: 0.03
-Nodes (43): Stack time-less coefficient snapshots into one object with a time axis.      Gri, Read an Agama expansion into a structured dataclass — one snapshot or many., read_coefs(), stack_coefs(), cylsp3_snaps(), cylsp_snaps(), mult_series(), mult_snaps() (+35 more)
+Cohesion: 0.12
+Nodes (10): MultipoleCoefs, ndarray, Structured representation of a Multipole (spherical harmonic BFE) potential., Maximum l order present in *lm_labels*., Sorted unique l values., Sorted unique m values (includes negatives)., Radial power spectrum for harmonic order *l*.          Parameters         ------, Total power for harmonic order *l* summed over all radial bins.          Paramet (+2 more)
 
 ### Community 26 - "`nbody_streams.utils` — Analysis Utilities"
 Cohesion: 0.08
@@ -377,151 +362,139 @@ Nodes (8): `convert_coords`, `convert_to_vel_los`, `convert_vectors`, Coordinate
 
 ### Community 31 - "Treecode.h"
 Cohesion: 0.11
-Nodes (20): int3, double4, Treecode<real_t>::computeForces(), Treecode<real_t>::computeMultipoles(), computeKeys(), __global__, __host__, __out (+12 more)
+Nodes (21): int3, double4, Treecode<real_t>::computeForces(), Treecode<real_t>::computeMultipoles(), computeKeys(), __global__, __host__, __out (+13 more)
 
 ### Community 32 - "Treecode"
 Cohesion: 0.04
 Nodes (52): Treecode, BUILD_MAX_WORK, BUILD_PENDING_WORK_BYTES, buildTree, cell_max, computeForces, computeMultipoles, d_build_octCounter (+44 more)
 
 ### Community 35 - ".dark"
-Cohesion: 0.10
-Nodes (14): Convenience constructor for dark-matter particles., _plummer_like(), ndarray, run_simulation emits PerformanceWarning for large CPU direct N., Very small Plummer-like ICs for integration tests., Without species kwarg, old dark/star HDF5 schema is written., Verify that debug_energy=True works without errors on all dispatcher paths     t, debug_energy=False (default) must not print energy lines. (+6 more)
+Cohesion: 0.14
+Nodes (11): Convenience constructor for dark-matter particles., _plummer_like(), Very small Plummer-like ICs for integration tests., Without species kwarg, old dark/star HDF5 schema is written., Verify that debug_energy=True works without errors on all dispatcher paths     t, debug_energy=False (default) must not print energy lines., run_simulation must raise TypeError on unknown kwargs for CPU path., run_simulation must raise TypeError on unknown kwargs for GPU direct path. (+3 more)
 
 ### Community 36 - "Species"
-Cohesion: 0.20
-Nodes (4): Convenience constructor for stellar particles., TestParticleReaderMultiSpecies, Multi-species runs must conserve the *total* combined energy and momentum     ac, TestConservationMultiSpecies
+Cohesion: 0.14
+Nodes (11): _build_particle_arrays(), NDArray, Split a combined ``(N_total, 6)`` phase-space array into per-species slices., Definition of a particle species in an N-body simulation.      Parameters     --, Build combined per-particle mass and softening arrays from a species list., Species, _split_by_species(), tests/test_multi_species.py Tests for the multi-species simulation pipeline intr (+3 more)
 
 ### Community 37 - "_potential.py"
-Cohesion: 0.05
-Nodes (54): _apply_modifiers(), _build_cylspline_data(), _build_dehnen_gpu(), _build_disk_gpu(), _build_king_gpu(), _build_multipole_data(), _build_single(), _build_spheroid_gpu() (+46 more)
+Cohesion: 0.06
+Nodes (45): _build_dehnen_gpu(), _build_disk_gpu(), _build_king_gpu(), _build_multipole_data(), _build_single(), _build_spheroid_gpu(), _coerce(), _compute_invPhi0() (+37 more)
 
 ### Community 38 - "nbody_io.py"
 Cohesion: 0.29
 Nodes (17): check_nan_inf(), direct_sum_max_eps(), generate_plummer(), hdr(), Return (result, elapsed_ms) with a surrounding device sync., Small-N O(N^2) direct-sum with tree_gpu max softening convention:       eps2_ij, rel_err_stats(), subhdr() (+9 more)
 
 ### Community 40 - "`nbody_streams.agama_helper`"
-Cohesion: 0.20
-Nodes (10): Center parameter, Contents, Full example: MW potential pipeline, Gotchas, `nbody_streams.agama_helper`, Overview, `read_coef_string(source, group_name="snap_000", dataset_name="coefs") -> str`, `read_coefs(source, group_name="snap_000", dataset_name="coefs", times=None)` (+2 more)
+Cohesion: 0.05
+Nodes (43): 1 — Fit and save coefficient files, 2 — Pack text files into HDF5, 3 — Inspect and modify coefficients, 4 — Load Agama potential, Accuracy (vs Agama CPU), API (matches `agama.Potential`), Center parameter, Coefficient dataclasses (+35 more)
 
 ### Community 41 - "Changelog"
-Cohesion: 0.04
-Nodes (44): [1.0.0] - 2025-XX-XX, [1.1.0] - 2026-02-08, [1.2.0] - 2026-02-14, [1.3.0] - 2026-02-24, [2.0.0] - 2026-02-28, [2.1.0] - 2026-03-07, [2.2.0] - 2026-03-24, [2.3.0] - 2026-05-12 (+36 more)
+Cohesion: 0.05
+Nodes (42): [1.0.0] - 2025-XX-XX, [1.1.0] - 2026-02-08, [1.2.0] - 2026-02-14, [1.3.0] - 2026-02-24, [2.0.0] - 2026-02-28, [2.1.0] - 2026-03-07, [2.2.0] - 2026-03-24, [2.3.0] - 2026-05-12 (+34 more)
 
 ### Community 42 - "test_multi_species.py"
-Cohesion: 0.13
-Nodes (18): ndarray, nbody_streams.sim Unified high-level simulation entry point for multi-species N-, Run a direct N-body simulation with one or more particle species.      This is t, run_simulation(), _build_particle_arrays(), _emit_performance_warnings(), PerformanceWarning, NDArray (+10 more)
+Cohesion: 0.17
+Nodes (13): nbody_streams - lightweight direct N-body utilities., ndarray, nbody_streams.sim Unified high-level simulation entry point for multi-species N-, Run a direct N-body simulation with one or more particle species.      This is t, run_simulation(), _emit_performance_warnings(), PerformanceWarning, nbody_streams.species Species definitions and helper functions for multi-species (+5 more)
 
 ### Community 43 - "Box"
-Cohesion: 0.08
-Nodes (20): MultipoleCoefs, Parse **one** Agama Multipole snapshot into a :class:`MultipoleCoefs`.      Inte, Dispatch one coef string to the parser named by its ``type=`` header., Read one or many Agama Multipole snapshots into a :class:`MultipoleCoefs`., Structured representation of a Multipole (spherical harmonic BFE) potential., Maximum l order present in *lm_labels*., Sorted unique l values., Sorted unique m values (includes negatives). (+12 more)
+Cohesion: 0.10
+Nodes (18): double2, Box, centre, __device__, hsize, float3, __host__, T (+10 more)
 
 ### Community 44 - "_force.py"
 Cohesion: 0.10
-Nodes (23): CDLL, _coerce_eps(), cuda_alive(), _find_cudart(), _gpu_ptr(), ndarray, _force.py  --  ctypes interface to the GPU tree-code gravity shared library.  Su, Return a contiguous float32 CuPy array of length n for eps.      Accepts: (+15 more)
+Nodes (22): CDLL, _coerce_eps(), _find_cudart(), _gpu_ptr(), _max_n(), ndarray, _force.py  --  ctypes interface to the GPU tree-code gravity shared library.  Su, Return a contiguous float32 CuPy array of length n for eps.      Accepts: (+14 more)
 
 ### Community 45 - "buildTree.cu"
-Cohesion: 0.08
-Nodes (18): _check_unique_names(), _CoefTimeAxisMixin, Time-less view at time index *i*.          The returned object shares memory wit, Assert internal shape consistency, naming the offending field on failure., Serialise one snapshot back to the Agama CylSpline text format.          Paramet, Refuse a name/group template that collapses several times onto one target., Time-axis behaviour shared by :class:`MultipoleCoefs` and :class:`CylSplineCoefs, ``True`` when this object carries a trailing time axis. (+10 more)
+Cohesion: 0.10
+Nodes (28): dim3, buildOctant(), buildOctreeHost(), collect_leaves(), compute_level_begIdx(), computeBoundingBox(), computeGridAndBlockSize(), countAtRootNode() (+20 more)
 
 ### Community 46 - "NFWPotentialGPU"
 Cohesion: 0.11
-Nodes (13): NFWPotentialGPU, Navarro-Frenk-White potential optimized with CuPy ElementwiseKernels., Write a potential config file with the given suffix (any extension works)., _is_potential_ini detects multi-section content regardless of extension., [Potential halo] + [Potential disk] headers with a .dat extension., [Potential 0] + [Potential 1] + [Potential 2] (numbered headers)., Plain [Potential] header → single GPU pot, not composite., TYPE = NFW (uppercase) should be recognised. (+5 more)
+Nodes (15): NFWPotentialGPU, Navarro-Frenk-White potential optimized with CuPy ElementwiseKernels., PotentialGPU(), GPU potential factory : mirrors the ``agama.Potential`` API.      Usage     ----, Write a potential config file with the given suffix (any extension works)., _is_potential_ini detects multi-section content regardless of extension., [Potential halo] + [Potential disk] headers with a .dat extension., [Potential 0] + [Potential 1] + [Potential 2] (numbered headers). (+7 more)
 
 ### Community 47 - "_random_xv"
-Cohesion: 0.19
-Nodes (9): Write a snapshot compatible with :class:`ParticleReader`.      Two modes     ---, _save_snapshot(), Validate *species* list against *phase_space* shape.      Checks     ------, _validate_species(), _random_xv(), Old file with only dark particles (no star group)., Random (N, 6) phase space  - tiny, just for IO tests., TestSmartSnapshotIO (+1 more)
+Cohesion: 0.16
+Nodes (9): Write a snapshot compatible with :class:`ParticleReader`.      Two modes     ---, _save_snapshot(), ndarray, _random_xv(), Old file with only dark particles (no star group)., Random (N, 6) phase space  - tiny, just for IO tests., run_simulation emits PerformanceWarning for large CPU direct N., TestRunSimulationValidation (+1 more)
 
 ### Community 48 - "API"
 Cohesion: 0.07
 Nodes (29): AGAMA potential helper (`agama_helper`), Analysis utilities (`utils`), API, Caveats and known limitations, Comparison: direct N-body vs tree methods, Coordinates (`coords`), Dynamical friction with external potentials, Fast stream generation (`fast_sims`) (+21 more)
 
 ### Community 49 - "r"""Fit a spheroid (Zhao / generalised double-power-law) density profile.      I"
-Cohesion: 0.09
-Nodes (25): double2, __forceinline__ Box<T> ChildBox(), __forceinline__ int Particle4<double>::get_idx(), __forceinline__ int Particle4<double>::get_oct(), __forceinline__ int Particle4<double>::set_idx(), __forceinline__ int Particle4<double>::set_oct(), __forceinline__ int Particle4<float>::get_idx(), __forceinline__ int Particle4<float>::get_oct() (+17 more)
+Cohesion: 0.21
+Nodes (5): Validate *species* list against *phase_space* shape.      Checks     ------, Convenience constructor for stellar particles., _validate_species(), TestParticleReaderMultiSpecies, TestValidateSpecies
 
 ### Community 50 - "Particle4"
-Cohesion: 0.11
-Nodes (21): countAtRootNode(), __out, Box, centre, __device__, hsize, __forceinline__, __host__ (+13 more)
+Cohesion: 0.15
+Nodes (20): __forceinline__ Box<T> ChildBox(), __forceinline__ int Particle4<double>::get_idx(), __forceinline__ int Particle4<double>::get_oct(), __forceinline__ int Particle4<double>::set_idx(), __forceinline__ int Particle4<double>::set_oct(), __forceinline__ int Particle4<float>::get_idx(), __forceinline__ int Particle4<float>::get_oct(), __forceinline__ int Particle4<float>::set_idx() (+12 more)
 
 ### Community 51 - "CompositePotentialGPU"
-Cohesion: 0.36
-Nodes (3): host_mem, n, ptr
+Cohesion: 0.09
+Nodes (9): DehnenSphericalPotentialGPU, HernquistPotentialGPU, Hernquist: Phi(r) = -GM / (r + a)      Constructor: HernquistPotentialGPU(mass=1, Dehnen spherical: Phi(r) = -(GM/a) * (1 - (r/(r+a))^(2-gamma)) / (2-gamma)     S, CompositePotentialGPU, _GPUPotBase, Sum of GPU potential components : mirrors agama.Potential composite.      Each c, Build from an agama.Potential by materialising it as a single Multipole (+1 more)
 
 ### Community 52 - "treewalk_warp"
-Cohesion: 0.26
-Nodes (16): approxAcc(), __device__, float2, float3, float4, __forceinline__, __global__, int2 (+8 more)
+Cohesion: 0.16
+Nodes (20): approxAcc(), __device__, float2, float3, float4, __forceinline__, __global__, int2 (+12 more)
 
 ### Community 53 - "treeGPU_interface.cu"
 Cohesion: 0.15
 Nodes (24): float4, __global__, real_t, k_extract_unsorted(), k_load_pos_mass(), k_load_pos_mass_eps(), Res, w (+16 more)
 
 ### Community 54 - "Ellipsoidal radius and particle selection (numba-accelerated).      Computes the"
-Cohesion: 0.07
-Nodes (16): DehnenSphericalPotentialGPU, IsochronePotentialGPU, PlummerPotentialGPU, Plummer sphere: Phi(r) = -GM / sqrt(r^2 + b^2)      Constructor: PlummerPotentia, Dehnen spherical: Phi(r) = -(GM/a) * (1 - (r/(r+a))^(2-gamma)) / (2-gamma)     S, Isochrone: Phi(r) = -GM / (b + sqrt(r^2 + b^2))      Constructor: IsochronePoten, _frel(), GPUTimer (+8 more)
+Cohesion: 0.09
+Nodes (14): IsochronePotentialGPU, PlummerPotentialGPU, Plummer sphere: Phi(r) = -GM / sqrt(r^2 + b^2)      Constructor: PlummerPotentia, Isochrone: Phi(r) = -GM / (b + sqrt(r^2 + b^2))      Constructor: IsochronePoten, _frel(), GPUTimer, _hess_fd_check(), _pts() (+6 more)
 
 ### Community 55 - "Fit an adaptive ellipsoid to a particle distribution and compute shape diagnosti"
-Cohesion: 0.11
-Nodes (21): _is_uniform(), _load_restart(), ndarray, Path, nbody_streams.nbody_io  I/O utilities for N-body snapshots and restart data.  Pr, Append or update snapshot.times in output_dir.     Ensures unique snap_index ent, Worker for N-species parallel extraction.      Args (tuple):         snap_index, Check whether all elements of *arr* are equal to within relative tolerance. (+13 more)
+Cohesion: 0.47
+Nodes (3): _is_uniform(), Check whether all elements of *arr* are equal to within relative tolerance., TestIsUniform
 
 ### Community 56 - "Generate uniformly random points on the surface of a sphere.      Parameters"
 Cohesion: 0.22
 Nodes (7): _make_times_ns(), ParticleReader, A class to read N-body simulation data from one or more HDF5 files.      This re, Convert a raw np.loadtxt array into SimpleNamespace(snap=int_array, time=float_a, Read simulation properties from the first HDF5 file.          Supports two HDF5, Scan HDF5 files and map snapshot index -> file path for fast lookups.          S, Read a single snapshot by index or physical time.          Parameters         --
 
 ### Community 57 - "Generate num_pts points on a sphere using the Fibonacci spiral.      Points are"
-Cohesion: 0.10
-Nodes (17): nbody_streams.tree_gpu ====================== GPU Barnes-Hut tree code for N-bod, ndarray, Run a GPU-tree N-body simulation with KDK leapfrog integration.      Force evalu, Background-thread watchdog for GPU leapfrog loops.      Per-step overhead is ~1, run_nbody_gpu_tree(), _StepWatchdog, _plummer_ic(), ndarray (+9 more)
+Cohesion: 0.12
+Nodes (11): cuda_alive(), Pre-allocated GPU tree handle for time-stepping loops.      Parameters     -----, Return True if the CUDA context has no pending errors.      Uses cudaGetLastErro, TreeGPU, nbody_streams.tree_gpu ====================== GPU Barnes-Hut tree code for N-bod, ndarray, nbody_streams.tree_gpu.run_gpu_tree ==================================== KDK lea, Run a GPU-tree N-body simulation with KDK leapfrog integration.      Force evalu (+3 more)
 
 ### Community 58 - "Implementation internals"
 Cohesion: 0.08
 Nodes (24): Availability flag, Build system details, Building the shared library, ctypes interface (`_force.py`), `cuda_alive`, Data structures, Float32 note, `G_DEFAULT` (+16 more)
 
 ### Community 59 - "Find the density peak by locating the minimum gravitational potential.      Uses"
-Cohesion: 0.10
-Nodes (6): HernquistPotentialGPU, MiyamotoNagaiPotentialGPU, Hernquist: Phi(r) = -GM / (r + a)      Constructor: HernquistPotentialGPU(mass=1, Miyamoto-Nagai disk: Phi = -GM / sqrt(R^2 + (sqrt(z^2+b^2)+a)^2)     where R^2 =, _GPUPotBase, Mixin giving every GPU potential class ``+`` composition and ``sum()`` support.
+Cohesion: 0.20
+Nodes (10): Example: basic self-gravity, Example: resume from crash, Example: with external potential, GPU memory management, Integration scheme, Parameters, Raises, Returns (+2 more)
 
 ### Community 60 - "computeMultipoles.cu"
-Cohesion: 0.12
-Nodes (20): buildOctreeHost(), collect_leaves(), compute_level_begIdx(), computeBoundingBox(), float4, __global__, int2, T (+12 more)
+Cohesion: 0.32
+Nodes (6): addMonopole(), addQuadrupole(), __device__, double4, real_t, Treecode<float>
 
 ### Community 61 - "TreeGPU"
-Cohesion: 0.08
-Nodes (32): CylSplineCoefs, Return a copy with all m terms **not** in *keep_m* zeroed out.          Paramete, Return a deep copy — no array, list or dict is shared with *self*., Read one or many Agama CylSpline snapshots into a :class:`CylSplineCoefs`., Structured representation of a CylSpline (azimuthal harmonic BFE) potential., read_cylspl_coefs(), Regression tests for section-aware CylSpline coefficient parsing.  An Agama ``Cy, ``to_coef_string`` output for a Phi-only file must not have changed. (+24 more)
+Cohesion: 0.13
+Nodes (12): _extract_int_from_group(), Extract first integer from a group name for numeric sorting (e.g. 'snap_042' → 4, load_agama_evolving_potential(), _parse_evolving_ini(), Path, Build a time-evolving Agama potential from an HDF5 archive or a native     Agama, Parse an Agama ``Evolving`` potential ``.ini`` config file.      Returns     ---, _require_agama() (+4 more)
 
 ### Community 62 - "test_chandrasekhar.py"
 Cohesion: 0.24
 Nodes (7): Iterative shrinking-sphere centre-of-mass estimator.      At each iteration the, _shrinking_sphere_com(), CoM should converge close to the true cloud centre., All particles at same position → CoM = that position exactly., With one dominant dense clump + sparse background, CoM should         land in th, r_sphere must be positive and smaller than the full cloud extent., TestShrinkingSphereCom
 
-### Community 63 - "vec<3,double>"
-Cohesion: 0.14
-Nodes (15): _as_times(), _check_presence(), _check_stackable(), _describe_grid_mismatch(), ndarray, Attach or relabel the time axis.          Nothing is interpolated, smoothed or r, Common pre-conditions for stacking: time-less, valid, matching headers., Explain how grid *a* differs from reference *b* — shape, or first value. (+7 more)
+### Community 63 - "compute_nbody_forces_gpu"
+Cohesion: 0.23
+Nodes (11): _plummer_ic(), ndarray, Path, tests/test_snapshot_schedule.py Regression tests: the GPU-tree backend must writ, The schedule formula itself: exactly `snapshots` entries ending at n_steps., Small cold blob — physics is irrelevant here, only the I/O schedule is., Return (sorted snapshot ids, snap_time per id) across all snapshot files., _read_schedule() (+3 more)
 
-### Community 64 - "vec<2,float>"
-Cohesion: 0.14
-Nodes (17): _as_existing_path(), _is_source_sequence(), Path, Return lines from any coef source: file path, HDF5 path, or raw string.      Del, Split a CylSpline line stream into ``#Phi`` / ``#dPhi/dR`` / ``#dPhi/dz`` blocks, Expand any accepted *source* into raw coef strings plus resolved times.      Ret, Parse **one** Agama CylSpline snapshot into a :class:`CylSplineCoefs`.      Inte, Is *obj* a sequence of coefficient sources rather than a single one?      ``str` (+9 more)
+### Community 65 - "vec<4,float>"
+Cohesion: 0.50
+Nodes (3): float4, vec<4,float>, __device__
 
-### Community 65 - "_find_cudart"
-Cohesion: 0.24
-Nodes (6): GroupData, __device__, packed_data, __host__, int2, uint4
-
-### Community 66 - ".alloc"
-Cohesion: 0.18
-Nodes (11): Coefficient time axis, `column(l, m) -> int`  (Multipole only), `copy() -> MultipoleCoefs \| CylSplineCoefs`, Introspection properties, Methods (both classes unless noted), Module-level: `stack_coefs(items, times) -> MultipoleCoefs | CylSplineCoefs`, `radial_power` / `total_power` with a time axis, `snapshot(i) -> MultipoleCoefs \| CylSplineCoefs`  (alias: `obj[i]`) (+3 more)
+### Community 66 - "_find_cudart"
+Cohesion: 0.50
+Nodes (3): double4, vec<4,double>, __device__
 
 ### Community 67 - "make_df_force_extra"
 Cohesion: 0.14
 Nodes (11): _is_gpu_potential(), make_df_force_extra(), Build a ``force_extra`` closure that applies Chandrasekhar dynamical     frictio, True when *pot* is from the PotentialGPU family (nbody_streams.agama_helper)., DF is a rigid-body force — all particles within the core get the same         ac, Net DF acceleration should point opposite to bulk CoM velocity., Between correction steps, CoM should be predicted, not recalculated., Without Agama the factory should raise ImportError. (+3 more)
 
-### Community 69 - "computeMultipoles.cu"
-Cohesion: 0.32
-Nodes (6): addMonopole(), addQuadrupole(), __device__, double4, real_t, Treecode<float>
-
-### Community 70 - "_validate_species"
-Cohesion: 0.20
-Nodes (10): Example: basic self-gravity, Example: resume from crash, Example: with external potential, GPU memory management, Integration scheme, Parameters, Raises, Returns (+2 more)
-
-### Community 71 - "TreeGPU"
-Cohesion: 0.32
-Nodes (3): _max_n(), Pre-allocated GPU tree handle for time-stepping loops.      Parameters     -----, TreeGPU
+### Community 69 - "vec<3,double>"
+Cohesion: 0.50
+Nodes (3): double3, vec<3,double>, __device__
 
 ### Community 72 - "transforms.py"
 Cohesion: 0.17
@@ -535,69 +508,37 @@ Nodes (25): compute_sigma_r(), _jeans_sigma_r(), ndarray, nbody_streams._chandra
 Cohesion: 0.15
 Nodes (20): _calculate_particle_distances_sq(), _calculate_Rsphall_and_extract(), _compute_weighted_structure_tensor(), _density_peak_center(), fibonacci_sphere_grid(), find_center(), find_center_position(), fit_iterative_ellipsoid() (+12 more)
 
-### Community 76 - "vec<4,float>"
-Cohesion: 0.22
-Nodes (9): Coefficient dataclasses, `CylSplineCoefs`, `MultipoleCoefs`, `radial_power(l, use_quadrature=True) -> ndarray`, `to_coef_string() -> str`, `to_coef_string() -> str`, `total_power(l, use_quadrature=True) -> float`, `zeroed(keep_lm) -> MultipoleCoefs` (+1 more)
-
 ### Community 77 - "plot_density"
 Cohesion: 0.15
 Nodes (8): Axes, AxesImage, Colormap, plot_density(), Any, Generate a projected density image (imshow) from particle data.      Accepts par, imshow extent should be [-gridsize/2, gridsize/2] on both axes., TestPlotDensity
-
-### Community 78 - "computeGridAndBlockSize"
-Cohesion: 0.67
-Nodes (3): dim3, computeGridAndBlockSize(), __forceinline__
-
-### Community 79 - "minmax_block"
-Cohesion: 0.67
-Nodes (3): __device__, float2, minmax_block()
-
-### Community 80 - "Writers and materialization"
-Cohesion: 0.29
-Nodes (7): `materialize_potential(*, center=None, interp_linear=True, gpu=False)`, `to_coef_files(out_dir, name_fmt="snap_{i:04d}{ext}") -> list[str]`, `to_coef_string(t=None) -> str`, `to_coef_strings() -> list[str]`, `to_evolving_ini(ini_path, out_dir=None, interp_linear=True) -> str`, `to_h5(path, group_fmt="snap_{i:04d}", dataset_name="coefs", overwrite=True, write_times=True) -> str`, Writers and materialization
 
 ### Community 81 - "run_nbody_gpu"
 Cohesion: 0.18
 Nodes (11): Constants, Contents, Example: direct method with specific kernel, Example: tree method, make_plummer_sphere, Method selection guidance, `nbody_streams.run`, Parameters (+3 more)
 
-### Community 83 - "GPU potential evaluation (PotentialGPU)"
-Cohesion: 0.33
-Nodes (6): Accuracy (vs Agama CPU), API (matches `agama.Potential`), Factory: `PotentialGPU(...)`, GPU potential evaluation (PotentialGPU), Requirements, Supported types
-
-### Community 84 - "FIRE helpers"
-Cohesion: 0.33
-Nodes (6): `create_fire_evolving_ini(sim_dir, model_pattern, output_filename, snap_range=None, verbose=True) -> str`, FIRE helpers, `load_fire_pot(sim_dir, nsnap, sym="n", lmax=4, kind="whole", keep_lm_mult=None, keep_m_cylspl=None, include_negative_m=True, file_ext="DR", out_acc=False, halo=None, verbose=True, return_coefs=False, save_modified=False, save_dir=None)`, `read_snapshot_times(sim_dir, sep=r'\s+') -> pandas.DataFrame`, `refine_times(times, factor=10) -> ndarray`, `spline_resample_coefs(coefs, times_new) -> MultipoleCoefs | CylSplineCoefs`
-
 ### Community 85 - "Dynamical friction"
-Cohesion: 0.11
-Nodes (19): Caveats, Centre-of-mass detection, Contents, df_* kwargs reference, Dynamical friction, Dynamical friction timescales, Fallback path — direct integrators (no phi), Fallback path: `_shrinking_sphere_com` (direct integrators) (+11 more)
+Cohesion: 0.09
+Nodes (23): Caveats, Centre-of-mass detection, Chandrasekhar formula (BT2008 eq. 8.13), Contents, Core-stalling suppression, Coulomb logarithm, df_* kwargs reference, Dynamical friction (+15 more)
 
 ### Community 86 - "cuda_primitives.h"
-Cohesion: 0.23
-Nodes (18): buildOctant(), addBoxSize(), atomicAdd_double(), __forceinline__(), __device__, real_t, inclusive_scan_warp(), inclusive_segscan_warp() (+10 more)
-
-### Community 87 - "Quick-start workflow"
-Cohesion: 0.40
-Nodes (5): 1 — Fit and save coefficient files, 2 — Pack text files into HDF5, 3 — Inspect and modify coefficients, 4 — Load Agama potential, Quick-start workflow
+Cohesion: 0.24
+Nodes (17): addBoxSize(), atomicAdd_double(), __forceinline__(), __device__, real_t, inclusive_scan_warp(), inclusive_segscan_warp(), inclusive_segscan_warp_step() (+9 more)
 
 ### Community 88 - "validate_masses"
 Cohesion: 0.15
 Nodes (18): empirical_velocity_anisotropy_profile(), fit_dehnen_profile(), fit_plummer_profile(), r"""Compute the velocity anisotropy parameter :math:`\beta(r)`.      .. math::, r"""Fit a triaxial Dehnen profile by mapping to ellipsoidal radius.      Compute, r"""Fit a spherical Plummer profile to particle data.      Bins particles into l, ndarray, nbody_streams.utils._validation ================================  Shared input-v (+10 more)
 
 ### Community 89 - "_io.py"
-Cohesion: 0.07
-Nodes (49): _add_negative_m(), _detect_expansion_type(), generate_lmax_pairs(), agama_helper._coefs ~~~~~~~~~~~~~~~~~~~ Structured representations of Agama expa, Return 'Multipole' or 'CylSpline' from a coef string header, or '' if unknown., Generate (l, m) pairs for a spherical harmonic expansion.      Parameters     --, Expand (l, m) pairs to include their negative-m counterparts.      Each (l, m) w, create_fire_evolving_ini() (+41 more)
+Cohesion: 0.18
+Nodes (15): _get_fast_tmp_dir(), Any, Path, agama_helper._io ~~~~~~~~~~~~~~~~ HDF5 archive I/O, fast temporary-file helpers,, Store an Agama coefficient text string in an HDF5 archive.      The archive is c, Batch-write Agama coefficient files for multiple snapshots into HDF5 archives., Return fastest writable temp dir: /dev/shm (RAM-backed on Linux) or system tmp., Read the raw Agama coefficient text from a file or HDF5 archive.      Parameters (+7 more)
 
 ### Community 90 - "TestBoundCenterPhi"
 Cohesion: 0.16
 Nodes (10): _bound_center_phi(), Phi-energy iterative bound-particle centre.      Finds the centre of the gravita, Return a cluster at r0 on the x-axis with a bulk y-velocity., Simple pairwise Plummer phi (exact for small N test)., Returned CoM should be close to the cluster centre., For a self-gravitating cluster with low velocity dispersion, bound         parti, make_df_force_extra closure should accept and use phi kwarg., Unbound particles (phi + 0.5 v_rel^2 >= 0) should get zero DF. (+2 more)
 
-### Community 91 - "test_newtons_third_law.py"
-Cohesion: 0.50
-Nodes (4): _newtons_third_law(), Test that net force is ~0 for isolated system.          Returns:         bool: T, Test all precision modes., test_all_precisions()
-
 ### Community 92 - "AGAMA_GPU"
-Cohesion: 0.10
-Nodes (19): Accuracy, AGAMA_GPU, Analytic — `_analytic_potentials.py`, API, Coefficient objects — one snapshot or a whole time series, Composite types, CylSpl BFE - `CylSplinePotentialGPU`, File layout (+11 more)
+Cohesion: 0.12
+Nodes (15): Accuracy, AGAMA_GPU, Analytic — `_analytic_potentials.py`, API, Composite types, CylSpl BFE - `CylSplinePotentialGPU`, File layout, Known gotchas (+7 more)
 
 ### Community 93 - "Quadrupole"
 Cohesion: 0.20
@@ -607,17 +548,13 @@ Nodes (7): real_t, Quadrupole, __device__, q0, q1, real2_t, real4_t
 Cohesion: 0.24
 Nodes (8): maxeach(), mineach(), operator *(), vector3, x, y, z, REAL
 
-### Community 95 - "Loading Agama potentials"
-Cohesion: 0.50
-Nodes (4): `create_evolving_ini(times, coef_paths, output_path, interp_linear=True) -> str`, `load_agama_evolving_potential(source, times=None, *, group_names=None, dataset_name="coefs", center=None, interp_linear=True, keep_lm_mult=None, keep_m_cylspl=None, include_negative_m=True, gpu=False)`, `load_agama_potential(source, group_name="snap_000", dataset_name="coefs", center=None, keep_lm_mult=None, keep_m_cylspl=None, include_negative_m=True, gpu=False)`, Loading Agama potentials
+### Community 95 - "load_agama_potential"
+Cohesion: 0.36
+Nodes (8): make_axisym(), make_halo(), test_zero_pruning.py ~~~~~~~~~~~~~~~~~~~~ Benchmarks zero-coefficient pruning (P, Full FIRE halo: all (l,m) up to lmax, non-zero for most., Axisymmetric (m=0, even l only): maximum pruning benefit., test_correctness(), test_speedup(), timeit()
 
 ### Community 96 - "test_phase1_multipole.py"
 Cohesion: 0.29
 Nodes (14): _make_from_agama(), _make_from_coef_file(), _pts(), test_phase1_multipole.py ~~~~~~~~~~~~~~~~~~~~~~~~ Tests MultipolePotentialGPU ag, Load coef file, cap at lmax, return (agama_pot, gpu_pot)., Export agama_pot as Multipole BFE, load into GPU., _rel_force(), _rel_phi() (+6 more)
-
-### Community 97 - "Physics and formulae"
-Cohesion: 0.50
-Nodes (4): Chandrasekhar formula (BT2008 eq. 8.13), Core-stalling suppression, Coulomb logarithm, Physics and formulae
 
 ### Community 99 - "plots.py"
 Cohesion: 0.13
@@ -652,8 +589,8 @@ Cohesion: 0.18
 Nodes (10): AGAMA_GPU — Development Notes, Architecture decisions, File layout, INI loading (multi-section, case-insensitive), Kernel design, Non-uniform grid resampling, Numerical precision, Outer extrapolation (+2 more)
 
 ### Community 107 - "test_phase3_cylspline.py"
-Cohesion: 0.15
-Nodes (21): load_agama_potential(), Load a single-snapshot Agama potential from any coefficient source.      Accepts, Default gpu=False returns agama.Potential, not a GPU object., _pts(), test_phase3_cylspline.py ~~~~~~~~~~~~~~~~~~~~~~~~ Tests CylSplinePotentialGPU ag, Random Cartesian points inside a sphere, avoiding z-axis., _rel_deriv(), _rel_force() (+13 more)
+Cohesion: 0.21
+Nodes (14): load_agama_potential(), Load a single-snapshot Agama potential from any coefficient source.      Accepts, Load from an Agama .coef_cylsp file., Default gpu=False returns agama.Potential, not a GPU object., _pts(), test_phase3_cylspline.py ~~~~~~~~~~~~~~~~~~~~~~~~ Tests CylSplinePotentialGPU ag, Random Cartesian points inside a sphere, avoiding z-axis., _rel_deriv() (+6 more)
 
 ### Community 108 - "cuda_mem"
 Cohesion: 0.25
@@ -663,9 +600,9 @@ Nodes (4): cuda_mem, n, ptr, T
 Cohesion: 0.31
 Nodes (3): plot_stream_evolution(), Three-panel evolution plot: galactocentric distance, bound fraction     (or 3-D, TestPlotStreamEvolution
 
-### Community 110 - "vec<3,double>"
-Cohesion: 0.50
-Nodes (3): double3, vec<3,double>, __device__
+### Community 110 - "host_mem"
+Cohesion: 0.27
+Nodes (3): host_mem, n, ptr
 
 ### Community 111 - "get_smoothing_lengths"
 Cohesion: 0.15
@@ -678,10 +615,6 @@ Nodes (8): error_report(), generate_plummer(), Run with a small N and check that
 ### Community 113 - "Public API"
 Cohesion: 0.25
 Nodes (8): `create_ic_particle_spray_chen2025`, `create_ic_particle_spray_fardal2015`, `create_particle_spray_stream`, Dynamical friction, `nbody_streams.fast_sims` — Fast Stream Generation, Perturber potential, Public API, `run_restricted_nbody`
-
-### Community 114 - "vec<3,float>"
-Cohesion: 0.50
-Nodes (3): float3, vec<3,float>, __device__
 
 ### Community 115 - "_multipole_potential_kernel.cu"
 Cohesion: 0.39
@@ -711,13 +644,9 @@ Nodes (4): Potential, When quasispherical DF fails, _common should use Jeans, no
 Cohesion: 0.50
 Nodes (5): Chandrasekhar dynamical friction, Orbital decay mass dependence comparison (Sat A vs Sat B, t_DF proportional to 1/M_sat), Satellite A final surface density (M_sat=5e10 Msun, post-inspiral), Satellite A orbital decay with/without DF (M_sat=5e10 Msun), Satellite B orbit stability plot (M_sat=1e7 Msun, DF negligible)
 
-### Community 122 - "Potential fitting"
-Cohesion: 0.67
-Nodes (3): `create_snapshot_dict(pos_dark, mass_dark, pos_star=None, mass_star=None, pos_gas=None, mass_gas=None, temperature_gas=None) -> dict`, `fit_potential(snap, nsnap, *, sym="n", lmax=4, rmax_sel=300.0, rmax_exp=None, file_ext="", save_dir="potential/", halo=None, kind="both", center=None, rotation=None, verbose=True, subsample_factor=1, cold_temp_log10_thresh=4.5) -> dict[str, list[str]]`, Potential fitting
-
-### Community 123 - "HDF5 I/O"
-Cohesion: 0.67
-Nodes (3): HDF5 I/O, `write_coef_to_h5(h5_path, coef_string, group_name="snap_000", dataset_name="coefs", overwrite=False, metadata=None)`, `write_snapshot_coefs_to_h5(snapshot_ids, coef_file_patterns, h5_output_paths, group_fmt="snap_{snap:03d}", dataset_name="coefs", overwrite=True, encoding="utf-8", times=None)`
+### Community 125 - "vec<2,float>"
+Cohesion: 0.50
+Nodes (3): float2, vec<2,float>, __device__
 
 ### Community 126 - "empirical_velocity_rms_profile"
 Cohesion: 0.50
@@ -740,24 +669,24 @@ Cohesion: 0.20
 Nodes (10): `extract_orbits`, HDF5 snapshot format, Internal I/O functions, `_load_restart`, `nbody_streams.nbody_io` — HDF5 Snapshot I/O, `ParticleReader`, `read_snapshot`, `_save_restart` (+2 more)
 
 ## Knowledge Gaps
-- **489 isolated node(s):** `vec`, `__device__`, `__device__`, `__device__`, `__device__` (+484 more)
+- **466 isolated node(s):** `vec`, `__device__`, `__device__`, `__device__`, `__device__` (+461 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **114 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **113 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `_GPUPotBase` connect `Find the density peak by locating the minimum gravitational potential.      Uses` to `MultipolePotentialGPU`, `make_df_force_extra`, `_potential.py`, `EvolvingPotentialGPU`, `_jeans_sigma_r`, `CylSplinePotentialGPU`, `Box`, `ShiftedPotentialGPU`, `_AnalyticBase`, `NFWPotentialGPU`, `test_phase2_analytic.py`, `Ellipsoidal radius and particle selection (numba-accelerated).      Computes the`, `Fit an adaptive ellipsoid to a particle distribution and compute shape diagnosti`, `TreeGPU`?**
-  _High betweenness centrality (0.105) - this node is a cross-community bridge._
-- **Why does `Species` connect `_load.py` to `_make_ic`, `.dark`, `Species`, `.test_circular_orbit_decays`, `test_multi_species.py`, `_random_xv`, `test_phase2_analytic.py`, `Fit an adaptive ellipsoid to a particle distribution and compute shape diagnosti`, `Generate uniformly random points on the surface of a sphere.      Parameters`, `Generate num_pts points on a sphere using the Fibonacci spiral.      Points are`?**
-  _High betweenness centrality (0.055) - this node is a cross-community bridge._
-- **Why does `MultipoleCoefs` connect `Box` to `MultipolePotentialGPU`, `_potential.py`, `EvolvingPotentialGPU`, `CylSplinePotentialGPU`, `test_phase3_cylspline.py`, `ShiftedPotentialGPU`, `buildTree.cu`, `test_newtons_third_law.py`, `.radial_power`, `_io.py`, `Find the density peak by locating the minimum gravitational potential.      Uses`, `vec<3,double>`?**
-  _High betweenness centrality (0.032) - this node is a cross-community bridge._
+- **Why does `_GPUPotBase` connect `CompositePotentialGPU` to `MultipolePotentialGPU`, `_load.py`, `make_df_force_extra`, `_potential.py`, `EvolvingPotentialGPU`, `_jeans_sigma_r`, `CylSplinePotentialGPU`, `ShiftedPotentialGPU`, `_AnalyticBase`, `NFWPotentialGPU`, `test_phase2_analytic.py`, `Ellipsoidal radius and particle selection (numba-accelerated).      Computes the`, `.radial_power`, `Generate num_pts points on a sphere using the Fibonacci spiral.      Points are`?**
+  _High betweenness centrality (0.100) - this node is a cross-community bridge._
+- **Why does `Species` connect `Species` to `_make_ic`, `.dark`, `.test_circular_orbit_decays`, `test_multi_species.py`, `_random_xv`, `r"""Fit a spheroid (Zhao / generalised double-power-law) density profile.      I`, `test_phase2_analytic.py`, `Fit an adaptive ellipsoid to a particle distribution and compute shape diagnosti`, `Generate uniformly random points on the surface of a sphere.      Parameters`, `Generate num_pts points on a sphere using the Fibonacci spiral.      Points are`?**
+  _High betweenness centrality (0.062) - this node is a cross-community bridge._
+- **Why does `PotentialGPU()` connect `NFWPotentialGPU` to `MultipolePotentialGPU`, `_load.py`, `_potential.py`, `test_phase3_cylspline.py`, `ShiftedPotentialGPU`, `__init__.py`, `CompositePotentialGPU`, `Ellipsoidal radius and particle selection (numba-accelerated).      Computes the`?**
+  _High betweenness centrality (0.027) - this node is a cross-community bridge._
 - **Are the 21 inferred relationships involving `Species` (e.g. with `ParticleReader` and `_StepWatchdog`) actually correct?**
   _`Species` has 21 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 25 inferred relationships involving `MultipolePotentialGPU` (e.g. with `DehnenSphericalPotentialGPU` and `DiskAnsatzPotentialGPU`) actually correct?**
   _`MultipolePotentialGPU` has 25 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 19 inferred relationships involving `CylSplinePotentialGPU` (e.g. with `DehnenSphericalPotentialGPU` and `DiskAnsatzPotentialGPU`) actually correct?**
   _`CylSplinePotentialGPU` has 19 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `nbody_streams - lightweight direct N-body utilities.`, `nbody_streams._chandrasekhar ============================ Chandrasekhar dynamica`, `Convert a CuPy or NumPy array to a plain NumPy array (zero-copy when     possibl` to the rest of the system?**
-  _1010 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Are the 23 inferred relationships involving `CompositePotentialGPU` (e.g. with `DehnenSphericalPotentialGPU` and `DiskAnsatzPotentialGPU`) actually correct?**
+  _`CompositePotentialGPU` has 23 INFERRED edges - model-reasoned connections that need verification._
