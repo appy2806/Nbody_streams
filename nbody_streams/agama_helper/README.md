@@ -244,11 +244,31 @@ l>0 errors are a numerical floor from log-scaling derivative cancellation — bo
 
 ## Requirements
 
-- CUDA GPU (tested on NVIDIA L40)
-- `cupy >= 10.0` (matching CUDA version)
-- `nvcc` accessible on PATH
+Always required (CPU-only stack):
+
+- `numpy`, `h5py`
 - `scipy` (quintic spline construction; falls back gracefully if missing)
 - `agama` (for `Disk`/`Spheroid`/`King`/`Dehnen` types that use CPU export to build BFE)
+
+Required **only** for the `*PotentialGPU` classes:
+
+- CUDA GPU (tested on NVIDIA L40)
+- `cupy >= 10.0` (matching CUDA version) — `pip install 'nbody_streams[cuda]'`
+- `nvcc` accessible on PATH
+
+CuPy is optional.  `import nbody_streams.agama_helper` succeeds without it, and
+everything that does not touch the GPU — `read_coefs`, `load_agama_potential`,
+`load_agama_evolving_potential`, the HDF5 writers, the FIRE helpers, the coef
+dataclasses — works unchanged.  Constructing or evaluating a GPU potential on
+such an install raises an `ImportError` naming the missing package:
+
+```python
+from nbody_streams import agama_helper as ah
+
+ah.CUPY_AVAILABLE          # False on a CPU-only install
+pot = ah.load_agama_potential("MW_mult.h5", group_name="snap_090")   # fine
+pot = ah.PotentialGPU(...)  # ImportError: ... pip install 'nbody_streams[cuda]'
+```
 
 ---
 
@@ -262,6 +282,7 @@ agama_helper/
   _load.py                          <- load_agama_potential / load_agama_evolving_potential (cpu + gpu= flag)
   _coefs.py                         <- MultipoleCoefs / CylSplineCoefs (optional time axis), readers, stack_coefs
   _io.py                            <- HDF5 archive I/O, temp-file helpers, source resolution
+  _cupy.py                          <- optional-CuPy shim: real cupy, or a stub that raises on GPU use
   _fit.py                           <- BFE fitting from an N-body snapshot
   _fire.py                          <- FIRE-specific loaders and Evolving .ini generation
   tests/

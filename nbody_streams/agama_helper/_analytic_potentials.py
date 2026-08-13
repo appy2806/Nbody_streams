@@ -29,6 +29,10 @@ Note on King and Spheroid:
     These are materialised as Multipole expansions by Agama at construction time.
     Use MultipolePotentialGPU.from_agama(agama.Potential(type='King', ...))
     to load them as GPU Multipole potentials.
+
+CuPy is an optional dependency of the package.  This module imports without it;
+constructing or evaluating any potential below then raises a descriptive
+ImportError pointing at ``pip install 'nbody_streams[cuda]'``.
 """
 
 from __future__ import annotations
@@ -40,10 +44,13 @@ from typing import Tuple, Union
 
 import numpy as np
 
+# CuPy is optional (see _cupy.py): without it the kernels below become
+# placeholders that raise a descriptive ImportError when first called, so the
+# module still imports on CPU-only installs.
 try:
-    import cupy as cp
-except ImportError as _err:
-    raise ImportError("CuPy is required.") from _err
+    from ._cupy import cp
+except ImportError:                             # direct script execution
+    from _cupy import cp                        # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Physical constants
