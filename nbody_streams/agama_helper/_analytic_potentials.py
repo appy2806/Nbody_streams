@@ -34,6 +34,8 @@ Note on King and Spheroid:
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
+from pathlib import Path
 from typing import Tuple, Union
 
 import numpy as np
@@ -78,10 +80,18 @@ def _squeeze(arr, single):
 # isinstance-detectable base class as the BFE potentials.
 # _potential.py only imports _analytic_potentials lazily (inside functions),
 # so this top-level import is safe — no circular dependency.
+# ``_AgamaTimeSpline`` lives alongside the other spline helpers in _potential.py
+# because the Shifted/Scaled modifiers use it too.
 try:
-    from nbody_streams.agama_helper._potential import _GPUPotBase as _GPUPotBase
+    from nbody_streams.agama_helper._potential import (
+        _GPUPotBase as _GPUPotBase,
+        _AgamaTimeSpline as _AgamaTimeSpline,
+    )
 except ImportError:
-    from _potential import _GPUPotBase as _GPUPotBase
+    from _potential import (  # noqa: E402
+        _GPUPotBase as _GPUPotBase,
+        _AgamaTimeSpline as _AgamaTimeSpline,
+    )
 
 
 class _AnalyticBase(_GPUPotBase):
@@ -1120,6 +1130,36 @@ class DiskAnsatzPotentialGPU(_AnalyticBase):
 # UniformAcceleration
 # ---------------------------------------------------------------------------
 
+def _read_accel_table(src) -> _AgamaTimeSpline:
+    """Build the acceleration spline from Agama's ``file=`` argument.
+
+    Accepts what ``agama.Potential(type='UniformAcceleration', file=...)``
+    accepts: a path to a whitespace-separated text file, or the equivalent
+    array already loaded in memory.
+
+    * ``(T, 4)`` --- ``[t, ax, ay, az]``, regularized natural cubic spline.
+    * ``(T, 7)`` --- ``[t, ax, ay, az, dax/dt, day/dt, daz/dt]``, Hermite spline.
+    """
+    if isinstance(src, _AgamaTimeSpline):
+        return src
+
+    if isinstance(src, (str, Path)):
+        arr = np.loadtxt(str(src), comments=('#', ';'))
+    else:
+        arr = np.asarray(src, dtype=np.float64)
+
+    arr = np.atleast_2d(arr)
+    if arr.ndim != 2 or arr.shape[1] not in (4, 7):
+        raise ValueError(
+            "UniformAcceleration file= must be a (T,4) table [t, ax, ay, az] "
+            "or a (T,7) table [t, ax, ay, az, dax/dt, day/dt, daz/dt]; "
+            f"got shape {arr.shape}."
+        )
+    if arr.shape[1] == 7:
+        return _AgamaTimeSpline(arr[:, 0], arr[:, 1:4], arr[:, 4:7])
+    return _AgamaTimeSpline(arr[:, 0], arr[:, 1:4])
+
+
 _uniform_phi_kernel = cp.ElementwiseKernel(
     'T x, T y, T z, T ax, T ay, T az', 'T out',
     'out = -(ax*x + ay*y + az*z);', 
@@ -1138,42 +1178,155 @@ _uniform_grad_kernel = cp.ElementwiseKernel(
 
 class UniformAccelerationGPU(_AnalyticBase):
     """
-    Uniform (spatially constant) acceleration: F = (ax, ay, az).
-    Phi(x,y,z) = -ax*x - ay*y - az*z  (Phi = x·(-a))
+    Spatially uniform, optionally time-dependent acceleration ``a(t)``, arising
+    from working in a non-inertial reference frame (e.g. the MW disc frame
+    accelerating towards an infalling LMC).
 
-    Constructor: UniformAccelerationGPU(ax=0, ay=0, az=0)
-    Time-varying acceleration: pass ax/ay/az as scalars evaluated at the desired time.
+    ``Phi(x, t) = -a(t)·x``, so the force is ``+a(t)`` everywhere and both the
+    Hessian and the density are identically zero.
+
+    Matches Agama's ``UniformAcceleration`` (``potential_composite.h``).
+
+    Constructors
+    ------------
+    Constant acceleration::
+
+        UniformAccelerationGPU(ax=0.01, ay=-0.02, az=0.005)
+
+    Time-dependent acceleration, mirroring
+    ``agama.Potential(type='UniformAcceleration', file=...)``::
+
+        acc = np.loadtxt('accMW')            # (T, 4): t, ax, ay, az
+        UniformAccelerationGPU(file=acc)
+        UniformAccelerationGPU(file='path/to/accMW')
+
+    Parameters
+    ----------
+    ax, ay, az : float, optional
+        Constant acceleration components [(km/s)^2/kpc]. Ignored when
+        ``file`` is given.
+    file : str, Path or array-like, optional
+        Time-dependent acceleration table, either a path to a whitespace-
+        separated text file or the equivalent array:
+
+        * ``(T, 4)`` --- ``[t, ax, ay, az]``, interpolated with a **regularized
+          natural cubic spline** (Agama's ``math::CubicSpline(..., reg=true)``).
+        * ``(T, 7)`` --- ``[t, ax, ay, az, dax/dt, day/dt, daz/dt]``,
+          interpolated with a cubic Hermite spline.
+
+        Outside the tabulated range the acceleration is extrapolated linearly
+        from the endpoint value and derivative, as Agama does.
+
+    Notes
+    -----
+    Time interpolation happens on the CPU once per call (O(log T)); the GPU
+    kernels see three plain floats, so a time-dependent instance costs the same
+    per particle as a constant one.
     """
 
-    def __init__(self, ax: float = 0.0, ay: float = 0.0, az: float = 0.0):
-        self._ax = float(ax)
-        self._ay = float(ay)
-        self._az = float(az)
+    def __init__(self, ax: float = 0.0, ay: float = 0.0, az: float = 0.0,
+                 file=None):
+        if file is not None:
+            self._spline = _read_accel_table(file)
+            a0 = self._spline(float(self._spline.times[0]))
+            self._ax, self._ay, self._az = (float(a0[0]), float(a0[1]), float(a0[2]))
+        else:
+            self._spline = None
+            self._ax = float(ax)
+            self._ay = float(ay)
+            self._az = float(az)
+
+    @property
+    def is_time_dependent(self) -> bool:
+        return self._spline is not None and self._spline.times.size > 1
 
     @classmethod
     def from_agama(cls, pot) -> "UniformAccelerationGPU":
         raise TypeError(
             "UniformAccelerationGPU.from_agama() is not supported: Agama does not export "
-            "analytic potential parameters.\n"
-            "Construct directly:  UniformAccelerationGPU(ax=..., ay=..., az=...)"
+            "the acceleration table of a UniformAcceleration potential.\n"
+            "Rebuild it from the same source you passed to Agama:\n"
+            "    UniformAccelerationGPU(file=acc_table)        # (T,4) array or path\n"
+            "    UniformAccelerationGPU(ax=..., ay=..., az=...)  # constant"
         )
 
-    def _phi(self, x, y, z):
-        return _uniform_phi_kernel(x, y, z, self._ax, self._ay, self._az)
+    def _a_at(self, t: float) -> Tuple[float, float, float]:
+        """Acceleration components at time *t*."""
+        if self._spline is None:
+            return self._ax, self._ay, self._az
+        a = self._spline(float(t))
+        return float(a[0]), float(a[1]), float(a[2])
 
-    def _grad(self, x, y, z):
-        # dPhi/dx = -ax, etc. (constant)
+    # --- kernel hooks -------------------------------------------------------
+    # The base class calls these without a time; the public methods below
+    # override that so the requested time actually reaches the kernels.
+
+    def _phi(self, x, y, z, t: float = 0.0):
+        ax, ay, az = self._a_at(t)
+        return _uniform_phi_kernel(x, y, z, ax, ay, az)
+
+    def _grad(self, x, y, z, t: float = 0.0):
+        # dPhi/dx = -ax, etc. (uniform in space)
+        ax, ay, az = self._a_at(t)
         out = cp.empty((x.size, 3), dtype=x.dtype)
-        _uniform_grad_kernel(x, y, z, self._ax, self._ay, self._az, out)
+        _uniform_grad_kernel(x, y, z, ax, ay, az, out)
         return out
 
-    def _hess(self, x, y, z):
-        # Always zero for a linear potential
+    def _hess(self, x, y, z, t: float = 0.0):
+        # Always zero for a potential linear in x --- no time dependence
         return cp.zeros((x.size, 6), dtype=x.dtype)
 
-    def _rho(self, x, y, z):
-        # Laplacian of linear function = 0
+    def _rho(self, x, y, z, t: float = 0.0):
+        # Laplacian of a linear function = 0 (Agama returns 0 here too)
         return cp.zeros(x.size, dtype=x.dtype)
+
+    # --- public API: identical to _AnalyticBase but threading *t* through ----
+
+    def potential(self, xyz, t: float = 0.0) -> cp.ndarray:
+        arr, single = _prep_xyz(xyz)
+        return _squeeze(self._phi(arr[:, 0], arr[:, 1], arr[:, 2], t), single)
+
+    def force(self, xyz, t: float = 0.0) -> cp.ndarray:
+        arr, single = _prep_xyz(xyz)
+        return _squeeze(-self._grad(arr[:, 0], arr[:, 1], arr[:, 2], t), single)
+
+    def forceDeriv(self, xyz, t: float = 0.0):
+        arr, single = _prep_xyz(xyz)
+        x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
+        f = -self._grad(x, y, z, t)
+        h = self._hess(x, y, z, t)
+        return (f[0], -h[0]) if single else (f, -h)
+
+    def evalDeriv(self, xyz, t: float = 0.0):
+        arr, single = _prep_xyz(xyz)
+        x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
+        phi  = self._phi(x, y, z, t)
+        f    = -self._grad(x, y, z, t)
+        d    = -self._hess(x, y, z, t)
+        return (phi[0], f[0], d[0]) if single else (phi, f, d)
+
+    def eval(self, xyz, pot: bool = False, acc: bool = False,
+             der: bool = False, t: float = 0.0):
+        if not (pot or acc or der):
+            raise ValueError("eval(): at least one of pot, acc, der must be True.")
+        arr, single = _prep_xyz(xyz)
+        x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
+        results = []
+        if pot:
+            results.append(_squeeze(self._phi(x, y, z, t), single))
+        if acc:
+            results.append(_squeeze(-self._grad(x, y, z, t), single))
+        if der:
+            results.append(_squeeze(-self._hess(x, y, z, t), single))
+        return results[0] if len(results) == 1 else tuple(results)
+
+    def __repr__(self) -> str:
+        if self.is_time_dependent:
+            tk = self._spline.times
+            return (f"UniformAccelerationGPU(file=<{tk.size} rows, "
+                    f"t=[{tk[0]:g}, {tk[-1]:g}]>)")
+        return (f"UniformAccelerationGPU(ax={self._ax:g}, "
+                f"ay={self._ay:g}, az={self._az:g})")
 
 
 

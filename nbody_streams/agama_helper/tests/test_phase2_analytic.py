@@ -142,7 +142,7 @@ MODELS = [
      dict(type='Dehnen', mass=1e12, scaleRadius=5.0, gamma=1.5),
      None, _TOL_A),
 
-    # DiskAnsatz and UniformAcceleration don't exist as standalone Agama types
+    # DiskAnsatz doesn't exist as a standalone Agama type
     ("DiskAnsatz (exp)  [GPU only]",
      lambda: DiskAnsatzPotentialGPU(surfaceDensity=1e8, scaleRadius=3.0, scaleHeight=0.3),
      None, None, _TOL_A),
@@ -151,9 +151,25 @@ MODELS = [
      lambda: DiskAnsatzPotentialGPU(surfaceDensity=1e8, scaleRadius=3.0, scaleHeight=-0.3),
      None, None, _TOL_A),
 
-    ("UniformAccel [GPU only]",
+    # UniformAcceleration takes its parameters through file=, so a constant is a
+    # one-row table.  The time-dependent form lives in test_uniform_acceleration.py.
+    ("UniformAccel (constant)",
      lambda: UniformAccelerationGPU(ax=0.01, ay=-0.02, az=0.005),
-     None, None, _TOL_A),
+     dict(type='UniformAcceleration', file=np.array([[0.0, 0.01, -0.02, 0.005]])),
+     None, _TOL_A),
+
+    ("UniformAccel (t-dependent, t=0)",
+     lambda: UniformAccelerationGPU(
+         file=np.column_stack([np.linspace(-14., 0., 64),
+                               30. * np.sin(0.7 * np.linspace(-14., 0., 64)),
+                               120. * np.exp(0.3 * np.linspace(-14., 0., 64)),
+                               50. * np.cos(0.4 * np.linspace(-14., 0., 64))])),
+     dict(type='UniformAcceleration',
+          file=np.column_stack([np.linspace(-14., 0., 64),
+                                30. * np.sin(0.7 * np.linspace(-14., 0., 64)),
+                                120. * np.exp(0.3 * np.linspace(-14., 0., 64)),
+                                50. * np.cos(0.4 * np.linspace(-14., 0., 64))])),
+     None, _TOL_A),
 
     # ------------------------------------------------------------------
     # Category B — Agama CPU → Multipole export → MultipolePotentialGPU

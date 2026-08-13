@@ -59,3 +59,6 @@ graphify-out/cost.json
 *.o
 *.so
 *.a
+
+# local feature task notes, not for the repo
+new_feat_task.md

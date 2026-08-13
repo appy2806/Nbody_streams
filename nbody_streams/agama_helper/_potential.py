@@ -40,9 +40,10 @@ import os
 import tempfile
 import uuid
 import warnings
+from bisect import bisect_right
 from pathlib import Path
 from typing import Tuple, Union
-from scipy.interpolate import CubicSpline, CubicHermiteSpline
+from scipy.interpolate import CubicHermiteSpline
 
 import numpy as np
 
@@ -1217,6 +1218,143 @@ def _natural_cubic_deriv_batch(t: np.ndarray, Y: np.ndarray) -> np.ndarray:
     return np.vstack([dy, dy_last])
 
 
+# Hyman (1983) slope limiter uses 3 shaved by one ulp, exactly as Agama's
+# math_spline.cpp::regularizeSpline, so that monotonic input stays monotonic.
+_HYMAN_THREE = 3 - 3e-15
+
+
+def _regularize_deriv(t: np.ndarray, F: np.ndarray, D: np.ndarray) -> np.ndarray:
+    """Hyman (1983) slope limiter applied to natural-cubic-spline derivatives.
+
+    Port of Agama ``math_spline.cpp::regularizeSpline``, batched over the
+    columns of *F* / *D*.
+
+    Parameters
+    ----------
+    t : (n,) strictly increasing knots
+    F : (n, m) values at the knots
+    D : (n, m) first derivatives from the natural cubic spline
+
+    Returns
+    -------
+    (n, m) limited derivatives (a copy; *D* is not modified)
+    """
+    n = t.shape[0]
+    D = np.array(D, dtype=np.float64, copy=True)
+    if n < 2:
+        return D
+
+    sec = np.diff(F, axis=0) / np.diff(t)[:, None]        # (n-1, m) secants
+
+    # Boundary knots: clip into [0, 3*sec] (or [3*sec, 0] when sec < 0).
+    for i, k in ((0, 0), (n - 1, n - 2)):
+        s  = sec[k]
+        lo = np.where(s >= 0, 0.0, _HYMAN_THREE * s)
+        hi = np.where(s >= 0, _HYMAN_THREE * s, 0.0)
+        D[i] = np.clip(D[i], lo, hi)
+
+    # Interior knots: limit |D| to 3*min(|secL|, |secR|); the sign follows the
+    # secants when they agree, otherwise the unlimited derivative keeps its sign.
+    if n > 2:
+        secL, secR = sec[:-1], sec[1:]
+        mag = np.minimum(np.abs(D[1:-1]),
+                         _HYMAN_THREE * np.minimum(np.abs(secL), np.abs(secR)))
+        sgn = np.where(secL * secR >= 0, np.sign(secL), np.sign(D[1:-1]))
+        D[1:-1] = mag * sgn
+
+    return D
+
+
+class _AgamaTimeSpline:
+    """Time interpolation of a K-vector, bit-compatible with Agama.
+
+    Reproduces ``potential_factory.cpp::readTimeDependentArray`` +
+    ``math::CubicSpline``:
+
+    * values only   : natural cubic spline with the Hyman regularization filter
+      (``agama.Spline(t, y, reg=True)``) --- **not** SciPy's default
+      ``not-a-knot`` spline, which gives visibly different results near the
+      endpoints.
+    * values + first derivatives : cubic Hermite spline, no regularization.
+    * a single row  : constant.
+
+    Outside the knot range the spline is extrapolated **linearly** using the
+    endpoint value and derivative, matching Agama's ``CubicSpline::evalDeriv``.
+
+    Evaluated on the CPU at a scalar time --- O(log n) per call, negligible
+    next to any GPU kernel launch.
+    """
+
+    def __init__(self, times: np.ndarray, vals: np.ndarray,
+                 ders: np.ndarray | None = None) -> None:
+        times = np.ascontiguousarray(times, dtype=np.float64)
+        vals  = np.ascontiguousarray(vals,  dtype=np.float64)
+        if times.ndim != 1 or vals.ndim != 2 or vals.shape[0] != times.size:
+            raise ValueError("times must be (n,) and vals (n, K) with matching n.")
+        if not np.all(np.isfinite(times)) or not np.all(np.isfinite(vals)):
+            raise ValueError("Non-finite entries in the time-dependent table.")
+
+        if times.size > 1 and not np.all(np.diff(times) > 0):
+            order = np.argsort(times, kind='stable')
+            times, vals = times[order], vals[order]
+            if ders is not None:
+                ders = np.asarray(ders, dtype=np.float64)[order]
+            if not np.all(np.diff(times) > 0):
+                raise ValueError("Duplicate timestamps in the time-dependent table.")
+
+        self._t = times
+        self._f = vals
+
+        if times.size == 1:
+            self._d = np.zeros_like(vals)
+        elif ders is not None:
+            # Hermite: Agama does not regularize when derivatives are supplied.
+            self._d = np.ascontiguousarray(ders, dtype=np.float64)
+            if self._d.shape != vals.shape:
+                raise ValueError("Derivative table must have the same shape as the values.")
+        else:
+            self._d = _regularize_deriv(times, vals,
+                                        _natural_cubic_deriv_batch(times, vals))
+
+        # Python-list mirrors of the knot data.  __call__ runs once per
+        # potential/force evaluation, so scalar float arithmetic on lists is
+        # ~9x cheaper than NumPy row arithmetic here (and bit-identical).
+        self._tl = self._t.tolist()
+        self._fl = [tuple(r) for r in self._f.tolist()]
+        self._dl = [tuple(r) for r in self._d.tolist()]
+
+    @property
+    def times(self) -> np.ndarray:
+        return self._t
+
+    def __call__(self, t: float) -> tuple:
+        """Value of the K-vector at scalar time *t*, as a tuple of K floats."""
+        tk, fl, dl = self._tl, self._fl, self._dl
+        if len(tk) == 1:
+            return fl[0]
+
+        if t < tk[0]:                       # linear extrapolation, as Agama
+            dt, f0, d0 = t - tk[0], fl[0], dl[0]
+            return tuple(f0[k] + d0[k] * dt for k in range(len(f0)))
+        if t >= tk[-1]:
+            dt, fN, dN = t - tk[-1], fl[-1], dl[-1]
+            return tuple(fN[k] + dN[k] * dt for k in range(len(fN)))
+
+        i  = bisect_right(tk, t) - 1
+        ta = tk[i]
+        h  = tk[i + 1] - ta
+        s  = (t - ta) / h
+        s2 = s * s
+        s3 = s2 * s
+        # Cubic Hermite basis on [t_i, t_i+1]
+        c0 = 2 * s3 - 3 * s2 + 1
+        m0 = (s3 - 2 * s2 + s) * h
+        c1 = -2 * s3 + 3 * s2
+        m1 = (s3 - s2) * h
+        fa, fb, da, db = fl[i], fl[i + 1], dl[i], dl[i + 1]
+        return tuple(c0 * fa[k] + m0 * da[k] + c1 * fb[k] + m1 * db[k]
+                     for k in range(len(fa)))
+
 def _clamped_left_cubic_deriv_batch(t: np.ndarray, Y: np.ndarray,
                                     left_deriv: float = 0.0) -> np.ndarray:
     """
@@ -1836,9 +1974,16 @@ class ShiftedPotentialGPU(_GPUPotBase):
     center : array-like, two accepted forms (mirrors Agama):
 
         * **Static** : shape ``(3,)``: ``[x0, y0, z0]``
-        * **Trajectory** : shape ``(T, 4)``: each row is ``[t, x, y, z]``.
-          Center is linearly interpolated at the requested time.
-          Clamped to the first/last entry outside the time range.
+        * **Trajectory** : shape ``(T, 4)``: each row is ``[t, x, y, z]``,
+          interpolated with a **regularized natural** cubic spline (Agama's
+          ``math::CubicSpline(..., reg=true)`` --- *not* SciPy's default
+          not-a-knot spline).
+        * **Trajectory with velocities** : shape ``(T, 7)``:
+          ``[t, x, y, z, vx, vy, vz]``, interpolated with a cubic Hermite
+          spline.
+
+        Outside the tabulated range the center is extrapolated linearly from
+        the endpoint value and slope, matching Agama.
 
     Examples
     --------
@@ -1854,59 +1999,25 @@ class ShiftedPotentialGPU(_GPUPotBase):
     def __init__(self, inner, center) -> None:
         self._inner = inner
         center = np.asarray(center, dtype=np.float64)
-        
+
         if center.ndim == 1 and center.shape == (3,):
             self._is_static = True
             self._center_static = center
         elif center.ndim == 2 and center.shape[1] >= 4:
             self._is_static = False
-            
-            # Monotonically increasing times are required for interpolation; check and enforce this.
-            if not np.all(center[1:, 0] > center[:-1, 0]):
-                center = center[center[:, 0].argsort()]
-
-            self._times = center[:, 0]
-            pos = center[:, 1:4]
-            
-            if center.shape[1] >= 7:
-                # 7-column: Time, Position, Velocity -> Hermite (Cubic matching velocities)
-                vel = center[:, 4:7]
-                self._spline = CubicHermiteSpline(self._times, pos, vel)
-            else:
-                # 4-column: Time, Position -> Standard Cubic Spline
-                self._spline = CubicSpline(self._times, pos, bc_type='not-a-knot')
-
-            # Cache Boundary Values for Extrapolation
-            self._t0 = self._times[0]
-            self._tN = self._times[-1]
-            
-            # Position at boundaries
-            self._pos0 = self._spline(self._t0)
-            self._posN = self._spline(self._tN)
-            
-            # Velocity at boundaries (1st derivative)
-            # Even for 4-col data, SciPy calculates the derivative at the edge.
-            self._vel0 = self._spline(self._t0, 1)
-            self._velN = self._spline(self._tN, 1)       
+            # 4-column: [t, x, y, z]        -> regularized natural cubic spline
+            # 7-column: [t, x, y, z, vx, vy, vz] -> Hermite spline
+            # Agama reads center= through the same readTimeDependentArray<3> it
+            # uses for UniformAcceleration, so the interpolation must match:
+            # natural BC + Hyman filter, and linear extrapolation at both ends.
+            vel = center[:, 4:7] if center.shape[1] >= 7 else None
+            self._spline = _AgamaTimeSpline(center[:, 0], center[:, 1:4], vel)
         else:
             raise ValueError("Center must be (3,) or (T, 4) or (T, 7).")
 
-    def _center_at(self, t: float) -> np.ndarray:
-        # Case A: Static Center
+    def _center_at(self, t: float):
         if self._is_static:
             return self._center_static
-        
-        # Case B: Extrapolate Backward (t < start) 
-        if t < self._t0:
-            dt = t - self._t0
-            return self._pos0 + self._vel0 * dt
-        
-        # Case C: Extrapolate Forward (t > end)
-        if t > self._tN:
-            dt = t - self._tN
-            return self._posN + self._velN * dt
-        
-        # Case D: Standard Interpolation (inside domain)
         return self._spline(t)
 
     def _shift(self, xyz, t: float = 0.0):
@@ -1954,7 +2065,8 @@ class ScaledPotentialGPU(_GPUPotBase):
     scale : float  **or**  array-like
         * ``float`` : static spatial scale factor.
         * ``(T, 2)`` : time-varying scale: each row is ``[t, scale(t)]``.
-          CubicSpline fit; linear extrapolation outside the time range.
+          Regularized natural cubic spline (matching Agama); linear
+          extrapolation outside the time range.
           ``ampl`` stays at the provided scalar value.
         * ``(T, 3)`` : time-varying scale *and* amplitude: rows ``[t, ampl(t), scale(t)]``.
           Matches Agama's ``scale=`` file format (K=2 values per row).
@@ -1994,29 +2106,13 @@ class ScaledPotentialGPU(_GPUPotBase):
             times = arr[:, 0]
 
         self._is_static = False
-        self._times     = times
-        self._t0        = float(times[0])
-        self._tN        = float(times[-1])
 
-        # Scale spline
-        scales           = arr[:, -1]   # last column is always scale
-        self._scale_spl  = CubicSpline(times, scales, bc_type='not-a-knot')
-        self._scale0     = float(self._scale_spl(self._t0))
-        self._scaleN     = float(self._scale_spl(self._tN))
-        self._dscale0    = float(self._scale_spl(self._t0, 1))
-        self._dscaleN    = float(self._scale_spl(self._tN, 1))
-
-        # Amplitude spline (only for (T,3))
-        if arr.shape[1] == 3:
-            ampls           = arr[:, 1]
-            self._ampl_spl  = CubicSpline(times, ampls, bc_type='not-a-knot')
-            self._ampl0     = float(self._ampl_spl(self._t0))
-            self._amplN     = float(self._ampl_spl(self._tN))
-            self._dampl0    = float(self._ampl_spl(self._t0, 1))
-            self._damplN    = float(self._ampl_spl(self._tN, 1))
-        else:
-            self._ampl_spl = None
-
+        # Agama reads scale= through readTimeDependentArray<2>, i.e. the same
+        # regularized natural cubic spline (and linear extrapolation) used for
+        # center= and UniformAcceleration --- not SciPy's default not-a-knot.
+        # (T,2) -> one spline for scale; (T,3) -> [ampl, scale] together.
+        self._spline   = _AgamaTimeSpline(times, arr[:, 1:])
+        self._has_ampl = arr.shape[1] == 3
         self._ampl_val = float(ampl)   # scalar fallback / override for (T,2) case
 
     def _sa(self, t: float):
@@ -2024,29 +2120,9 @@ class ScaledPotentialGPU(_GPUPotBase):
         if self._is_static:
             return 1.0 / self._scale_val, self._ampl_val
 
-        # Scale
-        if t < self._t0:
-            dt = t - self._t0
-            sc = self._scale0 + self._dscale0 * dt
-        elif t > self._tN:
-            dt = t - self._tN
-            sc = self._scaleN + self._dscaleN * dt
-        else:
-            sc = float(self._scale_spl(t))
-        s = 1.0 / sc
-
-        # Amplitude
-        if self._ampl_spl is None:
-            a = self._ampl_val
-        elif t < self._t0:
-            dt = t - self._t0
-            a  = self._ampl0 + self._dampl0 * dt
-        elif t > self._tN:
-            dt = t - self._tN
-            a  = self._amplN + self._damplN * dt
-        else:
-            a = float(self._ampl_spl(t))
-
+        vals = self._spline(t)
+        s    = 1.0 / vals[-1]          # last column is always scale
+        a    = vals[0] if self._has_ampl else self._ampl_val
         return s, a
 
     def potential(self, xyz, t: float = 0.0):
@@ -2499,6 +2575,20 @@ def _load_potential_ini(p: Path):
                 built.append(CylSplinePotentialGPU.from_file(coef_path))
             continue
 
+        # ---- UniformAcceleration: file= holds the acceleration table ----
+        if type_ == 'uniformacceleration':
+            acc_file = params.get('file') or params.get('File')
+            if acc_file is None:
+                raise ValueError(
+                    f"UniformAcceleration section in {p} has no 'file' key "
+                    "(the time-dependent acceleration table)."
+                )
+            acc_path = Path(str(acc_file))
+            if not acc_path.is_absolute():
+                acc_path = base / acc_path
+            built.append(PotentialGPU(type='UniformAcceleration', file=acc_path))
+            continue
+
         # ---- Evolving: parse Timestamps block ----
         if type_ == 'evolving':
             if data_kind != 'ts':
@@ -2595,11 +2685,10 @@ def _build_single(source, pot_kw: dict):
             return _load_potential_ini(p)
         return MultipolePotentialGPU.from_file(source, **pot_kw)
 
-    # Already a GPU potential object (any class) : pass through
-    if callable(getattr(source, 'potential', None)) and callable(getattr(source, 'force', None)):
-        return source
-
-    if type(source).__name__ == "Potential":
+    # NOTE: an agama.Potential also has callable .potential/.force, so it must be
+    # matched *before* the duck-typed GPU pass-through below — otherwise the CPU
+    # object is handed straight back and never converted.
+    if type(source).__name__ == "Potential" and type(source).__module__ == "agama":
         try:
             n = source.nComponents
         except AttributeError:
@@ -2608,7 +2697,23 @@ def _build_single(source, pot_kw: dict):
             return CompositePotentialGPU(
                 [_build_single(source[i], pot_kw) for i in range(n)]
             )
+        # Agama exports no parameters for UniformAcceleration, so it cannot be
+        # round-tripped through the object — say so instead of silently fitting
+        # a Multipole to a potential that is linear in x.
+        # (Agama's Python wrapper exposes the type only through repr().)
+        if repr(source).startswith('UniformAcceleration'):
+            raise TypeError(
+                "Cannot convert an agama UniformAcceleration component: Agama does "
+                "not expose its acceleration table.\nRebuild it on the GPU side from "
+                "the same input, e.g.\n"
+                "    PotentialGPU(type='UniformAcceleration', file=acc_table)\n"
+                "and add it to the other components with '+' or PotentialGPU(...)."
+            )
         return MultipolePotentialGPU.from_agama(source, **pot_kw)
+
+    # Already a GPU potential object (any class) : pass through
+    if callable(getattr(source, 'potential', None)) and callable(getattr(source, 'force', None)):
+        return source
 
     raise TypeError(
         f"Cannot build a GPU potential from {type(source).__name__!r}. "
@@ -2717,6 +2822,13 @@ def PotentialGPU(*args,
                     "type='Multipole' requires file= to specify the coefficient file."
                 )
             pot = MultipolePotentialGPU.from_file(file, **pot_kw)
+            return _apply_modifiers(pot, center, scale, ampl)
+        # UniformAcceleration takes file= as the time-dependent acceleration
+        # table, not as a coefficient file — route it so file= is honoured
+        # instead of being silently dropped by the analytic map below.
+        if key == 'uniformacceleration' and file is not None:
+            amap = _get_analytic_map()
+            pot  = amap[key](file=file, **_normalize_params(kw))
             return _apply_modifiers(pot, center, scale, ampl)
         amap = _get_analytic_map()
         cls  = amap.get(key)

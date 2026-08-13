@@ -680,6 +680,7 @@ from nbody_streams.agama_helper import PotentialGPU
 | Analytic: `NFW`, `Plummer`, `Hernquist`, `Isochrone` | Direct CuPy kernel |
 | Analytic: `MiyamotoNagai`, `LogHalo`/`Logarithmic` | Direct CuPy kernel |
 | Analytic: `DehnenSpherical` (γ ∈ [0,2)) | Direct CuPy kernel |
+| Analytic: `UniformAcceleration` (constant or time-dependent) | Direct CuPy kernel |
 | `Disk` | `CompositePotentialGPU(DiskAnsatzGPU + MultipolePotentialGPU)` |
 | `Spheroid`, `King` | Agama CPU export → `MultipolePotentialGPU` |
 | Multi-component `.ini` / any text file with `[Potential]` | `CompositePotentialGPU` |
@@ -722,6 +723,15 @@ pot = PotentialGPU(mc.zeroed([(0,0),(2,0)]))
 
 # From agama.Potential (exports to BFE)
 pot = PotentialGPU(agama.Potential(type='Spheroid', ...))
+# Only types Agama actually exports coefficients for (Multipole, CylSpline,
+# Spheroid, King, ...).  Agama analytic types store no parameters on export,
+# so those raise with a message telling you to use type= instead.
+
+# Non-inertial frame: spatially uniform, time-dependent acceleration
+acc = np.loadtxt('accMW')                       # (T,4): t, ax, ay, az
+pot = PotentialGPU(type='UniformAcceleration', file=acc)
+pot = PotentialGPU(type='UniformAcceleration', file='accMW')      # or a path
+pot = PotentialGPU(type='UniformAcceleration', ax=0.01, ay=0., az=0.)  # constant
 
 # Composite: variadic positional args
 pot = PotentialGPU(pot_halo, pot_disk, pot_lmc)
@@ -753,6 +763,62 @@ F, dF = pot.eval(xyz, acc=True, der=True)
 `forceDeriv` returns `dF = [dFx/dx, dFy/dy, dFz/dz, dFx/dy, dFy/dz, dFz/dx]`
 matching `agama.Potential.forceDeriv` exactly.
 
+### `UniformAcceleration` — non-inertial reference frame
+
+Φ(**x**, t) = −**a**(t)·**x**, so the force is **a**(t) everywhere and both the
+Hessian and the density are identically zero (Agama returns zero for these
+too — its density is the Laplacian of a potential that is linear in **x**).
+
+This is the term you add when integrating in the MW disc frame while the halo
+is being accelerated by an infalling satellite:
+
+```python
+import numpy as np
+from nbody_streams.agama_helper import PotentialGPU
+
+accMW = np.loadtxt('accMW_McM17streams')   # (T, 4): t, ax, ay, az
+
+pot = (PotentialGPU(file='MW_mult.coef_mul_DR')
+       + PotentialGPU(coefs_lmc, center=lmc_traj[:, :4])
+       + PotentialGPU(type='UniformAcceleration', file=accMW))
+
+F = pot.force(xyz, t=-3.5)     # t is required — the acceleration varies with it
+```
+
+**Input forms** (all identical to `agama.Potential(type='UniformAcceleration', file=...)`):
+
+| `file=` | Interpretation |
+|---|---|
+| `(T, 4)` array or path | `[t, ax, ay, az]` → regularized natural cubic spline |
+| `(T, 7)` array or path | `[t, ax, ay, az, dax/dt, day/dt, daz/dt]` → cubic Hermite spline |
+| omitted, with `ax=/ay=/az=` | constant acceleration, no time dependence |
+
+An INI section works too:
+
+```ini
+[Potential accel]
+type = UniformAcceleration
+file = accMW_McM17streams      ; resolved relative to the INI file
+```
+
+**Time interpolation.**  The 4-column form uses a **natural** cubic spline with
+Agama's Hyman (1983) regularization filter — matching
+`agama.Spline(t, a, reg=True)` to machine precision.  This is *not*
+`scipy.interpolate.CubicSpline`'s default `not-a-knot` spline; the two differ
+noticeably near the endpoints and around sharp jumps.  Outside the tabulated
+range the acceleration is extrapolated linearly from the endpoint value and
+slope, again as Agama does.
+
+**Cost.**  Interpolation happens once per call on the CPU (O(log T), ~1.5 µs
+for a 900-row table); the CuPy kernels receive three plain floats.  A
+time-dependent instance therefore costs a flat ~2–7 µs more per `force()` call
+than a constant one, independent of N — under 1 % at N ≥ 10⁶.
+
+**What is not supported.**  `UniformAccelerationGPU.from_agama()` and
+`PotentialGPU(<agama UniformAcceleration object>)` both raise: Agama does not
+expose the acceleration table through the Python object, so there is nothing to
+read back. Rebuild from the same array or file you gave Agama.
+
 ### Accuracy (vs Agama CPU)
 
 | Component | phi rel err | force rel err |
@@ -761,6 +827,7 @@ matching `agama.Potential.forceDeriv` exactly.
 | Multipole l>0 harmonics | ~1e-7 | ~1e-5 |
 | Disk composite (DiskAnsatz + Multipole lmax=32) | ~1e-6 | ~2e-6 |
 | Analytic (NFW, Hernquist, etc.) | ~1e-15 | ~1e-15 |
+| `UniformAcceleration` (constant and time-dependent) | ~1e-14 | ~1e-15 |
 
 l>0 errors are a numerical floor from log-scaling derivative cancellation —
 both GPU and Agama CPU hit the same floor.  BFE fitting error for N-body data
@@ -803,6 +870,29 @@ pot = ah.load_agama_potential(source, center="orbit_mw.txt")
 
 The temporary file created for 2-D arrays is cleaned up in the same `finally`
 block as the coefficient temporary.
+
+### Time interpolation of `center=` and `scale=`
+
+Agama reads `center=`, `scale=` and the `UniformAcceleration` table through the
+same `readTimeDependentArray`, so the GPU path uses one shared interpolator for
+all three:
+
+| Input | Interpolation |
+|---|---|
+| values only — `center` `(T,4)`, `scale` `(T,2)`/`(T,3)` | **natural** cubic spline + Hyman (1983) regularization filter |
+| values + derivatives — `center` `(T,7)` | cubic Hermite spline |
+| outside the tabulated range | linear, from the endpoint value and slope |
+
+This matches `agama.Spline(t, y, reg=True)` to machine precision. It is *not*
+`scipy.interpolate.CubicSpline`'s default `not-a-knot` spline — on a 40-sample
+trajectory the two differ by tens of pc, shrinking to sub-pc by ~300 samples, so
+the gap matters most when a trajectory is subsampled (e.g. `traj[0::100, :4]`).
+
+One API difference worth noting: Agama's `scale=` always carries *two* values
+`A(t), S(t)` — a static value is the string `"A S"` and a time table is `(T,3)`
+`[t, ampl, scale]`. The `(T,2)` `[t, scale]` form accepted by
+`ScaledPotentialGPU` is a GPU-side convenience that takes `ampl` from the
+separate keyword.
 
 ---
 
