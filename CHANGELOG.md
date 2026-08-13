@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Time-dependent `UniformAcceleration` on the GPU.**  `UniformAccelerationGPU`
+  previously accepted only constant `ax/ay/az`, which meant the form actually
+  used in practice — `agama.Potential(type='UniformAcceleration', file=accMW)`,
+  the non-inertial MW-frame term from an infalling LMC — had no GPU equivalent.
+  It now takes `file=`, accepting the same inputs Agama does:
+
+  ```python
+  accMW = np.loadtxt('accMW_McM17streams')     # (T, 4): t, ax, ay, az
+  pot   = PotentialGPU(type='UniformAcceleration', file=accMW)
+  F     = pot.force(xyz, t=-3.5)
+  ```
+
+  A `(T,4)` table is interpolated with a **natural** cubic spline plus Agama's
+  Hyman (1983) regularization filter, reproducing `agama.Spline(t, a, reg=True)`
+  to machine precision — deliberately *not* SciPy's default `not-a-knot` spline,
+  which differs near the endpoints and around sharp jumps.  A `(T,7)` table
+  `[t, a, da/dt]` uses a cubic Hermite spline.  Outside the tabulated range the
+  acceleration is extrapolated linearly from the endpoint value and slope, as in
+  Agama.  Accepted as an array or a file path, through `PotentialGPU(type=...)`,
+  a `[Potential]` INI section (relative paths resolved against the INI), or a
+  component dict.
+
+  Interpolation is a CPU-side O(log T) lookup once per call, so a time-dependent
+  instance costs a flat ~2–7 µs more per `force()` than a constant one,
+  independent of N.  Verified against Agama CPU at ~1e-14 (potential) and
+  ~1e-15 (force) in `tests/test_uniform_acceleration.py`.
+
+
 - **Optional trailing time axis on the coefficient dataclasses.**
   `MultipoleCoefs` and `CylSplineCoefs` now hold either a single snapshot or a
   whole time series in the *same* class.  Time is always the last array axis
@@ -73,6 +101,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the string path on fixtures quantised to the text format.
 
 ### Fixed
+
+- **`file=` was silently dropped for `UniformAcceleration`.**
+  `PotentialGPU(type='UniformAcceleration', file=acc)` ignored `file=` — only
+  `CylSpline` and `Multipole` honoured it — and returned a zero-acceleration
+  no-op instead of raising.  Simulations built this way ran with no reflex
+  acceleration at all, with nothing in the output to indicate it.
+
+- **`center=` and `scale=` used the wrong cubic spline.**
+  `ShiftedPotentialGPU` interpolated time-varying centers with
+  `scipy.interpolate.CubicSpline(bc_type='not-a-knot')` and `ScaledPotentialGPU`
+  did the same for `scale`/`ampl`.  Agama reads `center=`, `scale=` and the
+  `UniformAcceleration` table through one `readTimeDependentArray`, which builds
+  a **natural** cubic spline with the Hyman (1983) regularization filter — a
+  different curve.  On a 40-sample LMC-like trajectory the two differed by up to
+  44 pc in position (186 pc at 20 samples, sub-pc by ~300); the discrepancy grows
+  as the trajectory is subsampled, and the docstring's own example subsamples by
+  100.  All three inputs now share one `_AgamaTimeSpline`, matching
+  `agama.Spline(..., reg=True)` to machine precision, with Agama's linear
+  extrapolation beyond the endpoints.  The `(T,7)` Hermite path is unchanged in
+  kind.  As a side effect the interpolation is ~3x cheaper per call (1.3–1.9 µs
+  vs 3.9–5.4 µs), since it avoids SciPy's per-call array overhead.
+
+  The pre-existing tests only asserted that `ShiftedPotentialGPU` came back from
+  the factory and never compared trajectory values against Agama, so nothing
+  caught this; `tests/test_time_modifiers.py` now covers `center=`, `scale=` and
+  the combined stack numerically.
+
+  **This changes results** for any run using a time-varying `center=` or
+  `scale=`.
+
+- **`PotentialGPU(agama_pot)` returned the Agama CPU object unchanged.**
+  The duck-typed "already a GPU potential" pass-through (`.potential` and
+  `.force` are callable) matched `agama.Potential` first, shadowing the
+  conversion branch below it and making that branch dead code.  Every
+  documented `PotentialGPU(<agama.Potential>)` call — including
+  `PotentialGPU(agama.Potential(type='Spheroid', ...))` in the docs — silently
+  produced a CPU potential.  Agama potentials are now matched before the
+  pass-through, so exportable types (Multipole, CylSpline, Spheroid, King)
+  convert as documented and Agama analytic types raise the existing explanatory
+  error instead of quietly degrading to CPU.
 
 - **`read_cylspl_coefs` was section-blind.**  An Agama CylSpline export carries
   three sections — `#Phi`, `#dPhi/dR` and `#dPhi/dz` — each repeating the full

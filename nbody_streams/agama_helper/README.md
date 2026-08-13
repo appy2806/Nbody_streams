@@ -42,7 +42,15 @@ Agama's CylSpline::evalCyl with 2D bicubic Hermite splines. Requires coefficient
 | `LogHaloPotentialGPU` | Logarithmic (triaxial) |
 | `DehnenSphericalPotentialGPU` | Dehnen spherical (gamma in [0,2)) |
 | `DiskAnsatzPotentialGPU` | DiskAnsatz |
-| `UniformAccelerationGPU` | UniformAcceleration |
+| `UniformAccelerationGPU` | UniformAcceleration (constant `ax/ay/az`, or time-dependent `file=`) |
+
+`UniformAccelerationGPU` — `Phi(x,t) = -a(t)·x`; force `= a(t)`, Hessian and density
+identically zero.  `file=` accepts a `(T,4)` `[t, ax, ay, az]` table (regularized
+**natural** cubic spline, matching `agama.Spline(..., reg=True)` — *not* SciPy's
+default not-a-knot) or a `(T,7)` `[t, a, da/dt]` table (cubic Hermite), as an array
+or a path.  Linear extrapolation outside the range, as in Agama.  Interpolation is
+a CPU-side O(log T) lookup per call; kernels see three floats.
+`from_agama()` is not supported — Agama does not export the table.
 
 Via Agama CPU export (in _potential.py ):
 `Disk`     →  _build_disk_gpu : DiskAnsatz (from input kwargs) + Multipole (from Agama export) →  CompositePotentialGPU
@@ -52,8 +60,16 @@ Via Agama CPU export (in _potential.py ):
 
 ### Modifiers
 
-- `ShiftedPotentialGPU`: static offset `(3,)`, cubic-spline center trajectory `(T,4)`, or Hermite-spline `(T,7)`. Linear extrapolation outside time range.
+- `ShiftedPotentialGPU`: static offset `(3,)`, center trajectory `(T,4)`, or Hermite-spline `(T,7)`. Linear extrapolation outside time range.
 - `ScaledPotentialGPU`: static float, or time-dependent `(T,2)` / `(T,3)` tables.
+
+All three time-dependent inputs — `center=`, `scale=` and the `UniformAcceleration`
+table — share one interpolator (`_AgamaTimeSpline` in `_potential.py`), because Agama
+reads all three through the same `readTimeDependentArray`: a **regularized natural**
+cubic spline (values only) or a **Hermite** spline (values + derivatives), linearly
+extrapolated beyond the endpoints.  Note `scale=` in Agama always carries two values
+`[t, ampl, scale]`; the `(T,2)` `[t, scale]` form here is a GPU-side convenience that
+takes `ampl` from the separate keyword.
 
 ### Composite types
 
