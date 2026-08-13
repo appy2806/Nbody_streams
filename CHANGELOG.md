@@ -102,6 +102,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`agama_helper` no longer needs CuPy to import.**  CuPy is an optional extra
+  (`nbody_streams[cuda]`), but `agama_helper/__init__.py` imported
+  `PotentialGPU` from `_potential.py`, which raised `ImportError` at module
+  level when CuPy was absent.  On a CPU-only install that took the whole
+  subpackage down: the guard in `nbody_streams/__init__.py` swallowed the error
+  and `nbody_streams.agama_helper` simply did not exist, so a user who only
+  wanted `read_coefs` or `load_agama_potential` — neither of which touches the
+  GPU — got an `AttributeError` with no hint about the cause.
+
+  CuPy access now goes through `agama_helper/_cupy.py`, which exports the real
+  module when available and a stub otherwise.  The stub raises a descriptive
+  `ImportError` (naming `pip install 'nbody_streams[cuda]'`) on attribute
+  access, except for the kernel constructors — `ElementwiseKernel`,
+  `RawKernel`, `RawModule`, `ReductionKernel`, `fuse` — which return a
+  placeholder that raises only when the kernel is called.  That exception is
+  what lets `_analytic_potentials.py`, with ~35 module-level
+  `cp.ElementwiseKernel` definitions, import on a CPU-only box.  Instantiating
+  any GPU potential fails immediately via `_GPUPotBase.__new__`, rather than
+  deep inside a kernel launch.
+
+  `agama_helper.CUPY_AVAILABLE` reports whether the GPU paths are usable.
+  Nothing changes on a GPU install.  `tests/test_no_cupy.py` runs the CPU-only
+  import and round-trip checks in a subprocess with `import cupy` blocked.
+
 - **`file=` was silently dropped for `UniformAcceleration`.**
   `PotentialGPU(type='UniformAcceleration', file=acc)` ignored `file=` — only
   `CylSpline` and `Multipole` honoured it — and returned a zero-acceleration

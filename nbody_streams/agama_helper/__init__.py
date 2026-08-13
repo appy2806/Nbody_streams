@@ -7,6 +7,13 @@ expansion-based potentials (Multipole and CylSpline BFEs).
 Agama units are set to (Msol, kpc, km/s) at import time when agama is
 available.  Time is therefore in kpc / (km/s) ~ 0.978 Gyr.
 
+Optional dependencies
+---------------------
+Everything here except the ``*PotentialGPU`` classes is pure NumPy/h5py, so the
+subpackage imports and works fine without CuPy or a GPU.  ``CUPY_AVAILABLE``
+reports whether the GPU paths are usable; touching them without CuPy raises an
+ImportError pointing at ``pip install 'nbody_streams[cuda]'``.
+
 API overview
 ------------
 ``read_*``   — parse coefficient files into dataclasses, or read raw strings.
@@ -97,10 +104,14 @@ from ._fire import (
     spline_resample_coefs,
 )
 
+from ._cupy import CUPY_AVAILABLE
+
 from ._potential import (
     PotentialGPU,
 )
 __all__ = [
+    # optional-GPU flag
+    "CUPY_AVAILABLE",
     # potential class
     "PotentialGPU",
     # snapshot dict + fitting

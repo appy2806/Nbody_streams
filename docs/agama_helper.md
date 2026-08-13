@@ -835,11 +835,47 @@ is typically > 1 %, so this precision floor has no practical impact.
 
 ### Requirements
 
-- CUDA GPU (tested on NVIDIA L40)
-- `cupy >= 10.0` (matching CUDA version)
-- `nvcc` accessible on PATH
+Always required (CPU-only stack):
+
+- `numpy`, `h5py`
 - `scipy` (quintic spline construction; graceful fallback if absent)
 - `agama` (for `Disk` / `Spheroid` / `King` types that use CPU export)
+
+Required **only** for the `*PotentialGPU` classes:
+
+- CUDA GPU (tested on NVIDIA L40)
+- `cupy >= 10.0` (matching CUDA version) — `pip install 'nbody_streams[cuda]'`
+- `nvcc` accessible on PATH
+
+### CuPy is optional
+
+`import nbody_streams.agama_helper` works without CuPy, and so does every part
+of the subpackage that never touches the GPU: `read_coefs`, the coefficient
+dataclasses, `write_*_h5`, `load_agama_potential` /
+`load_agama_evolving_potential` (CPU path), and the FIRE helpers.
+
+```python
+from nbody_streams import agama_helper as ah
+
+ah.CUPY_AVAILABLE                                       # False on CPU-only installs
+mc  = ah.read_coefs("MW_mult.h5", group_name="snap_090")  # works
+pot = ah.load_agama_potential("MW_mult.h5", group_name="snap_090")  # works (CPU)
+```
+
+Touching a GPU path without CuPy raises an `ImportError` naming the missing
+package rather than an `AttributeError` from an undefined symbol:
+
+```python
+pot = ah.PotentialGPU(type='NFW', mass=1e12, scaleRadius=20)
+# ImportError: NFWPotentialGPU requires CuPy.
+# CuPy is required for the GPU potential classes of nbody_streams.agama_helper, ...
+# Install with:  pip install cupy-cuda12x        (adjust to your CUDA version)
+#            or:  pip install 'nbody_streams[cuda]'
+```
+
+The shim lives in `agama_helper/_cupy.py`; import it as
+`from ._cupy import CUPY_AVAILABLE, cp, require_cupy` in any new GPU module
+instead of importing `cupy` directly.
 
 ---
 

@@ -31,6 +31,11 @@ Requirements:
     CuPy >= 10.0,  nvcc accessible,  CUDA GPU
     scipy (for quintic spline construction and Lambert W : falls back to
     invPhi0=0 if unavailable, still quintic but without inner asymptote scaling)
+
+CuPy is an optional dependency of the package.  This module imports fine
+without it --- everything that does not touch the GPU (``_GPUPotBase``,
+``_AgamaTimeSpline``, the CPU spline preprocessing helpers) keeps working, and
+any GPU call raises a descriptive ImportError instead.
 """
 
 from __future__ import annotations
@@ -50,15 +55,15 @@ import numpy as np
 # ---------------------------------------------------------------------------
 # CuPy guard
 # ---------------------------------------------------------------------------
+# CuPy is optional: this module must stay importable on CPU-only installs so
+# that ``agama_helper``'s NumPy-only readers/loaders keep working.  Without
+# CuPy, ``cp`` is a stub that raises a descriptive ImportError as soon as a GPU
+# code path is touched (see _cupy.py).
 
 try:
-    import cupy as cp
-except ImportError as _err:
-    raise ImportError(
-        "CuPy is required for GPU potential evaluation.\n"
-        "Install with:  pip install cupy-cuda12x  (adjust CUDA version)\n"
-        f"Original error: {_err}"
-    ) from _err
+    from ._cupy import cp, require_cupy
+except ImportError:                             # direct script execution
+    from _cupy import cp, require_cupy          # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Compile the CUDA module once (lazy, cached on first use)
@@ -90,7 +95,15 @@ class _GPUPotBase:
     ``pot_a + pot_b``  ->  ``CompositePotentialGPU([pot_a, pot_b])``
     ``pot_a + composite``  ->  flattened composite (avoids nesting)
     ``sum([pot_a, pot_b, pot_c])``  ->  works via ``__radd__(0)``
+
+    Also the single choke point for the optional CuPy dependency: instantiating
+    *any* GPU potential without CuPy fails immediately with a clear message
+    rather than deep inside a kernel launch.
     """
+    def __new__(cls, *args, **kwargs):
+        require_cupy(cls.__name__)
+        return super().__new__(cls)
+
     def __add__(self, other):
         from_self  = self._components  if isinstance(self,  CompositePotentialGPU) else [self]
         from_other = other._components if isinstance(other, CompositePotentialGPU) else [other]
@@ -105,6 +118,7 @@ class _GPUPotBase:
 def _get_module() -> cp.RawModule:
     global _MODULE
     if _MODULE is None:
+        require_cupy("Multipole GPU kernels")
         if not _KERNEL_FILE.exists():
             raise FileNotFoundError(
                 f"CUDA kernel file not found: {_KERNEL_FILE}\n"
@@ -125,6 +139,7 @@ def _get_kernel(name: str) -> cp.RawKernel:
 def _get_cylspl_module() -> cp.RawModule:
     global _CYLSPL_MODULE
     if _CYLSPL_MODULE is None:
+        require_cupy("CylSpline GPU kernels")
         if not _CYLSPL_KERNEL_FILE.exists():
             raise FileNotFoundError(
                 f"CylSpline CUDA kernel file not found: {_CYLSPL_KERNEL_FILE}\n"
