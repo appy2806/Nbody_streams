@@ -130,7 +130,6 @@
   "128": "vec<4,float>",
   "129": "nbody_streams — Documentation",
   "130": "CLAUDE.md",
-  "131": "Empirical radial profiles",
   "132": "_chandrasekhar module",
   "133": "FIRE simulation helpers",
   "134": "force_extra hook",
@@ -287,11 +286,5 @@
   "285": "run_nbody_gpu_tree",
   "286": "_StepWatchdog",
   "287": "tree_gravity_gpu",
-  "288": "TreeGPU handle",
-  "289": "Density-profile fitting",
-  "290": "vec<4,double>",
-  "291": "vec<2,float>",
-  "292": "vec<4,float>",
-  "293": ".test_circular_orbit_decays",
-  "294": "Reading API"
+  "288": "TreeGPU handle"
 }
