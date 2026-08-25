@@ -11,6 +11,143 @@ Optional dependencies:
 - **scipy** — required for profile fitting, boundness, and velocity-dispersion functions.
 - **numba** — accelerates structure-tensor and distance computations; pure NumPy fallback is used when absent.
 - **agama** — used by `fit_double_spheroid_profile` (Agama Potential fit path) and `find_center` / `iterative_unbinding` (density-peak solver).
+- **pandas** — used by `FlatLCDM.from_snapshot_times` only (via `agama_helper.read_snapshot_times`).
+
+---
+
+## Cosmology and the comoving frame
+
+Flat LCDM background in closed form, plus the comoving/peculiar frame
+transforms.  NumPy only (apart from `scipy.optimize.curve_fit` inside
+`FlatLCDM.fit`) — no agama, no FIRE paths.
+
+Units are **Gyr, kpc, km/s** throughout.
+
+```python
+from nbody_streams.utils import FlatLCDM, comoving_to_physical, physical_to_comoving
+```
+
+### Why the transforms are only bookkeeping
+
+The comoving/peculiar equation of motion is an *exact* change of variables of
+the physical one.  With `r = a x`, `v_pec = a x'` and `H = a'/a`,
+
+```
+v_pec' = -grad(Phi) - H v_pec - a'' x - u_dot
+  ==>  r'' = (H' + H^2 - a''/a) r - grad(Phi) - u_dot,
+```
+
+and `H' = a''/a - H^2` makes the bracket vanish **identically**, leaving
+
+```
+r'' = -grad(Phi)(r, t) - u_dot(t).
+```
+
+`Phi` is absent from the cancellation, so this holds for an evolving potential
+as much as a static one: `a(t)` and `H(t)` are needed only to convert
+coordinates in and out, and `a''(t)` not at all.
+
+The centre term `u_dot` does **not** cancel — dropping it moves 5 Gyr endpoints
+by tens of kpc.  That term is built by
+[`agama_helper.center_acceleration`](agama_helper.md#comoving-host-frame).
+
+### `KPC_PER_GYR_PER_KMS`
+
+```python
+KPC_PER_GYR_PER_KMS = 1.0227121650537077   # (kpc/Gyr) per (km/s)
+```
+
+i.e. `1 Gyr = 1.0227 kpc/(km/s)`.  Not to be confused with Agama's integration
+variable, `kpc/(km/s) = 0.977792 Gyr`.
+
+### `FlatLCDM`
+
+```python
+FlatLCDM(hubble=0.702, omega_matter=0.272)
+```
+
+```
+a(t) = (Om/Ol)^(1/3) sinh(1.5 H0 sqrt(Ol) t)^(2/3)
+H(a) = H0 sqrt(Om/a^3 + Ol)
+t(a) = arcsinh(sqrt(Ol/Om) a^(3/2)) / (1.5 H0 sqrt(Ol))
+z(a) = 1/a - 1
+```
+
+| Name | Type | Description |
+|------|------|-------------|
+| `hubble` | float | Dimensionless *h*, with `H0 = 100 h km/s/Mpc`.  Default 0.702 (FIRE m12i). |
+| `omega_matter` | float | Present-day matter density.  Default 0.272; `omega_lambda = 1 - omega_matter`. |
+
+Attributes: `H0` in (km/s)/kpc, `omega_lambda`.
+
+**Constructors**
+
+| Call | Returns |
+|---|---|
+| `FlatLCDM(h, Om)` | Direct. |
+| `FlatLCDM.static()` | Degenerate `a = 1`, `H = 0` background for a non-cosmological potential; both transforms become the identity. |
+| `FlatLCDM.fit(t, a, t_min=0.5)` | Least-squares `(h, Om)` from a tabulated a(t) [Gyr]. |
+| `FlatLCDM.from_snapshot_times(sim_dir, t_min=0.5)` | `fit` applied to `snapshot_times.txt`. |
+
+**Methods** — all take *exactly one* of the listed arguments, scalar or array:
+
+| Method | Arguments | Returns |
+|---|---|---|
+| `scale_factor(t=None, z=None)` | `t` [Gyr] or `z` | `a` |
+| `time(a=None, z=None)` | `a` or `z` | age [Gyr] |
+| `redshift(t=None, a=None)` | `t` [Gyr] or `a` | `z` |
+| `hubble_parameter(t=None, a=None, z=None)` | any one | `H` [(km/s)/kpc] |
+| `a_double_dot(t=None, a=None, z=None)` | any one | `a''` [((km/s)/kpc)^2] |
+
+`time` is the exact analytic inverse of `scale_factor` — no root-finding, no
+spline.  `a_double_dot` cancels out of the physical equation of motion above and
+is kept for cross-checks against the comoving formulation; the closed form
+matters, because differentiating a spline through tabulated a(t) twice gives
+errors of order the value itself.
+
+```python
+cosmo = FlatLCDM.from_snapshot_times("/data/m12i_res7100/")
+cosmo                          # FlatLCDM(hubble=0.702, omega_matter=0.272)
+cosmo.time(a=1.0)              # 13.79 Gyr
+cosmo.redshift(t=[1.0, 7.5])   # array([5.812, 0.531])
+```
+
+> **Accuracy.** Any flat LCDM, not just FIRE's: against
+> `astropy.cosmology.FlatLambdaCDM` with `Tcmb0=0`, for *h* in 0.5–0.8 and Om in
+> 0.15–0.5, `a` agrees to 8e-12, `H` to 7e-16 and `t(z)` to 1.1e-10 Gyr.
+> Assumes flat (`Ol = 1 - Om`), `w = -1` and **no radiation**.
+
+> **Why no radiation term.** This is not an approximation *here*, because
+> gizmo's own background omits it too: the m12i `snapshot_times.txt` a(t)
+> matches this closed form to 5.2e-7, against 1.5e-3 for a radiation-inclusive
+> model.  For a code that *does* include radiation the age would be 6.0 Myr high
+> at z = 0 and 4 percent at z = 100, and refitting `(h, Om)` is a poor remedy.
+> Radiation keeps `H(a)` and `a''(a)` elementary but turns `t(a)` into an
+> elliptic integral — the `x = a^(3/2)` substitution behind the arcsinh only
+> collapses the quartic when `Or = 0`.  Quadrature plus monotone inversion is
+> the way in if it is ever needed.
+
+### `comoving_to_physical` / `physical_to_comoving`
+
+```python
+r, v     = comoving_to_physical(x, v_pec, t, cosmo)   # r = a x,   v = H r + v_pec
+x, v_pec = physical_to_comoving(r, v, t, cosmo)       # x = r/a,   v_pec = v - H r
+```
+
+| Name | Type | Description |
+|------|------|-------------|
+| `x` / `r` | array_like `(3,)` or `(..., 3)` | Comoving / physical position [kpc]. |
+| `v_pec` / `v` | array_like `(3,)` or `(..., 3)` | Peculiar / physical velocity [km/s]. |
+| `t` | float or array_like | Time [Gyr], broadcast against the **leading** axes (not the trailing 3). |
+| `cosmo` | `FlatLCDM` | Background. |
+
+Exact inverses of each other.  Per-particle times work:
+
+```python
+xv = reader.read(...)                       # (N, 6) physical
+t  = np.full(len(xv), 13.8)
+x, v_pec = physical_to_comoving(xv[:, :3], xv[:, 3:], t, cosmo)
+```
 
 ---
 

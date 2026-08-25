@@ -9,6 +9,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Comoving host frame: flat-LCDM cosmology and the galactic-centre
+  correction.**  A FIRE host potential is fitted in the *comoving* frame while
+  orbits integrate in physical coordinates.  The change of variables is exact
+  and the expansion terms cancel identically, leaving
+
+  ```
+  r'' = -grad(Phi)(r, t) - u_dot(t),
+  ```
+
+  where `u_dot = a x_com'' + H a x_com'` is the acceleration of the galactic
+  centre itself.  It is the one term that does *not* cancel, and dropping it
+  moves 5 Gyr orbit endpoints by tens of kpc.
+
+  `nbody_streams.utils` gains the background — pure NumPy, no agama, no FIRE
+  paths:
+
+  ```python
+  from nbody_streams.utils import FlatLCDM, comoving_to_physical, physical_to_comoving
+
+  cosmo = FlatLCDM.from_snapshot_times(sim_dir)   # fits (h, Om) to snapshot_times.txt
+  cosmo.time(a=1.0)                               # 13.79 Gyr, exact analytic inverse
+  x, v_pec = physical_to_comoving(xv[:, :3], xv[:, 3:], t, cosmo)
+  ```
+
+  `FlatLCDM` is closed-form throughout — `a(t)`, `t(a)`, `H(a)` and `a''(a)` —
+  which matters for `a''`, since differentiating a spline through tabulated
+  `a(t)` twice gives errors of order the value itself.  Against
+  `astropy.cosmology.FlatLambdaCDM` with `Tcmb0=0`, `a` agrees to 8e-12 and
+  `t(z)` to 1.1e-10 Gyr across h in 0.5–0.8, Om in 0.15–0.5.  Radiation is
+  omitted because gizmo's own background omits it: the m12i `snapshot_times.txt`
+  a(t) matches this closed form to 5.2e-7, against 1.5e-3 for a
+  radiation-inclusive model.  `FlatLCDM.static()` gives the degenerate `a = 1`,
+  `H = 0` background, for which both transforms are the identity.
+
+  `agama_helper` gains the FIRE-side pieces, which build `u_dot` and hand it to
+  Agama as a `UniformAcceleration` component:
+
+  ```python
+  cosmo = FlatLCDM.from_snapshot_times(sim_dir)
+  rot   = ah.read_rotation(sim_dir, nsnap=600)
+  acc   = ah.center_acceleration(f"{sim_dir}/m12i_reg_spl_{{}}.txt", rot, cosmo)
+  pot   = agama.Potential(host_evolving, acc)
+  ```
+
+  - `read_rotation` — the `(3, 3)` principal-axis rotation, taken as the last
+    three uncommented rows rather than a fixed line offset, because m12m/m12f
+    label the block with a comment that m12i/m12b omit.
+  - `read_center_splines` / `write_center_splines` — the three comoving
+    centre-of-mass splines.  The text form round-trips a `BSpline` bit for bit,
+    survives scipy/numpy upgrades, and carries no code-execution risk on read,
+    unlike a pickle.
+  - `center_acceleration_table` / `write_center_acceleration` — the
+    `(n_samples, 4)` table `[t, -u_dot]`, optionally with a one-section `.ini`
+    beside it.
+  - `center_acceleration(..., gpu=True)` returns a
+    `PotentialGPU(type="UniformAcceleration", ...)`.  CPU, GPU, and the written
+    `.ini` all interpolate the same table with Agama's regularized natural cubic
+    spline, so their forces agree to machine precision.
+
+  Two traps are documented at the call sites and in the docs: the kpc/Gyr^2
+  conversion **divides** by `K^2` (multiplying is wrong by 9.4 percent), and the
+  `.ini` timestamps, the acceleration table's time column, and
+  `timestart`/`time` must share one time convention — mixing Gyr with Agama's
+  `kpc/(km/s)` desynchronises the centre correction from the host.
+
+  `docs/utils.md` and `docs/agama_helper.md` cover both halves;
+  `tests/test_cosmology.py` and
+  `nbody_streams/agama_helper/tests/test_comoving_host.py` add 34 tests.
+
 - **Time-dependent `UniformAcceleration` on the GPU.**  `UniformAccelerationGPU`
   previously accepted only constant `ax/ay/az`, which meant the form actually
   used in practice — `agama.Potential(type='UniformAcceleration', file=accMW)`,

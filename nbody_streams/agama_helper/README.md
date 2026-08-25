@@ -284,7 +284,7 @@ agama_helper/
   _io.py                            <- HDF5 archive I/O, temp-file helpers, source resolution
   _cupy.py                          <- optional-CuPy shim: real cupy, or a stub that raises on GPU use
   _fit.py                           <- BFE fitting from an N-body snapshot
-  _fire.py                          <- FIRE-specific loaders and Evolving .ini generation
+  _fire.py                          <- FIRE-specific loaders, Evolving .ini generation, comoving-host centre acceleration
   tests/
     test_phase1_multipole.py        <- MultipolePotentialGPU correctness + benchmarks vs Agama CPU
     test_phase2_analytic.py         <- analytic GPU potential tests
@@ -292,6 +292,7 @@ agama_helper/
     test_zero_pruning.py            <- zero-coefficient pruning correctness + speedup
     test_cylspl_sections.py         <- section-aware CylSpline parsing (#Phi / #dPhi/dR / #dPhi/dz)
     test_series.py                  <- coefficient time axis: stacking, round-trips, validation
+    test_comoving_host.py           <- FIRE rotation, centre splines, centre-acceleration table (CPU == GPU == .ini)
   tech_err.md                       <- architecture decisions and precision notes
 ```
 

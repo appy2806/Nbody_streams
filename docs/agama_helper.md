@@ -35,6 +35,7 @@ from nbody_streams import agama_helper as ah
 - [GPU potential evaluation (PotentialGPU)](#gpu-potential-evaluation-potentialgpu)
 - [Center parameter](#center-parameter)
 - [FIRE helpers](#fire-helpers)
+- [Comoving host frame](#comoving-host-frame)
 - [Potential fitting](#potential-fitting)
 - [Gotchas](#gotchas)
 
@@ -1037,6 +1038,189 @@ pot = fine.materialize_potential()
 > therefore requires `agama` and has no scipy fallback: a silent
 > `not-a-knot` fallback would be a materially different spline, not merely a
 > less-precise one.
+
+---
+
+## Comoving host frame
+
+A FIRE host potential is fitted in the **comoving** frame, but the orbit
+integration happens in physical coordinates.  The change of variables is exact
+and the expansion terms cancel identically — see
+[the derivation in `utils`](utils.md#why-the-transforms-are-only-bookkeeping) —
+leaving
+
+```
+r'' = -grad(Phi)(r, t) - u_dot(t).
+```
+
+The one term that survives is `u_dot`, the acceleration of the galactic centre
+itself.  These helpers build it from the FIRE centre-of-mass splines and hand it
+to Agama as a `UniformAcceleration` component, so it composes with the evolving
+host like any other potential.  **Dropping it moves 5 Gyr orbit endpoints by
+tens of kpc.**
+
+The background cosmology lives in
+[`nbody_streams.utils.FlatLCDM`](utils.md#flatlcdm) — it is pure NumPy and knows
+nothing about agama.
+
+### End-to-end
+
+```python
+import agama
+import numpy as np
+from nbody_streams import agama_helper as ah
+from nbody_streams.utils import FlatLCDM, physical_to_comoving
+
+sim_dir = "/data/m12i_res7100/"
+
+cosmo = FlatLCDM.from_snapshot_times(sim_dir)          # h = 0.702, Om = 0.272
+rot   = ah.read_rotation(sim_dir, nsnap=600)           # (3, 3) principal-axis frame
+acc   = ah.center_acceleration(f"{sim_dir}/m12i_reg_spl_{{}}.txt", rot, cosmo)
+
+host  = ah.load_agama_evolving_potential("m12i_mult.h5", times)
+pot   = agama.Potential(host, acc)                     # host + fictitious centre force
+
+orbit = agama.orbit(potential=pot, ic=xv0, time=5.0, timestart=13.8, trajsize=500)
+```
+
+On the GPU, the same table drives `PotentialGPU`:
+
+```python
+acc_gpu  = ah.center_acceleration(splines, rot, cosmo, gpu=True)
+host_gpu = ah.load_agama_evolving_potential("m12i_mult.h5", times, gpu=True)
+pot_gpu  = host_gpu + acc_gpu
+```
+
+Both sides interpolate the table with Agama's **regularized natural cubic
+spline** (`math::CubicSpline(..., reg=true)`), so CPU and GPU forces agree to
+machine precision.
+
+### `read_rotation(sim_dir, nsnap=600, spl=True, subdir="potential/10kpc") -> ndarray`
+
+The `(3, 3)` rotation into the present-day principal-axis frame, from
+`<subdir>/<nsnap>_coords_spl.txt` (or `_coords.txt` with `spl=False`).  Apply as
+`xyz @ R.T`.
+
+> The rotation is taken as the **last three uncommented rows**, not a fixed line
+> offset: m12m and m12f label the block with a
+> `# rotation to principal-axis frame` comment that m12i and m12b omit, so any
+> fixed `skip_header` is wrong for half the suite.
+
+### `read_center_splines(file_pattern) -> list[BSpline]`
+
+Load the three comoving centre-of-mass splines (x, y, z), giving the centre
+[kpc] against time [Gyr].  `file_pattern` carries one `{}` for the component:
+
+```python
+sp = ah.read_center_splines("/data/m12i/m12i_reg_spl_{}.txt")      # text
+sp = ah.read_center_splines("/data/m12i/m12i_reg_spl_{}.pickle")   # pickle
+```
+
+A `.txt` suffix reads the knot/coefficient columns written by
+`write_center_splines`; anything else is unpickled.
+
+> **Prefer the text form.** The pickle branch executes arbitrary code from the
+> file on load, and pickled scipy objects do not reliably survive scipy/numpy
+> upgrades.  The text form round-trips the `BSpline` — knots, coefficients,
+> degree, and therefore every derivative — bit for bit.
+
+### `write_center_splines(file_pattern, center_splines) -> list[str]`
+
+Write the three splines as `(knots, coefficients)` text with a
+`# degree N, M coefficients` header.  Returns the three paths.
+
+```python
+ah.write_center_splines("/data/m12i/m12i_reg_spl_{}.txt", sp)
+```
+
+### `center_acceleration(center_splines, rotation, cosmo, t_range=None, n_samples=1201, gpu=False)`
+
+The centre correction as a `UniformAcceleration` potential.  The centre's
+peculiar velocity is `u = a x_com'`, so
+
+```
+u_dot = a x_com'' + H a x_com',
+```
+
+a **physical** acceleration despite `x_com` being comoving.  With `x_com'` in
+kpc/Gyr, `x_com''` in kpc/Gyr^2 and `1 Gyr = K kpc/(km/s)`,
+
+```
+u_dot [(km/s)^2/kpc] = a x_com''/K^2 + a H x_com'/K,
+```
+
+rotated into the integration frame.  The potential carries `-u_dot`, a
+fictitious force subtracted from the host force.
+
+| Name | Type | Description |
+|------|------|-------------|
+| `center_splines` | str, Path, or sequence | A `{}` path pattern, or three splines from `read_center_splines`. |
+| `rotation` | ndarray `(3, 3)` | From `read_rotation`. |
+| `cosmo` | `FlatLCDM` | Background cosmology. |
+| `t_range` | `(float, float)` or None | Range [Gyr] to tabulate; defaults to the splines' knot range.  Agama extrapolates linearly beyond the table. |
+| `n_samples` | int | Table length, default 1201. |
+| `gpu` | bool | Return a `PotentialGPU` instead of an `agama.Potential`. |
+
+`n_samples` is **not** the snapshot count — Agama re-splines the table, so this
+is purely a resolution knob: a 5 Gyr orbit shifts by 50 pc at 301 samples, 4 pc
+at 601, and 1201 sits at the integrator's noise floor.
+
+### `center_acceleration_table(...) -> ndarray (n_samples, 4)`
+
+The table behind `center_acceleration`: columns `t` [Gyr] and `-u_dot` x, y, z
+[(km/s)^2/kpc], in the integration frame.  Same parameters, minus `gpu`.
+
+> `t_range` is taken as given and is **not** clipped to the splines' knot range,
+> so it can reach the last snapshot: the FIRE centre splines end at snapshot
+> 598, 4.4 Myr short of snapshot 600, and initial conditions at the present day
+> would otherwise sit outside the table.  The splines extrapolate with their
+> final polynomial piece over that gap, which is what the pipeline's own
+> `599/600_coords_spl.txt` already contain.
+
+### `write_center_acceleration(path, center_splines, rotation, cosmo, t_range=None, n_samples=1201, ini=True) -> str`
+
+Write the table to disk, to reload without the splines.  With `ini=True` a
+one-section `.ini` is written beside it:
+
+```ini
+[Potential]
+type = UniformAcceleration
+file = /abs/path/to/accCEN.txt
+```
+
+```python
+ah.write_center_acceleration("accCEN.txt", sp, rot, cosmo)
+
+agama.Potential("accCEN.ini")                                  # CPU
+agama.Potential(type="UniformAcceleration", file="accCEN.txt")  # CPU
+ah.PotentialGPU(type="UniformAcceleration", file="accCEN.txt")  # GPU
+```
+
+All give forces identical to `center_acceleration`.  The `.ini` can be inlined
+as a component of a master file alongside the host.
+
+### Gotchas: units and end knots
+
+> **The unit conversion divides by `K^2`.** `x_com''` is in kpc/Gyr^2 and the
+> result must be (km/s)^2/kpc, so the second-derivative term carries `1/K^2`.
+> Multiplying instead is wrong by 9.4 percent — small enough to look plausible
+> and large enough to matter.
+
+> **Time units must be consistent in three places.** Agama's integration
+> variable is `kpc/(km/s) = 0.977792 Gyr`, and that one variable drives both the
+> dynamics and an `Evolving` potential's clock.  The `.ini` timestamps, the time
+> column of the acceleration table, and `timestart`/`time` must share a
+> convention.  Stamping the `.ini` in Gyr keeps the snapshot sequence exact but
+> makes elapsed time 2.27 percent short; dividing all three by 0.977792 makes
+> both exact.  **Mixing the two desynchronises the centre correction from the
+> host and is not benign.**  The centre splines are not among the three — they
+> stay fit in Gyr and are evaluated in Gyr.
+
+> **The end knots are noisy.** The m12i centre splines are quintic smoothing
+> fits with crowded end knots, and their second derivative spikes there:
+> `|u_dot|` reaches 1396 (km/s)^2/kpc at the first knot against 40–160 through
+> the interior, while the position residuals stay a flat 0.2–0.4 kpc.  Pass
+> `t_range` to trim the end intervals if it matters.
 
 ---
 

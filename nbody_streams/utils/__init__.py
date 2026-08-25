@@ -1,5 +1,11 @@
 """nbody_streams.utils - analysis and diagnostic utilities."""
 
+from ._cosmology import (
+    KPC_PER_GYR_PER_KMS,
+    FlatLCDM,
+    comoving_to_physical,
+    physical_to_comoving,
+)
 from .main import (
     make_uneven_grid,
     # Empirical radial profiles
@@ -26,6 +32,11 @@ from .main import (
 )
 
 __all__ = [
+    # Cosmology / comoving frame
+    "KPC_PER_GYR_PER_KMS",
+    "FlatLCDM",
+    "comoving_to_physical",
+    "physical_to_comoving",
     "make_uneven_grid",
     "empirical_density_profile",
     "empirical_circular_velocity_profile",

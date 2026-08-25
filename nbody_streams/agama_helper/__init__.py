@@ -66,6 +66,13 @@ Quick start
 >>> ser.phi[:, ser.column(2, 2), :] *= 1.5                # arbitrary manual surgery
 >>> pot_ev = ser.materialize_potential()                  # picks up the live arrays
 >>> ser.to_h5("edited.h5")                                # round-trips via group_name="all"
+>>>
+>>> # --- Comoving host frame: the galactic-centre correction ---
+>>> from nbody_streams.utils import FlatLCDM
+>>> cosmo = FlatLCDM.from_snapshot_times(sim_dir)
+>>> rot = ah.read_rotation(sim_dir, nsnap=600)
+>>> acc = ah.center_acceleration(f"{sim_dir}/m12i_reg_spl_{{}}.txt", rot, cosmo)
+>>> pot = agama.Potential(pot_ev, acc)     # host + fictitious centre force
 """
 
 # Set Agama units (Msol, kpc, km/s) at import time.
@@ -102,6 +109,12 @@ from ._fire import (
     create_fire_evolving_ini,
     refine_times,
     spline_resample_coefs,
+    read_rotation,
+    read_center_splines,
+    write_center_splines,
+    center_acceleration,
+    center_acceleration_table,
+    write_center_acceleration,
 )
 
 from ._cupy import CUPY_AVAILABLE
@@ -141,4 +154,11 @@ __all__ = [
     # cubic-spline resampling of a coefficient time series (needs agama.Spline)
     "refine_times",
     "spline_resample_coefs",
+    # comoving host frame (see nbody_streams.utils.FlatLCDM for the cosmology)
+    "read_rotation",
+    "read_center_splines",
+    "write_center_splines",
+    "center_acceleration",
+    "center_acceleration_table",
+    "write_center_acceleration",
 ]
