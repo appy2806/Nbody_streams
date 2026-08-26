@@ -7,6 +7,7 @@ from nbody_streams.coords import (
     convert_vectors,
     convert_to_vel_los,
     generate_stream_coords,
+    to_stream_coords,
 )
 
 
@@ -276,6 +277,84 @@ class TestGenerateStreamCoords:
     def test_invalid_shape_raises(self):
         with pytest.raises(ValueError):
             generate_stream_coords(np.ones((10,)))
+
+
+# =====================================================================
+# The progenitor anchors the stream frame
+# =====================================================================
+
+def _mock_stream(n=400, seed=0):
+    """A progenitor plus a thin stream spread along its orbit, deliberately tilted."""
+    rng = np.random.default_rng(seed)
+    xv_prog = np.array([12.0, 5.0, -3.0, -40.0, 130.0, 25.0])
+    r = np.linalg.norm(xv_prog[:3])
+    L = np.cross(xv_prog[:3], xv_prog[3:])
+    zhat = L / np.linalg.norm(L)
+    xhat = xv_prog[:3] / r
+    yhat = np.cross(zhat, xhat)
+    t = rng.uniform(-0.6, 0.6, n)                       # along-track angle
+    off = rng.normal(0.0, 0.02, n)                      # out-of-plane scatter
+    pos = r * (np.cos(t)[:, None] * xhat + np.sin(t)[:, None] * yhat) \
+        + off[:, None] * zhat * r
+    vel = rng.normal(0.0, 5.0, (n, 3)) + xv_prog[3:]
+    return np.hstack([pos, vel]), xv_prog
+
+
+@pytest.mark.parametrize("optimizer_fit", [False, True])
+def test_progenitor_pinned_to_frame_origin(optimizer_fit):
+    """
+    The progenitor must land exactly at (phi1, phi2) = (0, 0).
+
+    It *defines* the frame, so this is a construction property, not an
+    approximation. Regression test: the optimizer once tilted zhat toward xhat,
+    which displaced the progenitor by arcsin(alpha) -- up to 4 degrees on real
+    data -- while still reporting the frame as progenitor-centred.
+    """
+    xv, xv_prog = _mock_stream()
+    phi1, phi2, R = generate_stream_coords(
+        xv, xv_prog, optimizer_fit=optimizer_fit, return_rotation=True)
+    g1, g2 = to_stream_coords(xv_prog, R)
+    assert abs(float(g1)) < 1e-10, f"progenitor phi1 = {float(g1)}"
+    assert abs(float(g2)) < 1e-10, f"progenitor phi2 = {float(g2)}"
+
+
+@pytest.mark.parametrize("optimizer_fit", [False, True])
+def test_stream_frame_rotation_is_orthonormal(optimizer_fit):
+    """R must stay a proper rotation: R^T R = I and det R = +1."""
+    xv, xv_prog = _mock_stream()
+    _, _, R = generate_stream_coords(
+        xv, xv_prog, optimizer_fit=optimizer_fit, return_rotation=True)
+    np.testing.assert_allclose(R.T @ R, np.eye(3), atol=1e-12)
+    np.testing.assert_allclose(np.linalg.det(R), 1.0, atol=1e-12)
+
+
+def test_optimizer_reduces_phi2_objective():
+    """
+    The roll must earn its cost: it should flatten the stream, not just pin it.
+
+    Tested against sum(phi2**2), which is what the optimizer actually minimises --
+    NOT the standard deviation. Those differ, because sum of squares is taken about
+    zero while std is about the mean, so the fit can legitimately accept slightly
+    wider scatter in exchange for a smaller offset from the equator. Asserting on
+    std would flag that correct behaviour as a regression.
+    """
+    for seed in range(4):
+        xv, xv_prog = _mock_stream(seed=seed)
+        _, phi2_off = generate_stream_coords(xv, xv_prog, optimizer_fit=False)
+        _, phi2_on = generate_stream_coords(xv, xv_prog, optimizer_fit=True)
+        assert np.sum(phi2_on ** 2) <= np.sum(phi2_off ** 2) * (1 + 1e-9)
+
+
+def test_progenitor_pinned_for_multiple_streams():
+    """Batched input: every stream's progenitor pinned, not just the first."""
+    xvs, progs = zip(*(_mock_stream(seed=k) for k in range(4)))
+    xv = np.stack(xvs)
+    xv_prog = np.stack(progs)
+    _, _, R = generate_stream_coords(
+        xv, xv_prog, optimizer_fit=True, return_rotation=True)
+    g1, g2 = to_stream_coords(xv_prog, R)
+    assert np.abs(g1).max() < 1e-10
+    assert np.abs(g2).max() < 1e-10
 
 
 # =====================================================================
