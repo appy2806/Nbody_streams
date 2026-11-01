@@ -396,6 +396,52 @@ def test_two_body():
     assert mean_ax2 < 0, f"Clump 2 should feel force toward clump 1 (a_x < 0), got {mean_ax2:.3e}"
 
 
+# ─── Test 9: Translation invariance (compact system far from the origin) ────
+
+def test_offset_invariance():
+    """A pc-scale system tens of kpc from the origin must get the same forces.
+
+    Guards against float32 cancellation in the cell quadrupoles: raw second
+    moments about the origin gave 20 percent median force errors for a 5 pc
+    Plummer sphere shifted by ~37 kpc.
+    """
+    print("=" * 72)
+    print("TEST 9: Translation invariance (5 pc Plummer sphere shifted by 37 kpc)")
+    print("=" * 72)
+
+    n = 50_000
+    a = 0.005                      # 5 pc (kpc units)
+    eps = 3e-4                     # 0.3 pc
+    pos, mass = generate_plummer(n, seed=7)
+    pos64 = cp.asnumpy(pos).astype(np.float64) * a
+    shift = np.array([-30.9, -20.3, 2.4])
+
+    pos0 = cp.asarray(pos64, dtype=cp.float32)
+    pos1 = cp.asarray(pos64 + shift, dtype=cp.float32)
+    h_gpu = cp.full(n, eps, dtype=cp.float32)
+    acc_ref = compute_nbody_forces_gpu(
+        pos0, mass, softening=h_gpu,
+        precision='float32', kernel='plummer', G=1.0,
+        return_cupy=True, skip_validation=True,
+    )
+    acc0, _ = tree_gravity_gpu(pos0, mass, eps=eps, theta=0.5, G=1.0)
+    acc1, _ = tree_gravity_gpu(pos1, mass, eps=eps, theta=0.5, G=1.0)
+    cp.cuda.runtime.deviceSynchronize()
+
+    s0 = rel_err_stats(acc0, acc_ref)
+    s1 = rel_err_stats(acc1, acc_ref)
+    s01 = rel_err_stats(acc1, acc0)
+    print(f"  origin  vs direct: median={s0['median']:.2e}  p99={s0['p99']:.2e}")
+    print(f"  shifted vs direct: median={s1['median']:.2e}  p99={s1['p99']:.2e}")
+    print(f"  shifted vs origin: median={s01['median']:.2e}  p99={s01['p99']:.2e}")
+
+    passed = s1['median'] < 2 * s0['median'] + 1e-4 and s01['median'] < 1e-3
+    print(f"\n  Offset invariance: {'PASS' if passed else 'FAIL'}")
+    assert passed, f"tree forces change under translation: {s1['median']:.2e} vs {s0['median']:.2e}"
+    print()
+    return passed
+
+
 # ─── Run all tests ──────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -409,6 +455,7 @@ if __name__ == "__main__":
         ("Accuracy vs N",         test_accuracy_vs_n),
         ("Reproducibility",       test_reproducibility),
         ("Two-body analytic",     test_two_body),
+        ("Offset invariance",     test_offset_invariance),
     ]
 
     for name, test_fn in tests:
