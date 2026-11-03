@@ -687,6 +687,32 @@ from nbody_streams.agama_helper import PotentialGPU
 | Multi-component `.ini` / any text file with `[Potential]` | `CompositePotentialGPU` |
 | `EvolvingPotentialGPU` | Linear lerp of snapshot GPU potentials |
 
+### Rotation modifiers: `orientation=` and `rotation=`
+
+GPU counterparts of Agama's `orientation=` (`TiltedPotentialGPU`) and `rotation=`
+(`RotatingPotentialGPU`), matching Agama to 1e-12 for potential, force and force
+derivatives:
+
+| keyword | meaning |
+|---|---|
+| `orientation=[a, b, g]` | static z-x-z Euler angles: `Phi(x) = Phi_in(R^T x)`, `R = Rz(a) Rx(b) Rz(g)`; `[0, b, 0]` is a rotation by `b` about x |
+| `rotation=angle` | constant angle about z (Agama semantics: *not* a pattern speed) |
+| `rotation=[[t, angle], ...]` | time-dependent angle; regularized natural cubic spline, linear extrapolation (as `center=`) |
+
+Given together, modifiers nest as in Agama: scale, rotation, orientation, center
+(innermost first). A **time-dependent rotation about an arbitrary axis** is a
+conjugation, e.g. a tilt `theta(t)` about x:
+
+```python
+inner = PotentialGPU(halo_coefs, orientation=[0, np.pi/2, np.pi/2])
+halo  = PotentialGPU(PotentialGPU(inner, rotation=t_theta_table),
+                     orientation=[-np.pi/2, -np.pi/2, 0])
+# == Phi_halo(R_x(theta(t))^T x); identical nesting works in agama.Potential(potential=...)
+```
+
+Stacked rotation modifiers collapse into one 3x3 matrix (`.matrix(t)`), so the
+cost per call is two (N,3)x(3,3) products plus the inner evaluation.
+
 ### Factory: `PotentialGPU(...)`
 
 Mirrors `agama.Potential` — accepts the same argument styles:

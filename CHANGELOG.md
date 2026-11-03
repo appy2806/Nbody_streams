@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **GPU rotation modifiers.** `TiltedPotentialGPU` (`orientation=`) and
+  `RotatingPotentialGPU` (`rotation=`, constant angle or `[t, angle]` table)
+  mirror Agama's modifiers; `PotentialGPU(..., orientation=, rotation=)` and
+  component dicts / INI sections accept them, nesting in Agama's order (scale,
+  rotation, orientation, center). Nested rotations collapse into one matrix.
+  This makes time-dependent tilts (e.g. a halo tumbling about x) run fully on
+  the GPU. `euler_matrix()` gives Agama's orientation matrix.
+
+### Fixed
+
+- `ShiftedPotentialGPU` accepted only CuPy positions; NumPy input now works
+  (it is moved to the GPU, like the other modifiers).
+
 - **Comoving host frame: flat-LCDM cosmology and the galactic-centre
   correction.**  A FIRE host potential is fitted in the *comoving* frame while
   orbits integrate in physical coordinates.  The change of variables is exact

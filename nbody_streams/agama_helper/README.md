@@ -62,6 +62,9 @@ Via Agama CPU export (in _potential.py ):
 
 - `ShiftedPotentialGPU`: static offset `(3,)`, center trajectory `(T,4)`, or Hermite-spline `(T,7)`. Linear extrapolation outside time range.
 - `ScaledPotentialGPU`: static float, or time-dependent `(T,2)` / `(T,3)` tables.
+- `TiltedPotentialGPU` (`orientation=`): static z-x-z Euler angles, `Phi(x) = Phi_in(R^T x)`, `R = Rz(a) Rx(b) Rz(g)`.
+- `RotatingPotentialGPU` (`rotation=`): angle about z, constant (as in Agama, *not* a pattern speed) or a `[t, angle]` table (same spline as `center=`). Nested rotation modifiers collapse into one 3x3 matrix per call.
+- Several modifiers in one call nest as in Agama: scale, rotation, orientation, center (innermost first).
 
 All three time-dependent inputs — `center=`, `scale=` and the `UniformAcceleration`
 table — share one interpolator (`_AgamaTimeSpline` in `_potential.py`), because Agama
@@ -87,7 +90,7 @@ Mirrors `agama.Potential` API:
 `PotentialGPU('snap.coef_mul')` — coef file → `MultipolePotentialGPU`  
 `PotentialGPU(dict1, dict2)` — Agama-style component dicts  
 `PotentialGPU(pot1, pot2)` — variadic GPU objects → composite  
-`center=`, `scale=`, `ampl=` → wraps in Shifted/ScaledPotentialGPU  
+`center=`, `scale=`, `ampl=`, `orientation=`, `rotation=` → wraps in Shifted/Scaled/Tilted/RotatingPotentialGPU  
 `+` operator via `_GPUPotBase` mixin
 
 `_load_potential_ini` handles:
