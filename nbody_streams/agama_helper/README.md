@@ -62,6 +62,9 @@ Via Agama CPU export (in _potential.py ):
 
 - `ShiftedPotentialGPU`: static offset `(3,)`, center trajectory `(T,4)`, or Hermite-spline `(T,7)`. Linear extrapolation outside time range.
 - `ScaledPotentialGPU`: static float, or time-dependent `(T,2)` / `(T,3)` tables.
+- `TiltedPotentialGPU` (`orientation=`): static z-x-z Euler angles, `Phi(x) = Phi_in(R^T x)`, `R = Rz(a) Rx(b) Rz(g)`.
+- `RotatingPotentialGPU` (`rotation=`): angle about z, constant (as in Agama, *not* a pattern speed) or a `[t, angle]` table (same spline as `center=`). Nested rotation modifiers collapse into one 3x3 matrix per call.
+- Several modifiers in one call nest as in Agama: scale, rotation, orientation, center (innermost first).
 
 All three time-dependent inputs — `center=`, `scale=` and the `UniformAcceleration`
 table — share one interpolator (`_AgamaTimeSpline` in `_potential.py`), because Agama
@@ -87,7 +90,7 @@ Mirrors `agama.Potential` API:
 `PotentialGPU('snap.coef_mul')` — coef file → `MultipolePotentialGPU`  
 `PotentialGPU(dict1, dict2)` — Agama-style component dicts  
 `PotentialGPU(pot1, pot2)` — variadic GPU objects → composite  
-`center=`, `scale=`, `ampl=` → wraps in Shifted/ScaledPotentialGPU  
+`center=`, `scale=`, `ampl=`, `orientation=`, `rotation=` → wraps in Shifted/Scaled/Tilted/RotatingPotentialGPU  
 `+` operator via `_GPUPotBase` mixin
 
 `_load_potential_ini` handles:
@@ -284,7 +287,7 @@ agama_helper/
   _io.py                            <- HDF5 archive I/O, temp-file helpers, source resolution
   _cupy.py                          <- optional-CuPy shim: real cupy, or a stub that raises on GPU use
   _fit.py                           <- BFE fitting from an N-body snapshot
-  _fire.py                          <- FIRE-specific loaders and Evolving .ini generation
+  _fire.py                          <- FIRE-specific loaders, Evolving .ini generation, comoving-host centre acceleration
   tests/
     test_phase1_multipole.py        <- MultipolePotentialGPU correctness + benchmarks vs Agama CPU
     test_phase2_analytic.py         <- analytic GPU potential tests
@@ -292,6 +295,7 @@ agama_helper/
     test_zero_pruning.py            <- zero-coefficient pruning correctness + speedup
     test_cylspl_sections.py         <- section-aware CylSpline parsing (#Phi / #dPhi/dR / #dPhi/dz)
     test_series.py                  <- coefficient time axis: stacking, round-trips, validation
+    test_comoving_host.py           <- FIRE rotation, centre splines, centre-acceleration table (CPU == GPU == .ini)
   tech_err.md                       <- architecture decisions and precision notes
 ```
 

@@ -6,17 +6,30 @@ FIRE-simulation-specific convenience wrappers (Arora et al. 2022).
 These functions encode FIRE path conventions (``potential/10kpc/``,
 ``snapshot_times.txt``) and are not needed for generic Agama workflows.
 All heavy-lifting is delegated to the generic modules
-(:mod:`agama_helper._io`, :mod:`agama_helper._load`, :mod:`agama_helper._coefs`).
+(:mod:`agama_helper._io`, :mod:`agama_helper._load`, :mod:`agama_helper._coefs`)
+and, for the background cosmology, to
+:mod:`nbody_streams.utils._cosmology`.
+
+Sections
+--------
+1. Snapshot time table
+2. FIRE evolving-potential ``.ini`` helper
+3. FIRE potential loader
+4. Cubic-spline resampling of a coefficient time series
+5. Comoving host frame: rotation, centre splines, centre acceleration
 """
 
 from __future__ import annotations
 
+import os
+import pickle
 import re
 from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
 
+from ..utils._cosmology import KPC_PER_GYR_PER_KMS
 from ._coefs import MultipoleCoefs, _add_negative_m, read_cylspl_coefs, read_mult_coefs
 from ._io import _cleanup_tmp_file, _write_tmp_coef
 from ._load import create_evolving_ini
@@ -597,3 +610,432 @@ def spline_resample_coefs(coefs, times_new):
             phi={m: _spline_block(v, times, times_new) for m, v in coefs.phi.items()},
             **extra,
         )
+
+
+# ---------------------------------------------------------------------------
+# Comoving host frame: rotation, centre splines, centre acceleration
+# ---------------------------------------------------------------------------
+#
+# The physical equation of motion in a comoving simulation is
+#
+#     r'' = -grad(Phi)(r, t) - u_dot(t),
+#
+# an exact change of variables away from the comoving/peculiar one (see
+# :mod:`nbody_streams.utils._cosmology`).  The expansion terms cancel
+# identically; the centre term ``u_dot`` does not.  These helpers build that
+# term from the FIRE centre-of-mass splines and hand it to Agama as a
+# ``UniformAcceleration`` component, so it composes with the evolving host
+# potential like any other.
+
+def read_rotation(
+    sim_dir: Union[Path, str],
+    nsnap: int = 600,
+    spl: bool = True,
+    subdir: str = "potential/10kpc",
+) -> np.ndarray:
+    """
+    Read the (3, 3) rotation into the present-day principal-axis frame.
+
+    Parameters
+    ----------
+    sim_dir : str or Path
+        FIRE simulation root directory.
+    nsnap : int, optional
+        Snapshot defining the frame, by default 600.
+    spl : bool, optional
+        Use ``<nsnap>_coords_spl.txt`` rather than ``<nsnap>_coords.txt``,
+        by default ``True``.
+    subdir : str, optional
+        Location of the coords files under *sim_dir*, by default
+        ``"potential/10kpc"``.
+
+    Returns
+    -------
+    ndarray, shape (3, 3)
+        Rotation matrix.  Apply as ``xyz @ R.T``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the coords file does not exist.
+    ValueError
+        If fewer than three uncommented rows are present, or the last three do
+        not form a (3, 3) block.
+
+    Notes
+    -----
+    The rotation is taken as the **last three uncommented rows**, not a fixed
+    line offset: m12m and m12f label the block with a
+    ``# rotation to principal-axis frame`` comment that m12i and m12b omit, so
+    any fixed ``skip_header`` is wrong for half the suite.
+    """
+    suffix = "_coords_spl.txt" if spl else "_coords.txt"
+    path = Path(sim_dir) / subdir / f"{int(nsnap)}{suffix}"
+    if not path.exists():
+        raise FileNotFoundError(f"coords file not found: {path}")
+
+    rows = [
+        line for line in path.read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if len(rows) < 3:
+        raise ValueError(
+            f"{path} has only {len(rows)} uncommented row(s); the rotation "
+            "block is the last three."
+        )
+
+    rot = np.array([[float(v) for v in line.split()] for line in rows[-3:]], dtype=float)
+    if rot.shape != (3, 3):
+        raise ValueError(
+            f"last three rows of {path} give shape {rot.shape}, not (3, 3)."
+        )
+    return rot
+
+
+def read_center_splines(file_pattern: Union[Path, str]) -> list:
+    """
+    Load the three comoving centre-of-mass splines.
+
+    Parameters
+    ----------
+    file_pattern : str or Path
+        Path with one ``{}`` for the component, e.g.
+        ``".../m12i_reg_spl_{}.pickle"``.  A ``.txt`` suffix reads the knot and
+        coefficient columns written by :func:`write_center_splines` instead,
+        and rebuilds an identical ``BSpline``; anything else is unpickled.
+
+    Returns
+    -------
+    list of scipy.interpolate.BSpline
+        Three splines giving the comoving centre [kpc] against time [Gyr], in
+        x, y, z order.
+
+    Raises
+    ------
+    FileNotFoundError
+        If any of the three component files is missing.
+    ValueError
+        If a ``.txt`` file has no parsable ``degree N`` header.
+
+    Notes
+    -----
+    The non-``.txt`` branch calls :func:`pickle.load`, which executes arbitrary
+    code from the file.  Only load pickles you produced yourself; prefer the
+    ``.txt`` form written by :func:`write_center_splines`, which additionally
+    survives scipy and numpy upgrades.
+    """
+    from scipy import interpolate
+
+    out = []
+    for c in "xyz":
+        path = Path(str(file_pattern).format(c))
+        if not path.exists():
+            raise FileNotFoundError(f"centre-spline file not found: {path}")
+        if path.suffix == ".txt":
+            header = path.read_text().splitlines()[0]
+            match = re.search(r"degree\s+(\d+)", header)
+            if match is None:
+                raise ValueError(
+                    f"{path}: expected a 'degree N' header written by "
+                    f"write_center_splines; got {header!r}."
+                )
+            degree = int(match.group(1))
+            knots, coeff = np.loadtxt(path, unpack=True)
+            out.append(interpolate.BSpline(
+                knots, coeff[:len(knots) - degree - 1], degree, extrapolate=True))
+        else:
+            with open(path, "rb") as fh:
+                out.append(pickle.load(fh))
+    return out
+
+
+def write_center_splines(file_pattern: Union[Path, str], center_splines) -> list[str]:
+    """
+    Write the three centre splines as ``(knots, coefficients)`` text.
+
+    Reload with :func:`read_center_splines`, which reconstructs the same
+    ``scipy.interpolate.BSpline`` bit for bit.  Unlike a pickle this survives
+    scipy and numpy upgrades, and carries no code-execution risk on read.
+
+    Parameters
+    ----------
+    file_pattern : str or Path
+        Path with one ``{}`` for the component, e.g.
+        ``".../m12i_reg_spl_{}.txt"``.  Must end in ``.txt`` to be readable
+        back by :func:`read_center_splines`.
+    center_splines : sequence of scipy.interpolate.BSpline
+        Three BSplines, in x, y, z order.
+
+    Returns
+    -------
+    list of str
+        The three paths written.
+
+    Raises
+    ------
+    ValueError
+        If *center_splines* does not hold exactly three splines, or a spline
+        has more coefficients than knots.
+    """
+    splines = list(center_splines)
+    if len(splines) != 3:
+        raise ValueError(f"expected 3 centre splines (x, y, z); got {len(splines)}.")
+
+    written: list[str] = []
+    for c, sp in zip("xyz", splines):
+        if len(sp.c) > len(sp.t):
+            raise ValueError(
+                f"spline '{c}' has {len(sp.c)} coefficients but only {len(sp.t)} "
+                "knots; it cannot be stored as two aligned columns."
+            )
+        col = np.zeros(len(sp.t))
+        col[:len(sp.c)] = sp.c
+        path = Path(str(file_pattern).format(c))
+        np.savetxt(
+            path, np.column_stack([sp.t, col]), fmt="%.17g",
+            header=f"degree {sp.k}, {len(sp.c)} coefficients\nknot  coefficient",
+        )
+        written.append(str(path))
+    return written
+
+
+def center_acceleration_table(
+    center_splines,
+    rotation: np.ndarray,
+    cosmo,
+    t_range: Optional[tuple[float, float]] = None,
+    n_samples: int = 1201,
+) -> np.ndarray:
+    """
+    Tabulate ``-u_dot``, the galactic-centre correction, on a uniform time grid.
+
+    This is the ``(n_samples, 4)`` array behind :func:`center_acceleration`;
+    see there for the physics and for the parameters.
+
+    Parameters
+    ----------
+    center_splines : str, Path, or sequence
+        A ``{}`` path pattern, or three splines from
+        :func:`read_center_splines`.
+    rotation : ndarray, shape (3, 3)
+        From :func:`read_rotation`.
+    cosmo : nbody_streams.utils.FlatLCDM
+        Background cosmology.
+    t_range : (float, float), optional
+        Range [Gyr] to tabulate; defaults to the splines' knot range.
+    n_samples : int, optional
+        Number of rows, by default 1201.
+
+    Returns
+    -------
+    ndarray, shape (n_samples, 4)
+        Columns ``t`` [Gyr] and ``-u_dot`` x, y, z [(km/s)^2/kpc], in the
+        integration frame.
+
+    Raises
+    ------
+    ValueError
+        If *rotation* is not (3, 3), *t_range* is empty, or *n_samples* < 2.
+
+    Notes
+    -----
+    *t_range* is taken as given and is **not** clipped to the splines' knot
+    range, so it can reach the last snapshot: the FIRE centre splines end at
+    snapshot 598, 4.4 Myr short of snapshot 600, and initial conditions at the
+    present day would otherwise sit outside the table.  The splines extrapolate
+    with their final polynomial piece over that gap, which is what the
+    pipeline's own ``599/600_coords_spl.txt`` already contain.
+    """
+    if isinstance(center_splines, (str, os.PathLike)):
+        center_splines = read_center_splines(center_splines)
+
+    rotation = np.asarray(rotation, dtype=float)
+    if rotation.shape != (3, 3):
+        raise ValueError(f"rotation must have shape (3, 3); got {rotation.shape}.")
+
+    n_samples = int(n_samples)
+    if n_samples < 2:
+        raise ValueError(f"n_samples must be >= 2; got {n_samples}.")
+
+    if t_range is None:
+        s = center_splines[0]
+        lo, hi = (float(s.t[s.k]), float(s.t[-s.k - 1])) if hasattr(s, "k") \
+            else (float(s.x[0]), float(s.x[-1]))
+    else:
+        lo, hi = float(min(t_range)), float(max(t_range))
+        if hi <= lo:
+            raise ValueError(f"t_range {tuple(t_range)} is empty")
+
+    t = np.linspace(lo, hi, n_samples)
+    a = cosmo.scale_factor(t)
+    H = cosmo.hubble_parameter(a=a)
+    d1 = np.column_stack([sp.derivative(1)(t) for sp in center_splines])   # kpc/Gyr
+    d2 = np.column_stack([sp.derivative(2)(t) for sp in center_splines])   # kpc/Gyr^2
+
+    K = KPC_PER_GYR_PER_KMS
+    u_dot = (a[:, None] * d2 / K ** 2 + (a * H)[:, None] * d1 / K) @ rotation.T
+    return np.column_stack([t, -u_dot])
+
+
+def write_center_acceleration(
+    path: Union[Path, str],
+    center_splines,
+    rotation: np.ndarray,
+    cosmo,
+    t_range: Optional[tuple[float, float]] = None,
+    n_samples: int = 1201,
+    ini: bool = True,
+) -> str:
+    """
+    Write the centre-acceleration table, to reload without the splines.
+
+    Reload with ``agama.Potential(type="UniformAcceleration", file=path)``,
+    with ``agama.Potential(<path>.ini)``, or on the GPU with
+    ``PotentialGPU(type="UniformAcceleration", file=path)``; all give forces
+    identical to :func:`center_acceleration`, since the table is parsed by the
+    same reader either way.  The ``.ini`` can be inlined as a component of a
+    master file alongside the host.
+
+    Parameters
+    ----------
+    path : str or Path
+        Destination for the 4-column table.
+    center_splines : str, Path, or sequence
+        A ``{}`` path pattern, or three splines from
+        :func:`read_center_splines`.
+    rotation : ndarray, shape (3, 3)
+        From :func:`read_rotation`.
+    cosmo : nbody_streams.utils.FlatLCDM
+        Background cosmology.
+    t_range : (float, float), optional
+        Range [Gyr] to tabulate; defaults to the splines' knot range.
+    n_samples : int, optional
+        Table length, by default 1201.
+    ini : bool, optional
+        Also write a one-section ``.ini`` beside it, by default ``True``.
+
+    Returns
+    -------
+    str
+        The path written.
+    """
+    table = center_acceleration_table(center_splines, rotation, cosmo, t_range, n_samples)
+    path = Path(path)
+    np.savetxt(
+        path, table, fmt="%.17g",
+        header="t [Gyr]   -u_dot x y z [(km/s)^2/kpc], integration frame",
+    )
+    if ini:
+        path.with_suffix(".ini").write_text(
+            "[Potential]\ntype = UniformAcceleration\n"
+            f"file = {path.resolve()}\n"
+        )
+    return str(path)
+
+
+def center_acceleration(
+    center_splines,
+    rotation: np.ndarray,
+    cosmo,
+    t_range: Optional[tuple[float, float]] = None,
+    n_samples: int = 1201,
+    gpu: bool = False,
+):
+    r"""
+    Galactic-centre correction as a ``UniformAcceleration`` potential.
+
+    The centre's peculiar velocity is ``u = a x_com'``, so
+
+    .. code-block:: text
+
+        u_dot = a x_com'' + H a x_com',
+
+    a *physical* acceleration despite ``x_com`` being comoving.  With
+    ``x_com'`` in kpc/Gyr, ``x_com''`` in kpc/Gyr^2 and
+    ``1 Gyr = K kpc/(km/s)``,
+
+    .. code-block:: text
+
+        u_dot [(km/s)^2/kpc] = a x_com''/K^2 + a H x_com'/K,
+
+    rotated into the integration frame.  The potential carries ``-u_dot``, a
+    fictitious force subtracted from the host force.
+
+    Parameters
+    ----------
+    center_splines : str, Path, or sequence
+        A ``{}`` path pattern, or three splines from
+        :func:`read_center_splines`.
+    rotation : ndarray, shape (3, 3)
+        From :func:`read_rotation`.
+    cosmo : nbody_streams.utils.FlatLCDM
+        Background cosmology.
+    t_range : (float, float), optional
+        Range [Gyr] to tabulate; defaults to the splines' knot range.  Agama
+        extrapolates linearly beyond the table.
+    n_samples : int, optional
+        Table length, by default 1201.  Agama re-splines it, so this is not the
+        snapshot count: a 5 Gyr orbit shifts by 50 pc at 301 samples, 4 pc at
+        601, and 1201 sits at the integrator's noise floor.
+    gpu : bool, optional
+        Return a :class:`~agama_helper.PotentialGPU` instead of an
+        ``agama.Potential``, by default ``False``.  Both interpolate the table
+        with Agama's regularized natural cubic spline, so the two agree to
+        machine precision.
+
+    Returns
+    -------
+    agama.Potential or PotentialGPU
+        Compose with the host, e.g. ``agama.Potential(host, acc)`` on the CPU
+        or ``host_gpu + acc_gpu`` on the GPU.
+
+    See Also
+    --------
+    write_center_acceleration : same table, written to disk.
+    nbody_streams.utils.FlatLCDM
+
+    Notes
+    -----
+    Units are the package-wide (Msol, kpc, km/s), set by
+    ``agama_helper``'s import-time ``agama.setUnits`` call.
+
+    The kpc/Gyr^2 conversion **divides** by ``K^2``; multiplying is wrong by
+    9.4 percent.
+
+    Time units are the usual trap.  Agama's integration variable is
+    kpc/(km/s) = 0.977792 Gyr, and that one variable drives both the dynamics
+    and an ``Evolving`` potential's clock.  Three things must share a
+    convention: the ``.ini`` timestamps, the time column of this table, and
+    ``timestart``/``time``.  Stamping the ``.ini`` in Gyr keeps the snapshot
+    sequence exact but makes elapsed time 2.27 percent short; dividing all
+    three by 0.977792 makes both exact.  Mixing the two desynchronises the
+    centre correction from the host and is not benign.  The centre splines are
+    not among the three -- they stay fit in Gyr and are evaluated in Gyr here.
+
+    The m12i centre splines are quintic smoothing fits with crowded end knots
+    and their second derivative spikes there: ``|u_dot|`` reaches
+    1396 (km/s)^2/kpc at the first knot against 40-160 through the interior,
+    while the position residuals stay a flat 0.2-0.4 kpc.  Pass *t_range* to
+    trim the end intervals if it matters.
+
+    Examples
+    --------
+    >>> from nbody_streams import agama_helper as ah
+    >>> from nbody_streams.utils import FlatLCDM
+    >>> cosmo = FlatLCDM.from_snapshot_times(sim_dir)
+    >>> rot = ah.read_rotation(sim_dir, nsnap=600)
+    >>> acc = ah.center_acceleration(f"{sim_dir}/m12i_reg_spl_{{}}.txt", rot, cosmo)
+    >>> host = ah.load_agama_evolving_potential("m12i_mult.h5", times)
+    >>> pot = agama.Potential(host, acc)
+    """
+    table = center_acceleration_table(center_splines, rotation, cosmo, t_range, n_samples)
+
+    if gpu:
+        from ._potential import PotentialGPU
+        return PotentialGPU(type="UniformAcceleration", file=table)
+
+    try:
+        import agama
+    except ImportError as exc:
+        raise ImportError("agama is required for center_acceleration.") from exc
+    return agama.Potential(type="UniformAcceleration", file=table)

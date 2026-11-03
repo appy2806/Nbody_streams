@@ -43,8 +43,21 @@ def generate_stream_coords(
     degrees : bool, default True
         Return angles in degrees; otherwise radians.
     optimizer_fit : bool, default False
-        If True, apply a scipy.optimize rotation in the phi1-phi2 plane
-        to minimise the spread in phi2 (aligns the stream along phi1).
+        If True, refine the frame by rolling it about ``xhat`` -- the progenitor's
+        own radius vector -- to minimise the scatter in phi2.  That roll is the
+        complete family of rotations leaving the progenitor at
+        ``(phi1, phi2) = (0, 0)``, so the progenitor remains pinned to the origin
+        exactly.  It anchors the frame; a fit that moved it would report a frame
+        different from the one it used.
+
+        .. versionchanged:: unreleased
+           Previously tilted ``zhat`` in both ``xhat`` and ``yhat``.  The ``xhat``
+           component displaced the progenitor by ``arcsin(alpha)`` (up to 4 deg on a
+           real stream sample, 0.06 typical), which is a bug.  Measured on 300 m12i
+           streams, the change shifts the binned disturbance metrics by <1 percent
+           (Spearman > 0.99, they detrend phi2 against phi1 with a cubic) but moves
+           ``width_deg`` by ~24 percent, because the old fit was minimising exactly
+           what the width measures.
     fit_kwargs : dict, optional
         Extra keyword arguments forwarded to ``scipy.optimize.minimize``
         when *optimizer_fit* is True.
@@ -132,37 +145,28 @@ def generate_stream_coords(
     phi1 = np.arctan2(ys, xs)
     phi2 = np.arcsin(zs / rs)
 
-    # --- Optional pole-tilt rotation to minimise phi2 scatter ---
+    # --- Optional roll about the progenitor axis to minimise phi2 scatter ---
     if optimizer_fit:
         from scipy.optimize import minimize
 
         for s in range(S):
-            r_prog_s = xv_prog[s, :3]
             pos_s    = xv[s, :, :3]
             xhat_0   = R[s, :, 0].copy()
             yhat_0   = R[s, :, 1].copy()
             zhat_0   = R[s, :, 2].copy()
 
-            def _build_R_s(params, _xh=xhat_0, _yh=yhat_0, _zh=zhat_0,
-                           _rp=r_prog_s):
-                alpha, beta = params
-                # Tilt zhat linearly in the (xhat, yhat) directions
-                # (exact for small angles; sufficient for stream alignment)
-                zhat_new  = _zh + alpha * _xh + beta * _yh
-                zhat_new /= np.linalg.norm(zhat_new)
-
-                # Repin xhat: project progenitor onto new equatorial plane
-                r_n      = _rp / np.linalg.norm(_rp)
-                xhat_new = r_n - np.dot(r_n, zhat_new) * zhat_new
-                norm_x   = np.linalg.norm(xhat_new)
-                if norm_x < 1e-10:
-                    # Progenitor is too close to new pole — fall back
-                    xhat_new = _xh - np.dot(_xh, zhat_new) * zhat_new
-                    norm_x   = np.linalg.norm(xhat_new)
-                xhat_new /= norm_x
-                yhat_new  = np.cross(zhat_new, xhat_new)
-
-                return np.stack([xhat_new, yhat_new, zhat_new], axis=-1)
+            def _build_R_s(params, _xh=xhat_0, _yh=yhat_0, _zh=zhat_0):
+                # Roll the frame about xhat, which IS the progenitor direction.
+                # This is the complete family of rotations that leaves the
+                # progenitor at (phi1, phi2) = (0, 0): xhat is untouched, so the
+                # progenitor stays pinned exactly, by construction rather than by
+                # numerical luck.  An exact rotation, not a small-angle tilt, so
+                # gamma is unbounded and the parametrisation never saturates.
+                gamma = float(np.atleast_1d(params)[0])
+                c_g, s_g = np.cos(gamma), np.sin(gamma)
+                zhat_new = c_g * _zh + s_g * _yh
+                yhat_new = c_g * _yh - s_g * _zh
+                return np.stack([_xh, yhat_new, zhat_new], axis=-1)
 
             def _cost(params, _pos=pos_s):
                 R_new   = _build_R_s(params)
@@ -171,7 +175,7 @@ def generate_stream_coords(
                 phi2_new = np.arcsin(np.clip(c[:, 2] / r_new, -1.0, 1.0))
                 return np.sum(phi2_new ** 2)
 
-            res    = minimize(_cost, x0=[0.0, 0.0], **(fit_kwargs or {}))
+            res    = minimize(_cost, x0=[0.0], **(fit_kwargs or {}))
             R[s]   = _build_R_s(res.x)
 
         # Recompute phi1, phi2 exactly from updated R — guaranteed consistent

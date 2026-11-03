@@ -2039,6 +2039,7 @@ class ShiftedPotentialGPU(_GPUPotBase):
         # 1. Evaluate center at time t (CPU side, O(1))
         c_cpu = self._center_at(t)
         # 2. Push 3 floats to GPU
+        xyz = cp.asarray(xyz)                      # NumPy input -> GPU (as the other modifiers)
         c_gpu = cp.asarray(c_cpu, dtype=xyz.dtype)
         # 3. CuPy elementwise broadcast (extremely fast, VRAM bandwidth bound)
         return xyz - c_gpu
@@ -2181,6 +2182,197 @@ class ScaledPotentialGPU(_GPUPotBase):
         else:
             results = [self.potential(xyz, t)]
         return results[0] if len(results) == 1 else tuple(results)
+
+
+# ---------------------------------------------------------------------------
+# Rotation modifiers: orientation= (Tilted) and rotation= (Rotating)
+# ---------------------------------------------------------------------------
+
+def _rot_z(angle: float) -> np.ndarray:
+    c, s = np.cos(angle), np.sin(angle)
+    return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+
+
+def euler_matrix(alpha: float, beta: float, gamma: float) -> np.ndarray:
+    """Agama's ``orientation=[alpha, beta, gamma]`` rotation matrix.
+
+    ``R = Rz(alpha) @ Rx(beta) @ Rz(gamma)`` (z-x-z Euler angles, radians).
+    The modified potential is ``Phi(x) = Phi_inner(R^T x)``, i.e. the inner
+    potential's own axes are rotated by ``R``.  ``[0, beta, 0]`` is a rotation
+    by ``beta`` about the x-axis.
+    """
+    cb, sb = np.cos(beta), np.sin(beta)
+    rx = np.array([[1.0, 0.0, 0.0], [0.0, cb, -sb], [0.0, sb, cb]])
+    return _rot_z(alpha) @ rx @ _rot_z(gamma)
+
+
+def _rotate_sym6(d, R):
+    """Rotate symmetric tensors stored as (..., 6) [xx, yy, zz, xy, yz, zx]: R D R^T."""
+    d = cp.asarray(d)
+    single = d.ndim == 1
+    d = d.reshape(-1, 6)
+    M = cp.empty((d.shape[0], 3, 3), dtype=d.dtype)
+    M[:, 0, 0], M[:, 1, 1], M[:, 2, 2] = d[:, 0], d[:, 1], d[:, 2]
+    M[:, 0, 1] = M[:, 1, 0] = d[:, 3]
+    M[:, 1, 2] = M[:, 2, 1] = d[:, 4]
+    M[:, 0, 2] = M[:, 2, 0] = d[:, 5]
+    Rg = cp.asarray(R, dtype=d.dtype)
+    M = cp.einsum('ij,njk,lk->nil', Rg, M, Rg)
+    out = cp.stack([M[:, 0, 0], M[:, 1, 1], M[:, 2, 2],
+                    M[:, 0, 1], M[:, 1, 2], M[:, 2, 0]], axis=1)
+    return out[0] if single else out
+
+
+class _RotatedBase(_GPUPotBase):
+    """Common machinery for ``Phi(x, t) = Phi_inner(R(t)^T x, t)``.
+
+    Nested rotation modifiers collapse into one matrix product, so a stack
+    like Tilted(Rotating(Tilted(inner))) costs a single pair of (N,3)x(3,3)
+    products per call, not three.
+    """
+
+    def __init__(self, inner) -> None:
+        if isinstance(inner, _RotatedBase):
+            self._inner_rot, self._base = inner, inner._base
+        else:
+            self._inner_rot, self._base = None, inner
+
+    def _own_matrix(self, t: float) -> np.ndarray:
+        raise NotImplementedError
+
+    def matrix(self, t: float = 0.0) -> np.ndarray:
+        """Total rotation R(t) (3, 3): ``Phi(x, t) = Phi_base(R(t)^T x, t)``."""
+        R = self._own_matrix(t)
+        if self._inner_rot is not None:
+            R = R @ self._inner_rot.matrix(t)
+        return R
+
+    def _to_inner(self, xyz, t):
+        R = self.matrix(t)
+        xyz = cp.asarray(xyz, dtype=cp.float64)
+        return xyz @ cp.asarray(R), R           # row form of R^T x
+
+    @staticmethod
+    def _vec_out(v, R):
+        return v @ cp.asarray(R).T              # row form of R v
+
+    def potential(self, xyz, t: float = 0.0):
+        xi, _ = self._to_inner(xyz, t)
+        return self._base.potential(xi, t)
+
+    def force(self, xyz, t: float = 0.0):
+        xi, R = self._to_inner(xyz, t)
+        return self._vec_out(self._base.force(xi, t), R)
+
+    def density(self, xyz, t: float = 0.0):
+        xi, _ = self._to_inner(xyz, t)
+        return self._base.density(xi, t)
+
+    def forceDeriv(self, xyz, t: float = 0.0):
+        xi, R = self._to_inner(xyz, t)
+        F, dF = self._base.forceDeriv(xi, t)
+        return self._vec_out(F, R), _rotate_sym6(dF, R)
+
+    def evalDeriv(self, xyz, t: float = 0.0):
+        xi, R = self._to_inner(xyz, t)
+        phi, F, dF = self._base.evalDeriv(xi, t)
+        return phi, self._vec_out(F, R), _rotate_sym6(dF, R)
+
+    def eval(self, xyz, pot: bool = False, acc: bool = False,
+             der: bool = False, t: float = 0.0):
+        if not (pot or acc or der):
+            raise ValueError("eval(): at least one of pot, acc, der must be True.")
+        if der:
+            phi_r, force_r, deriv_r = self.evalDeriv(xyz, t)
+            results = []
+            if pot: results.append(phi_r)
+            if acc: results.append(force_r)
+            results.append(deriv_r)
+        elif acc:
+            results = []
+            if pot: results.append(self.potential(xyz, t))
+            results.append(self.force(xyz, t))
+        else:
+            results = [self.potential(xyz, t)]
+        return results[0] if len(results) == 1 else tuple(results)
+
+
+class TiltedPotentialGPU(_RotatedBase):
+    """
+    Static rotation: Agama's ``orientation=`` modifier.
+
+    ``Phi(x) = Phi_inner(R^T x)`` with ``R = euler_matrix(alpha, beta, gamma)``
+    (z-x-z Euler angles in radians; see :func:`euler_matrix`).
+
+    Parameters
+    ----------
+    inner : any GPU potential
+    orientation : (3,) array-like ``[alpha, beta, gamma]``, or a string
+        ``"alpha beta gamma"`` (INI form).
+    """
+
+    def __init__(self, inner, orientation) -> None:
+        if isinstance(orientation, str):
+            orientation = [float(v) for v in orientation.replace(',', ' ').split()]
+        ang = np.asarray(orientation, dtype=np.float64)
+        if ang.shape != (3,):
+            raise ValueError("orientation must be three Euler angles [alpha, beta, gamma].")
+        self.orientation = ang
+        self._R = euler_matrix(*ang)
+        super().__init__(inner)
+
+    def _own_matrix(self, t: float) -> np.ndarray:
+        return self._R
+
+
+class RotatingPotentialGPU(_RotatedBase):
+    """
+    Rotation about the z-axis: Agama's ``rotation=`` modifier.
+
+    ``Phi(x, t) = Phi_inner(Rz(angle(t))^T x, t)``: the inner potential is
+    turned counter-clockwise by ``angle(t)`` about z.
+
+    Parameters
+    ----------
+    inner : any GPU potential
+    rotation : float, (T, 2) array, or path
+        * ``float`` : constant angle [rad] (as in Agama, *not* a pattern
+          speed).  For uniform rotation pass a two-row table
+          ``[[t0, 0], [t1, Omega * (t1 - t0)]]``.
+        * ``(T, 2)`` ``[t, angle]`` table : regularized natural cubic spline,
+          linear extrapolation outside the table (Agama's
+          ``readTimeDependentArray``).
+        * ``(T, 3)`` ``[t, angle, dangle/dt]`` : cubic Hermite spline.
+        * ``str`` / ``Path`` : a number, or a text file holding such a table.
+    """
+
+    def __init__(self, inner, rotation) -> None:
+        if isinstance(rotation, (str, Path)):
+            try:
+                rotation = float(rotation)
+            except ValueError:
+                rotation = np.loadtxt(rotation, ndmin=2)
+        arr = np.asarray(rotation, dtype=np.float64)
+        if arr.ndim == 0:
+            self._is_static, self._R = True, _rot_z(float(arr))
+        elif arr.ndim == 2 and arr.shape[1] in (2, 3):
+            self._is_static = False
+            ders = arr[:, 2:3] if arr.shape[1] == 3 else None
+            self._spline = _AgamaTimeSpline(arr[:, 0], arr[:, 1:2], ders)
+        else:
+            raise ValueError("rotation must be a float or a (T,2)/(T,3) [t, angle(, dangle/dt)] table.")
+        super().__init__(inner)
+
+    def angle(self, t: float = 0.0) -> float:
+        """Rotation angle [rad] at time *t*."""
+        if self._is_static:
+            return float(np.arctan2(self._R[1, 0], self._R[0, 0]))
+        return self._spline(t)[0]
+
+    def _own_matrix(self, t: float) -> np.ndarray:
+        if self._is_static:
+            return self._R
+        return _rot_z(self._spline(t)[0])
 
 
 # ---------------------------------------------------------------------------
@@ -2365,8 +2557,11 @@ def _get_analytic_map() -> dict:
     return _ANALYTIC_TYPE_MAP
 
 
-def _apply_modifiers(pot, center, scale, ampl):
-    """Wrap *pot* with Shifted/Scaled modifiers if requested.
+def _apply_modifiers(pot, center, scale, ampl, orientation=None, rotation=None):
+    """Wrap *pot* with Scaled/Rotating/Tilted/Shifted modifiers if requested.
+
+    Order (innermost first) matches Agama: scale, rotation, orientation, center,
+    i.e. ``Phi(x) = Phi_in(Rz(angle)^T R_orient^T (x - center))``.
 
     ``scale`` may be:
     * ``None`` or a float : passed through as-is.
@@ -2390,6 +2585,10 @@ def _apply_modifiers(pot, center, scale, ampl):
                     "Expected a float, 'ampl scale' pair, or (T,2)/(T,3) array."
                 )
         pot = ScaledPotentialGPU(pot, scale=scale if scale is not None else 1.0, ampl=ampl)
+    if rotation is not None:
+        pot = RotatingPotentialGPU(pot, rotation=rotation)
+    if orientation is not None:
+        pot = TiltedPotentialGPU(pot, orientation=orientation)
     if center is not None:
         pot = ShiftedPotentialGPU(pot, center=center)
     return pot
@@ -2674,6 +2873,8 @@ def _build_single(source, pot_kw: dict):
         cen_  = _pop_ci(d, 'center')
         sc_   = _pop_ci(d, 'scale')
         am_   = float(_pop_ci(d, 'ampl') or 1.0)
+        or_   = _pop_ci(d, 'orientation')
+        rot_  = _pop_ci(d, 'rotation')
         # Do NOT normalize here: Agama-routed factories (Spheroid, King, Disk)
         # pass kwargs directly to agama.Potential which is case-insensitive.
         # GPU-native constructors (NFW, Plummer, …) normalize inside PotentialGPU.
@@ -2691,7 +2892,7 @@ def _build_single(source, pot_kw: dict):
             pot = MultipolePotentialGPU.from_file(coef_ref)
         else:
             pot = PotentialGPU(type=type_s, **d)
-        return _apply_modifiers(pot, cen_, sc_, am_)
+        return _apply_modifiers(pot, cen_, sc_, am_, or_, rot_)
 
     if isinstance(source, (str, Path)):
         p = Path(source)
@@ -2743,6 +2944,8 @@ def PotentialGPU(*args,
                  center        = None,
                  scale:  float | None = None,
                  ampl:   float        = 1.0,
+                 orientation   = None,
+                 rotation      = None,
                  **kw):
     """
     GPU potential factory : mirrors the ``agama.Potential`` API.
@@ -2774,6 +2977,8 @@ def PotentialGPU(*args,
         PotentialGPU(coefs_lmc, center=LMC_traj[:, :4])   # time-varying shift
         PotentialGPU(coefs_lmc, center=[x0, y0, z0])       # static shift
         PotentialGPU(coefs_lmc, scale=2.0, ampl=0.5)       # scaled
+        PotentialGPU(coefs_halo, orientation=[0, 0.3, 0])  # tilted 0.3 rad about x
+        PotentialGPU(coefs_bar, rotation=angle_table)      # [t, angle] about z
 
     Parameters
     ----------
@@ -2805,6 +3010,14 @@ def PotentialGPU(*args,
         Wrap the result in ``ScaledPotentialGPU(scale=scale, ampl=ampl)``.
     ampl : float, optional
         Amplitude multiplier for ``ScaledPotentialGPU`` (default 1.0).
+    orientation : (3,) array-like, optional
+        Euler angles ``[alpha, beta, gamma]`` (z-x-z, rad): wrap in
+        ``TiltedPotentialGPU``, as Agama's ``orientation=``.
+    rotation : float or (T, 2) / (T, 3) array, optional
+        Angle about z (constant, or a ``[t, angle]`` table): wrap in
+        ``RotatingPotentialGPU``, as Agama's ``rotation=``.  When several
+        modifiers are given they nest as in Agama: scale, rotation,
+        orientation, center (innermost first).
     **kw
         For analytic types: constructor kwargs (mass, scaleRadius, ...).
         For expansion types: forwarded to ``MultipolePotentialGPU``.
@@ -2816,7 +3029,7 @@ def PotentialGPU(*args,
     if len(args) > 1:
         components = [_build_single(a, pot_kw) for a in args]
         pot = CompositePotentialGPU(components)
-        return _apply_modifiers(pot, center, scale, ampl)
+        return _apply_modifiers(pot, center, scale, ampl, orientation, rotation)
 
     # --- type= dispatch ---
     if type is not None:
@@ -2830,21 +3043,21 @@ def PotentialGPU(*args,
                     "type='CylSpline' requires file= to specify the coefficient file."
                 )
             pot = CylSplinePotentialGPU.from_file(file, **pot_kw)
-            return _apply_modifiers(pot, center, scale, ampl)
+            return _apply_modifiers(pot, center, scale, ampl, orientation, rotation)
         if key == 'multipole':
             if file is None:
                 raise ValueError(
                     "type='Multipole' requires file= to specify the coefficient file."
                 )
             pot = MultipolePotentialGPU.from_file(file, **pot_kw)
-            return _apply_modifiers(pot, center, scale, ampl)
+            return _apply_modifiers(pot, center, scale, ampl, orientation, rotation)
         # UniformAcceleration takes file= as the time-dependent acceleration
         # table, not as a coefficient file — route it so file= is honoured
         # instead of being silently dropped by the analytic map below.
         if key == 'uniformacceleration' and file is not None:
             amap = _get_analytic_map()
             pot  = amap[key](file=file, **_normalize_params(kw))
-            return _apply_modifiers(pot, center, scale, ampl)
+            return _apply_modifiers(pot, center, scale, ampl, orientation, rotation)
         amap = _get_analytic_map()
         cls  = amap.get(key)
         if cls is None:
@@ -2862,19 +3075,19 @@ def PotentialGPU(*args,
             # pass kwargs through unchanged — agama.Potential is case-insensitive
             # and the factory handles its own internal normalization via _kl.
             pot = cls(**kw)
-        return _apply_modifiers(pot, center, scale, ampl)
+        return _apply_modifiers(pot, center, scale, ampl, orientation, rotation)
 
     # --- file= shorthand ---
     if file is not None:
         p = Path(file)
         pot = _load_potential_ini(p) if _is_potential_ini(p) \
               else MultipolePotentialGPU.from_file(file, **pot_kw)
-        return _apply_modifiers(pot, center, scale, ampl)
+        return _apply_modifiers(pot, center, scale, ampl, orientation, rotation)
 
     # --- single positional arg ---
     if len(args) == 1:
         pot = _build_single(args[0], pot_kw)
-        return _apply_modifiers(pot, center, scale, ampl)
+        return _apply_modifiers(pot, center, scale, ampl, orientation, rotation)
 
     raise TypeError(
         "PotentialGPU() requires at least one argument, type=, or file=."

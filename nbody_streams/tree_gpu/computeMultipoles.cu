@@ -113,6 +113,13 @@ namespace multipoles
       typename vec<3,real_t>::type rmin = {+huge,+huge,+huge};
       typename vec<3,real_t>::type rmax = {-huge,-huge,-huge};
       double4 M = {0.0};
+      /* Moments are accumulated about a reference point inside the cell (its
+       * first particle), not about the coordinate origin.  The quadrupole is
+       * Q = <xx> - <x><x>; with float32 raw moments about the origin this
+       * cancels catastrophically when the cell is small compared with its
+       * distance from the origin (relative error ~ 6e-8 (|X|/l)^2, e.g. 1 pc
+       * cells at 40 kpc). */
+      double refx = 0.0, refy = 0.0, refz = 0.0;
       Quadrupole<double> Q;
       float cellEpsMax = 0.0f;   /* max eps over all particles in this cell */
 
@@ -126,6 +133,10 @@ namespace multipoles
       {
         const int firstBody = cell.pbeg();
         const int  lastBody = cell.pend();
+        const Particle4<real_t> pref(ptclPos[firstBody]);
+        refx = pref.x();
+        refy = pref.y();
+        refz = pref.z();
 
         for (int i = firstBody; i < lastBody; i += WARP_SIZE)
         {
@@ -140,8 +151,12 @@ namespace multipoles
 #else
           typedef float treal;
 #endif
-          addMonopole<treal>(M, ptcl);
-          addQuadrupole<treal>(Q, ptcl);
+          Particle4<real_t> prel = ptcl;   /* position relative to the reference point */
+          prel.x() -= static_cast<real_t>(refx);
+          prel.y() -= static_cast<real_t>(refy);
+          prel.z() -= static_cast<real_t>(refz);
+          addMonopole<treal>(M, prel);
+          addQuadrupole<treal>(Q, prel);
 
           /* warp-level max reduction for eps */
           const float ei_raw = __ldg(&ptclEps[min(i+laneIdx, lastBody-1)]);
@@ -168,6 +183,10 @@ namespace multipoles
         Q.xz() = Q.xz()*inv_mass - M.x*M.z;
         Q.yz() = Q.yz()*inv_mass - M.y*M.z;
 #endif
+        /* back to absolute coordinates (the quadrupole is translation invariant) */
+        M.x += refx;
+        M.y += refy;
+        M.z += refz;
 #if 0
         {
           const double Qtmp = Q1.y;

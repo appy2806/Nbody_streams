@@ -166,10 +166,16 @@ The stream frame is defined by the angular momentum vector of the progenitor
 orbit.  Particles are projected into a rotated frame where phi1 runs along
 the stream and phi2 measures the perpendicular offset.
 
-When `optimizer_fit=True` the frame is refined by a 3-D pole tilt (tilting
-`zhat` in the `xhat`/`yhat` directions) rather than a simple in-plane
-rotation.  This correctly minimises the physical scatter in phi2 and keeps
-the returned `R` consistent with the final coordinates.
+When `optimizer_fit=True` the frame is refined by rolling it about `xhat` -- the
+progenitor's own radius vector -- to minimise the physical scatter in phi2.  That
+roll is the complete family of rotations leaving the progenitor at
+`(phi1, phi2) = (0, 0)`, so **the progenitor stays pinned to the origin exactly**.
+The returned `R` is the final rotation, consistent with the coordinates.
+
+Before this was fixed the frame was tilted in both `xhat` and `yhat`; the `xhat`
+component displaced the progenitor by `arcsin(alpha)`, up to 4 deg on a real stream
+sample.  Downstream effect measured on 300 m12i streams: binned disturbance metrics
+shift <1 per cent (Spearman > 0.99), `width_deg` by ~24 per cent.
 
 **Parameters**
 
@@ -179,7 +185,7 @@ the returned `R` consistent with the final coordinates.
 | `xv_prog` | ndarray `(6,)`, `(S, 6)`, or None | Progenitor phase-space vector(s). If None, the particle closest to the median position of each stream is used. |
 | `return_rotation` | bool | If True, also return the rotation matrix `R` that defines the stream frame. Default False. |
 | `degrees` | bool | Return angles in degrees; otherwise radians. Default True. |
-| `optimizer_fit` | bool | If True, apply a 3-D pole-tilt optimisation to minimise the spread in phi2 (aligns the stream along phi1). |
+| `optimizer_fit` | bool | If True, roll the frame about `xhat` (the progenitor direction) to minimise the spread in phi2. The progenitor stays exactly at the origin. |
 | `fit_kwargs` | dict or None | Extra kwargs forwarded to `scipy.optimize.minimize` when `optimizer_fit=True`. |
 
 **Returns**
