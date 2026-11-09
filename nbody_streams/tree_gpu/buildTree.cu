@@ -3,6 +3,15 @@
 #define NWARPS_OCTREE2 3
 #define NWARPS2 NWARPS_OCTREE2
 #define NWARPS  (1<<NWARPS2)
+/* Deepest cell level.  Children created at this level become leaves even
+ * when they hold more than NLEAF particles: particles closer than the float
+ * resolution of the box (e.g. exact duplicates) can never be separated, and
+ * without the cap the split recursion ran past level 31, the limit of the
+ * host level loop and of CellData's 5-bit level field, leaving cells unwritten
+ * and corrupting every force.  An oversized leaf is handled exactly by the
+ * walk (direct sum over its particles in warp-sized chunks) and by
+ * leafMultipoles.  Balanced trees are ~15-20 levels deep. */
+#define TREE_MAX_LEVEL 30
 #define MAX_WORK 262144 // default was 65536 (2^16), try to increase if you get "Error: pending work queue overflow, increase MAX_WORK and recompile" message
 // 1048576 is 2^20, which should be enough for 10^7 particles, but you can increase it further if you have more particles
 #include <thrust/device_ptr.h>
@@ -413,8 +422,10 @@ namespace treeBuild
       const int npCell = laneIdx < 8 ? shmem[laneIdx] : 0;
 
       /* compute number of children that needs to be further split, and cmopute their offsets */
-      const int2 nSubNodes = warpBinExclusiveScan(npCell > NLEAF);
-      const int2 nLeaves   = warpBinExclusiveScan(npCell > 0 && npCell <= NLEAF);
+      /* children of this cell live at level+1; at the depth cap none split */
+      const int splitAbove = (level + 1 < TREE_MAX_LEVEL) ? NLEAF : 0x7FFFFFFF;
+      const int2 nSubNodes = warpBinExclusiveScan(npCell > splitAbove);
+      const int2 nLeaves   = warpBinExclusiveScan(npCell > 0 && npCell <= splitAbove);
       if (warpIdx == 0 && laneIdx < 8)
       {
         shmem[8 +laneIdx] = nSubNodes.x;
@@ -463,7 +474,7 @@ namespace treeBuild
       const int leafOffset = shmem[16+warpIdx];
 
       /* if cell needs to be split, populate it shared atomic data */
-      if (nCell > NLEAF)
+      if (nCell > splitAbove)
       {
         int *octCounterN = octCounterNbase + nodeOffset*(8+8+8+64+8);
 
@@ -501,7 +512,7 @@ namespace treeBuild
       if (nSubNodes.y > 0 && warpIdx == 0)
       {
         /* build octant mask */
-        int octant_mask = npCell > NLEAF ?  (laneIdx << (3*nSubNodes.x)) : 0;
+        int octant_mask = npCell > splitAbove ?  (laneIdx << (3*nSubNodes.x)) : 0;
 #pragma unroll
         for (int i = 4; i >= 0; i--)
           octant_mask |= __shfl_xor_sync(FULL_MASK, octant_mask, 1<<i, WARP_SIZE);
@@ -529,7 +540,7 @@ namespace treeBuild
       /* process leaves */
       /******************/
 
-      if (nCell <= NLEAF && nCell > 0)
+      if (nCell <= splitAbove && nCell > 0)
       {
         if (laneIdx == 0)
         {

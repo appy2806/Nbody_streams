@@ -6,6 +6,7 @@ test_guards.py -- Regression tests for GPU-tree input guards and conventions.
   3. theta passed with a pre-built TreeGPU handle is honoured.
   4. Non-positive softening raises ValueError.
   5. Results are deterministic across repeated calls (leaf-list race).
+  7. Coincident particles (more than nleaf at one point) give correct forces.
   6. run_nbody_gpu_tree evolves an offset, moving cluster like the same
      cluster at rest at the origin (float64 state + recentred tree).
 """
@@ -128,3 +129,19 @@ def test_integrator_galilean_invariance():
     dx = np.linalg.norm(out[0][:, :3] - out[1][:, :3], axis=1)
     # float32 absolute coordinates at 40 kpc would round each drift by ~2e-6 kpc
     assert np.median(dx) < 1e-6
+
+
+@pytest.mark.parametrize("k", [65, 1000])
+def test_coincident_particles(k):
+    """More than nleaf particles at one point: the depth cap turns them into a
+    single oversized leaf instead of splitting past the 31-level limit (which
+    left cells unwritten and corrupted every force)."""
+    rng = np.random.default_rng(0)
+    x = np.vstack([rng.normal(size=(10_000, 3)), np.tile([0.3, 0.2, 0.1], (k, 1))])
+    m = np.full(len(x), 1.0 / len(x))
+    acc, phi = tree_gravity_gpu(cp.asarray(x, dtype=cp.float32), cp.asarray(m, dtype=cp.float32),
+                                0.01, G=1.0, theta=0.6)
+    assert bool(cp.isfinite(acc).all()) and bool(cp.isfinite(phi).all())
+    ref = compute_nbody_forces_gpu(x, m, softening=0.01, G=1.0, precision="float64",
+                                   kernel="plummer", return_cupy=True)
+    assert np.percentile(_rel_err(acc, ref), 99) < 1e-2
