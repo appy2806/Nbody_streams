@@ -2,363 +2,151 @@
 
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
-#include <thrust/scan.h>
 #include <thrust/execution_policy.h>
+
+/* Interaction groups for the tree walk, built from tree cells.
+ *
+ * A group is a set of <= nCrit particles that walk the tree together, sharing
+ * one opening test against the group's bounding box, so a group must be
+ * spatially compact.  Groups used to be fixed chunks of nCrit particles along
+ * a Peano-Hilbert ordering, split only at level-`levelSplit` key boundaries.
+ * When far outliers inflate the domain, one level-5 cell holds the whole
+ * system and a chunk can straddle the dense core and the sparse halo: its box
+ * then covers the core, every cell is opened, and one warp sums directly over
+ * all N particles while the rest of the GPU waits.  Measured: a Plummer
+ * sphere with 2M (3M) particles had one group with 2.0M (3.0M) direct
+ * interactions per particle against an average of ~4000, and the force pass
+ * took 17x (28x) longer than at 1M.  Which N trigger it depends on where the
+ * chunk boundaries land.
+ *
+ * Now groups are cut from "container" cells: cells with <= GROUP_CONTAINER_FACTOR
+ * * nCrit particles whose parent has more (or top-level cells).  Each
+ * container's contiguous particle range (tree order) is cut into
+ * ceil(n/nCrit) equal chunks; buildTree sorts the particles inside each leaf
+ * by original index, so the membership is reproducible.  A chunk can only
+ * straddle regions inside one container, so the worst case is bounded by the container size instead of
+ * N (measured max ~1e4 direct interactions per particle at 1M-3M).
+ * Every particle is in exactly one container: the first cell on its path
+ * from the top with <= GROUP_CONTAINER_FACTOR * nCrit particles.
+ *
+ * GROUP_CONTAINER_FACTOR = 32 (containers of <= 2048 particles for nCrit =
+ * 64): against the Peano-Hilbert groups, median force errors are 9-14% lower
+ * and 99th percentiles equal within 3% (Hernquist 1e5/1e6, tracer mixes,
+ * offset cluster); smaller containers give smaller, less full groups (K = 1,
+ * i.e. pure cell groups, was 2x slower), larger ones a larger worst case.
+ *
+ * Groups index particles in tree order (the order of d_ptclPos), so the walk
+ * reads query particles and their softening from the tree-ordered arrays: no
+ * Peano-Hilbert sort or particle reshuffle.
+ */
+#define GROUP_CONTAINER_FACTOR 32
 
 namespace makeGroups
 {
+  __device__ unsigned int groupCounter = 0;
 
-  template<typename T>
-    static __global__ void shuffle(const int n, const int *map, const T *in, T *out)
-    {
-      const int gidx = blockDim.x*blockIdx.x + threadIdx.x;
-      if (gidx >= n) return;
-
-      out[gidx] = in[map[gidx]];
-    }
-
-  /* Gather float array into group order: out[i] = in[map[i]] */
-  static __global__ void gather_float(const int n, const int *map, const float *in, float *out)
+  static __device__ __forceinline__ void emit(GroupData *groupList, const int pbeg, const int np)
   {
-    const int gidx = blockDim.x*blockIdx.x + threadIdx.x;
-    if (gidx >= n) return;
-    out[gidx] = in[map[gidx]];
+    const int g = atomicAdd(&groupCounter, 1);
+    groupList[g] = GroupData(pbeg, np);
   }
 
-  template<int NBITS>
-    static __device__ unsigned long long get_key(int3 crd)
-    {
-      int i,xi, yi, zi;
-      int mask;
-      unsigned long long key;
-
-      //0= 000, 1=001, 2=011, 3=010, 4=110, 5=111, 6=101, 7=100
-      //000=0=0, 001=1=1, 011=3=2, 010=2=3, 110=6=4, 111=7=5, 101=5=6, 100=4=7
-      const int C[8] = {0, 1, 7, 6, 3, 2, 4, 5};
-
-      int temp;
-
-      mask = 1 << (NBITS - 1);
-      key  = 0;
-
-#if 0
-      uint4 key_new;
-#endif
-
-#pragma unroll
-      for(i = 0; i < NBITS; i++, mask >>= 1)
-      {
-        xi = (crd.x & mask) ? 1 : 0;
-        yi = (crd.y & mask) ? 1 : 0;
-        zi = (crd.z & mask) ? 1 : 0;        
-
-        const int index = (xi << 2) + (yi << 1) + zi;
-
-        int Cvalue;
-        if(index == 0)
-        {
-          temp = crd.z; crd.z = crd.y; crd.y = temp;
-          Cvalue = C[0];
-        }
-        else  if(index == 1 || index == 5)
-        {
-          temp = crd.x; crd.x = crd.y; crd.y = temp;
-          if (index == 1) Cvalue = C[1];
-          else            Cvalue = C[5];
-        }
-        else  if(index == 4 || index == 6)
-        {
-          crd.x = (crd.x) ^ (-1);
-          crd.z = (crd.z) ^ (-1);
-          if (index == 4) Cvalue = C[4];
-          else            Cvalue = C[6];
-        }
-        else  if(index == 7 || index == 3)
-        {
-          temp  = (crd.x) ^ (-1);         
-          crd.x = (crd.y) ^ (-1);
-          crd.y = temp;
-          if (index == 3) Cvalue = C[3];
-          else            Cvalue = C[7];
-        }
-        else
-        {
-          temp = (crd.z) ^ (-1);         
-          crd.z = (crd.y) ^ (-1);
-          crd.y = temp;          
-          Cvalue = C[2];
-        }   
-
-        key = (key<<3) + Cvalue;
-
-#if 0
-        if(i == 19)
-        {
-          key_new.y = key;
-          key = 0;
-        }
-        if(i == 9)
-        {
-          key_new.x = key;
-          key = 0;
-        }
-#endif
-      } //end for
-
-#if 0
-      key_new.z = key;
-
-      return key_new;
-#else
-      return key;
-#endif
-    }
-
-  template<int NBINS, typename real_t>
-    static __global__
-    void computeKeys(
-        const int n,
-        const Box<real_t> *d_domain,
-        const Particle4<real_t> *ptclPos,
-        __out unsigned long long *keys,
-        __out int *values)
-    {
-      const int idx = blockIdx.x*blockDim.x + threadIdx.x;
-      if (idx >= n) return;
-
-      const Particle4<real_t> ptcl = ptclPos[idx];
-
-      const Box<real_t> domain = d_domain[0];
-      const real_t inv_domain_size = static_cast<real_t>(0.5f)/domain.hsize;
-      const Position<real_t> bmin(
-          domain.centre.x - domain.hsize,
-          domain.centre.y - domain.hsize,
-          domain.centre.z - domain.hsize);
-
-      const int xc = static_cast<int>((ptcl.x() - bmin.x) * inv_domain_size * (1<<NBINS));
-      const int yc = static_cast<int>((ptcl.y() - bmin.y) * inv_domain_size * (1<<NBINS));
-      const int zc = static_cast<int>((ptcl.z() - bmin.z) * inv_domain_size * (1<<NBINS));
-
-      keys  [idx] = get_key<NBINS>(make_int3(xc,yc,zc));
-      values[idx] = idx;
-    }
-
-  static __global__
-    void mask_keys(
-        const int n, 
-        const unsigned long long mask,
-        unsigned long long *keys,
-        unsigned long long *keys_inv,
-        int *ptclBegIdx,
-        int *ptclEndIdx)
-    {
-      const int gidx = blockIdx.x*blockDim.x + threadIdx.x;
-      if (gidx >= n) return;
-
-#if 0
-      if (gidx < 100)
-      {
-        printf("gidx= %d : keys= %llx  maks= %llx  res= %llx\n",
-            gidx, keys[gidx], mask, keys[gidx] & mask);
-      }
-
-#endif
-      keys[gidx] &= mask;
-      keys_inv[n-gidx-1] = keys[gidx];
-
-      extern __shared__ unsigned long long shKeys[];
-
-      const int tid = threadIdx.x;
-      shKeys[tid+1] = keys[gidx] & mask;
-
-      // compute signed block range safely (avoid unsigned underflow when blockIdx.x==0)
-      const int blockStart = int(blockIdx.x) * int(blockDim.x);
-      const int blockEnd   = min(blockStart + int(blockDim.x) - 1, n - 1);
-
-      int shIdx = 0;
-      int gmIdx = max(blockStart - 1, 0);        // signed subtraction: safe now
-      if (tid == 1)
-      {
-        shIdx = blockDim.x+1;
-        gmIdx = min(blockEnd + 1, n-1);
-      }
-      if (tid < 2)
-        shKeys[shIdx] = keys[gmIdx] & mask;
-
-      __syncthreads();
-
-      const int idx = tid+1;
-      const unsigned long long currKey = shKeys[idx  ];
-      const unsigned long long prevKey = shKeys[idx-1];
-      const unsigned long long nextKey = shKeys[idx+1];
-
-      if (currKey != prevKey || gidx == 0)
-        ptclBegIdx[gidx] = gidx;
-      else
-        ptclBegIdx[gidx] = 0;
-
-      if (currKey != nextKey || gidx == n-1)
-        ptclEndIdx[n-1-gidx] = gidx+1;
-      else
-        ptclEndIdx[n-1-gidx] = 0;
-
-    }
-
-  __device__ unsigned int groupCounter= 0;
-
-  static __global__
-    void make_groups(const int n, const int nCrit,
-        const int *ptclBegIdx, 
-        const int *ptclEndIdx,
-        GroupData *groupList)
-    {
-      const int gidx = blockDim.x * blockIdx.x + threadIdx.x;
-      if (gidx >= n) return;
-
-      const int ptclBeg = ptclBegIdx[gidx];
-      assert(gidx >= ptclBeg);
-
-      const int igroup   = (gidx - ptclBeg)/nCrit;
-      const int groupBeg = ptclBeg + igroup * nCrit;
-
-#if 0
-      if (gidx < 100)
-        printf("gidx= %d  groupBeg =%d\n",gidx, groupBeg);
-      return;
-#endif
-
-      if (gidx == groupBeg)
-      {
-        const int groupIdx = atomicAdd(&groupCounter,1);
-        const int ptclEnd = ptclEndIdx[n-1-gidx];
-        groupList[groupIdx] = GroupData(groupBeg, min(nCrit, ptclEnd - groupBeg));
-      }
-    }
-
-  struct keyCompare
+  /* One thread per cell.  A container is a cell with <= groupMax particles
+   * whose parent has > groupMax (or a top-level cell), or a leaf with more
+   * than groupMax particles (depth cap).  Its contiguous particle range (tree
+   * order, deterministic: buildTree sorts the particles inside each leaf) is
+   * cut into ceil(n/nCrit) equal chunks. */
+  static __global__ void cellGroups(
+      const int nCells,
+      const int topBeg,
+      const int topEnd,                 /* exclusive */
+      const CellData *cells,
+      const int nCrit,
+      const int groupMax,
+      GroupData *groupList)
   {
-    __host__ __device__
-      bool operator()(const unsigned long long x, const unsigned long long y)
-      {
-        return x < y;
-      }
-  };
+    const int idx = blockIdx.x*blockDim.x + threadIdx.x;
+    if (idx >= nCells) return;
 
+    const CellData cell = cells[idx];
+    const int pbeg = cell.pbeg();
+    const int np   = cell.pend() - pbeg;
+    if (np <= 0) return;
+
+    bool container;
+    if (np <= groupMax)
+    {
+      if (idx >= topBeg && idx < topEnd)
+        container = true;
+      else
+      {
+        const CellData parent = cells[cell.parent()];
+        container = (parent.pend() - parent.pbeg()) > groupMax;
+      }
+    }
+    else
+      container = cell.isLeaf();      /* oversized leaf (depth cap) */
+
+    if (!container) return;
+
+    const int nchunk = (np + nCrit - 1) / nCrit;
+    for (int c = 0; c < nchunk; c++)
+    {
+      const int b = (int)(((long long)np * c) / nchunk);
+      const int e = (int)(((long long)np * (c + 1)) / nchunk);
+      emit(groupList, pbeg + b, e - b);
+    }
+  }
+
+  /* GroupData is a packed int2 {pbeg, np}; sorted as int2 (Thrust needs a
+   * default-constructible value type) */
+  struct groupByBeg
+  {
+    __host__ __device__ bool operator()(const int2 a, const int2 b) const
+    {
+      return a.x < b.x;
+    }
+  };
 };
 
   template<typename real_t>
-void Treecode<real_t>::makeGroups(int levelSplit, const int nCrit)
+void Treecode<real_t>::makeGroups(int /* levelSplit: unused, kept for the C API */, const int nCrit)
 {
   this->nCrit = nCrit;
-  const int nthread = 256;
 
-  d_key.realloc(2.0*nPtcl);
-  d_value.realloc(nPtcl);
-  d_groupList.realloc(nPtcl); //nCells);
+  d_groupList.realloc(nPtcl);
 
-  unsigned long long *d_keys = (unsigned long long*)d_key.ptr;
-  int *d_values = d_value.ptr;
+  const double t0 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
 
   nGroups = 0;
   CUDA_SAFE_CALL(cudaMemcpyToSymbol(makeGroups::groupCounter, &nGroups, sizeof(int)));
 
-  const int nblock  = (nPtcl-1)/nthread + 1;
-  const int NBINS = 21; 
+  int2 levels[32];
+  d_level_begIdx.d2h(levels, 32);
+  const int topBeg = levels[1].x;
+  const int topEnd = levels[1].y + 1;
 
-  const double t0 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
-  makeGroups::computeKeys<NBINS,real_t><<<nblock,nthread>>>(nPtcl, d_domain, d_ptclPos, d_keys, d_values);
-
-  levelSplit = std::max(1,levelSplit);  /* pick the coarse segment boundaries at the levelSplit */
-  unsigned long long mask= 0;
-  for (int i = 0; i < NBINS; i++)
-  {
-    mask <<= 3;
-    if (i < levelSplit)
-      mask |= 0x7;
-  }
-  if (verbose){
-    fprintf(stderr, "mask= %llx  \n", mask);
-  }
-
-  /* sort particles by PH key */
-  thrust::device_ptr<unsigned long long> keys_beg(d_keys);
-  thrust::device_ptr<unsigned long long> keys_end(d_keys + nPtcl);
-  thrust::device_ptr<int> vals_beg(d_value.ptr);
-#if 1
-  thrust::sort_by_key(thrust::cuda::par(thrust_alloc), keys_beg, keys_end, vals_beg);
-#else
-  thrust::sort_by_key(keys_beg, keys_end, vals_beg, makeGroups::keyCompare());
-#endif
-
-#if 1
-  makeGroups::shuffle<Particle><<<nblock,nthread>>>(nPtcl, d_value, d_ptclPos, d_ptclPos_tmp);
-
-  /* Shuffle per-particle eps from tree order → group order so that the force kernel
-   * can load eps_i (query particle softening) directly by group index. */
-  makeGroups::gather_float<<<nblock,nthread>>>(nPtcl, d_value, d_ptclEpsTree.ptr, d_ptclEpsGrp.ptr);
-
-  cuda_mem<int> &d_ptclBegIdx = d_grpBegIdx;
-  cuda_mem<int> &d_ptclEndIdx = d_grpEndIdx;
-  cuda_mem<unsigned long long> &d_keys_inv = d_grpKeysInv;
-  makeGroups::mask_keys<<<nblock,nthread,(nthread+2)*sizeof(unsigned long long)>>>(nPtcl, mask, d_keys, d_keys_inv, d_ptclBegIdx, d_ptclEndIdx);
-
-  thrust::device_ptr<int> valuesBeg(d_ptclBegIdx.ptr);
-  thrust::device_ptr<int> valuesEnd(d_ptclEndIdx.ptr);
-  thrust::inclusive_scan_by_key(thrust::cuda::par(thrust_alloc), keys_beg,     keys_end,    valuesBeg, valuesBeg);
-
-  thrust::device_ptr<unsigned long long> keys_inv_beg(d_keys_inv.ptr);
-  thrust::device_ptr<unsigned long long> keys_inv_end(d_keys_inv.ptr + nPtcl);
-  thrust::inclusive_scan_by_key(thrust::cuda::par(thrust_alloc), keys_inv_beg, keys_inv_end, valuesEnd, valuesEnd);
-
-#if 0
-  std::vector<int> beg(nPtcl), end(nPtcl);
-  std::vector<unsigned long long> h_keys(nPtcl);
-  d_ptclBegIdx.d2h(&beg[0]);
-  d_ptclEndIdx.d2h(&end[0]);
-  d_key.d2h((int*)&h_keys[0],2*nPtcl);
-  for (int i = 0; i < nPtcl; i++)
-  {
-    printf("i= %d : keys= %llx beg= %d  end= %d\n", i, h_keys[i], beg[i], end[nPtcl-1-i]);
-  }
-#endif
-
-  makeGroups::make_groups<<<nblock,nthread>>>(nPtcl, nCrit, d_ptclBegIdx, d_ptclEndIdx, d_groupList);
-#endif
-
+  const int nthread = 256;
+  const int nblock  = (nCells - 1)/nthread + 1;
+  makeGroups::cellGroups<<<nblock, nthread>>>(nCells, topBeg, topEnd, d_cellDataList,
+      nCrit, GROUP_CONTAINER_FACTOR * nCrit, d_groupList);
   kernelSuccess("makeGroups");
-  if (verbose){
+
+  CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&nGroups, makeGroups::groupCounter, sizeof(int)));
+
+  /* walk groups in particle (tree) order: neighbouring warps then touch
+   * nearby cells, which keeps the cell data in L2 */
+  static_assert(sizeof(GroupData) == sizeof(int2), "GroupData must be a packed int2");
+  thrust::device_ptr<int2> gbeg(reinterpret_cast<int2*>(d_groupList.ptr));
+  thrust::sort(thrust::cuda::par(thrust_alloc), gbeg, gbeg + nGroups, makeGroups::groupByBeg());
+
+  if (verbose)
+  {
     cudaDeviceSynchronize();
     const double dt = rtc() - t0;
-    fprintf(stderr, " makeGroups done in %g sec : %g Mptcl/sec\n",  dt, nPtcl/1e6/dt);
-  }
-  
-    CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&nGroups, makeGroups::groupCounter, sizeof(int)));
-#if 0
-  assert(0);
-#endif
-
-  if (verbose){
+    fprintf(stderr, " makeGroups done in %g sec : %g Mptcl/sec\n", dt, nPtcl/1e6/dt);
     fprintf(stderr, "nGroup= %d <nCrit>= %g \n", nGroups, nPtcl*1.0/nGroups);
   }
-#if 0
-  {
-    std::vector<int2> groups(nGroups);
-    d_groupList.d2h((GroupData*)&groups[0], nGroups);
-    int np_in_group = 0;
-    for (int i = 0 ;i < nGroups; i++)
-    {
-#if 0
-      printf("groupdIdx= %d  :: pbeg= %d  np =%d \n", i, groups[i].x, groups[i].y);
-#else
-      np_in_group += groups[i].y;
-#endif
-    }
-    printf("np_in_group= %d    np= %d\n", np_in_group, nPtcl);
-    assert(0);
-  }
-#endif
-
 }
 
 #include "TreecodeInstances.h"
-

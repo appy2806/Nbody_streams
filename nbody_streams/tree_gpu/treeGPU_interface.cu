@@ -3,7 +3,8 @@
  * Per-particle softening:
  *   eps is carried through the pipeline via ptclVel.x.
  *   buildTree extracts it into d_ptclEpsTree (tree order).
- *   makeGroups shuffles it into d_ptclEpsGrp  (group order).
+ *   makeGroups builds walk groups from tree cells, so groups index the
+ *   tree-ordered arrays directly (no group-order copies).
  *   computeForces reads both:
  *     - g_ptclEpsGrp for query particles (eps_i)
  *     - g_ptclEpsTree for source particles (eps_j)
@@ -51,10 +52,9 @@ __global__ void k_load_pos_mass(
     ptclVel[i] = make_float4(global_eps, 0.0f, 0.0f, mass[i]);
 }
 
-/* AoS float4 → SoA extraction, composing two sort mappings. */
+/* AoS float4 (tree order) -> SoA in user order. */
 __global__ void k_extract_unsorted(
     int n,
-    const int* __restrict__ d_value,
     const int* __restrict__ d_origIdx,
     const float4* __restrict__ sorted_acc,
     real_t* ax, real_t* ay, real_t* az, real_t* pot)
@@ -62,7 +62,7 @@ __global__ void k_extract_unsorted(
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
 
-    int orig_idx = d_origIdx[d_value[i]];
+    int orig_idx = d_origIdx[i];
     float4 a = sorted_acc[i];
 
     ax[orig_idx]  = a.x;
@@ -144,7 +144,7 @@ extern "C" {
     void tree_get_acc_device(Tree* tree, int n,
                              real_t* ax, real_t* ay, real_t* az, real_t* pot)
     {
-        if (!tree->d_value.ptr || !tree->d_origIdx.ptr || !tree->d_ptclAcc.ptr) {
+        if (!tree->d_origIdx.ptr || !tree->d_ptclAcc.ptr) {
             fprintf(stderr, "Error: Tree data not ready for extraction.\n");
             return;
         }
@@ -152,7 +152,6 @@ extern "C" {
         int grid  = (n + block - 1) / block;
         k_extract_unsorted<<<grid, block>>>(
             n,
-            tree->d_value.ptr,
             tree->d_origIdx.ptr,
             (const float4*)tree->d_ptclAcc.ptr,
             ax, ay, az, pot);

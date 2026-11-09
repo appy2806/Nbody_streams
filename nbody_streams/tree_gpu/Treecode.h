@@ -206,13 +206,10 @@ struct Treecode
   cuda_mem<real4_t> d_cellQuad0;
   cuda_mem<real2_t> d_cellQuad1;
 
-  /* per-particle softening in two orderings:
-   *   d_ptclEpsTree[i] = eps for tree-sorted particle i  (source particles)
-   *   d_ptclEpsGrp [i] = eps for group-sorted particle i (query particles)
-   * Both are populated automatically by buildTree/makeGroups.
+  /* per-particle softening in tree order (walk groups index tree order too).
    * Set via treeGPU_interface tree_set_pos_mass_eps_device(); the .x field of
    * d_ptclVel carries eps through the tree sort before being extracted here. */
-  cuda_mem<float> d_ptclEpsTree, d_ptclEpsGrp;
+  cuda_mem<float> d_ptclEpsTree;
 
   /* per-cell max softening (max(eps) over all particles in the cell).
    * Populated by computeMultipoles() alongside monopole/quadrupole data.
@@ -248,10 +245,6 @@ struct Treecode
   cuda_mem<int> d_gmem_pool;
   int walk_nblock = 0;
 
-  /* makeGroups scratch (allocated once in alloc()) */
-  cuda_mem<int> d_grpBegIdx, d_grpEndIdx;
-  cuda_mem<unsigned long long> d_grpKeysInv;
-
   ThrustCachingAllocator thrust_alloc;
 
   double grav_potential;
@@ -279,7 +272,6 @@ struct Treecode
 
     /* per-particle softening (float, 4N bytes each) */
     d_ptclEpsTree.alloc(nPtcl);
-    d_ptclEpsGrp .alloc(nPtcl);
 
     /* allocate stack memory */
     node_max = nPtcl/5;
@@ -293,11 +285,8 @@ struct Treecode
     if (verbose) fprintf(stderr, "celldata= %g MB \n", cell_max*sizeof(CellData)/1024.0/1024.0);
     d_cellDataList.alloc(cell_max);
     d_cellDataList_tmp.alloc(cell_max);
-    d_key.alloc(2*cell_max);      /* 2x: makeGroups reuses it for 64-bit keys */
+    d_key.alloc(cell_max);
     d_value.alloc(cell_max);
-    d_grpBegIdx .alloc(nPtcl);
-    d_grpEndIdx .alloc(nPtcl);
-    d_grpKeysInv.alloc(nPtcl);
     d_origIdx.alloc(nPtcl);
 
     /* Pre-allocate d_leafList so d_leafList.realloc(nLeaves) in buildTree is a no-op.

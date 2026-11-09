@@ -434,11 +434,26 @@ finite COM inside the cell, so it contributes nothing to the forces.
 
 #### Phase 3 — `makeGroups`
 
-Particles are sorted by a Peano-Hilbert key (Thrust `sort_by_key`) and grouped into *interaction groups* by splitting the tree at
-`level_split` (default 5).  Each group is a contiguous block of ≤ `ncrit`
-particles from the same sub-tree, which gives coalesced global-memory reads
-in the force kernel.  The sorted-group index array `d_ptclEpsGrp` is
-populated here from `d_ptclEpsTree` via the group permutation.
+Builds the *interaction groups*: sets of <= `ncrit` particles that walk the
+tree together and share one opening test against the group's bounding box,
+so they must be spatially compact.  Groups are cut from *container* cells:
+cells with <= 32 * `ncrit` particles whose parent has more (or top-level
+cells).  Each container's contiguous particle range is split into
+ceil(n / `ncrit`) equal chunks, and groups are sorted by particle offset so
+neighbouring warps walk nearby cells.  A group can only straddle regions inside
+one container, which bounds the worst case: no group can open the whole tree.
+
+Groups index the tree-ordered particle arrays directly; buildTree sorts the
+particles inside each leaf by original index, so group membership, and the
+forces, are bit-for-bit reproducible between calls.
+
+This replaced Bonsai's Peano-Hilbert grouping (fixed `ncrit` chunks along a
+PH ordering, split at `level_split` key boundaries).  With far outliers, one
+level-5 cell held the whole system and a chunk could straddle the dense core
+and the sparse halo: that group opened every cell, one warp summed over all N
+particles, and the force pass waited on it (2M-particle Plummer: max 2.0M
+direct interactions per particle against ~4000 on average, 17x slower than
+1M).  `level_split` is still accepted but unused.
 
 #### Phase 4 — `computeForces`
 
@@ -512,8 +527,7 @@ arrays:
 user eps[i]
   → k_load_pos_mass_eps: ptclVel[i].x = eps[i]
   → buildTree (octant scatter): d_ptclEpsTree[tree_order_i] extracted
-  → makeGroups (Peano-Hilbert group sort): d_ptclEpsGrp[group_order_i] extracted
-  → computeForces: reads d_ptclEpsGrp (query eps_i), d_ptclEpsTree (source eps_j)
+  → computeForces: reads d_ptclEpsTree for both query (eps_i) and source (eps_j)
 ```
 
 The uniform-softening path (`tree_gravity_gpu(eps=scalar)`) uses the same
@@ -526,14 +540,14 @@ pipeline; `k_load_pos_mass` broadcasts the scalar into every `ptclVel.x`.
 `TreeGPU.alloc(N)` makes a bulk allocation of the persistent tree buffers
 listed below.  Nothing is allocated per step in steady state: the tree-walk
 ring-buffer pool (`d_gmem_pool`) is allocated on the first force call and
-reused, the `makeGroups` scratch is part of `alloc()`, and Thrust sort/scan
+reused, and Thrust sort
 scratch goes through a caching allocator owned by the tree.  The cell arrays
 grow (never shrink) with the number of cells.  The main allocations:
 
 | Buffer | Size | Purpose |
 |--------|------|---------|
 | `d_ptclPos`, `d_ptclAcc` | N × 16 bytes (float4) | Particle positions, accelerations |
-| `d_ptclEpsTree`, `d_ptclEpsGrp` | N × 4 bytes each | Softening in two sort orders |
+| `d_ptclEpsTree` | N × 4 bytes | Per-particle softening (tree order) |
 | `d_stack_memory_pool` | `max(N/5, 65536) × 96 × 4` bytes | Build-tree stack (≈ 24 MB for N=1M) |
 | `d_cellDataList` | N × 16 bytes | Cell metadata |
 | `d_cellMonopole`, `d_cellQuad0/1` | N × 16 + 8 bytes | Monopole + quadrupole moments |

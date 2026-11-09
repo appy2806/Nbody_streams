@@ -704,13 +704,13 @@ double4 Treecode<real_t>::computeForces(const bool INTCOUNT)
     CUDA_SAFE_CALL(cudaFuncSetCacheConfig(&computeForces::treewalk<NTHREAD2,STATS,NI>, cudaFuncCachePreferL1)); \
     computeForces::treewalk<NTHREAD2,STATS,NI><<<nblock,NTHREAD>>>(             \
         nGroups, d_groupList, starting_level, d_level_begIdx,                   \
-        d_ptclPos_tmp, d_ptclAcc,                                               \
+        d_ptclPos, d_ptclAcc,      /* groups index tree-ordered particles */   \
         d_gmem_pool,                                                            \
         (const uint4*)d_cellDataList.ptr, d_cellSize.ptr, d_cellMonopole.ptr,   \
         d_cellQuad0.ptr, d_cellQuad1.ptr,                                       \
         d_cellEpsMax.ptr,                                                       \
         (const float4*)d_ptclPos.ptr,                                           \
-        d_ptclEpsTree.ptr, d_ptclEpsGrp.ptr);                                   \
+        d_ptclEpsTree.ptr, d_ptclEpsTree.ptr);                                  \
   } while (0)
 
   if (nCrit > 2*WARP_SIZE)

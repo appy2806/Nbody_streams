@@ -677,6 +677,50 @@ namespace treeBuild
    *---------------------------------------------------------------------*/
   /* Extract per-particle eps from the tree-sorted vel buffer (.x field) into a flat float array.
    * Called after buildOctreeHost + pointer swap so that d_ptclVel is in tree order. */
+  /* Order the particles inside each leaf by their original (user) index.
+   * The octant scatter places particles within a leaf in an order that
+   * depends on atomics and so changes from build to build; fixing it makes
+   * walk-group membership and the leaf direct sums reproducible.  One warp
+   * per leaf, rank sort (origIdx is unique), in place: every lane reads its
+   * <= 2 particles before any lane writes.  Leaves above 64 particles (only
+   * possible at the depth cap) are left as they are. */
+  static __global__ void sortLeafParticles(
+      const int nLeaves, const int *leafList, const CellData *cells,
+      float4 *pos, float4 *vel, int *origIdx)
+  {
+    const int warpIdx = (blockIdx.x * blockDim.x + threadIdx.x) >> WARP_SIZE2;
+    const int laneIdx = threadIdx.x & (WARP_SIZE - 1);
+    if (warpIdx >= nLeaves) return;
+    const CellData leaf = cells[leafList[warpIdx]];
+    const int pbeg = leaf.pbeg();
+    const int n    = leaf.pend() - pbeg;
+    if (n <= 1 || n > 2*WARP_SIZE) return;
+
+    int    key[2];
+    float4 p[2], v[2];
+    #pragma unroll
+    for (int k = 0; k < 2; k++)
+    {
+      const int i = laneIdx + k*WARP_SIZE;
+      if (i < n) { key[k] = origIdx[pbeg + i]; p[k] = pos[pbeg + i]; v[k] = vel[pbeg + i]; }
+      else         key[k] = 0x7FFFFFFF;
+    }
+    int rank[2] = {0, 0};
+    for (int j = 0; j < 2*WARP_SIZE; j++)
+    {
+      const int kj = __shfl_sync(FULL_MASK, key[j / WARP_SIZE], j % WARP_SIZE);
+      rank[0] += kj < key[0];
+      rank[1] += kj < key[1];
+    }
+    __syncwarp(FULL_MASK);
+    #pragma unroll
+    for (int k = 0; k < 2; k++)
+    {
+      const int i = laneIdx + k*WARP_SIZE;
+      if (i < n) { pos[pbeg + rank[k]] = p[k]; vel[pbeg + rank[k]] = v[k]; origIdx[pbeg + rank[k]] = key[k]; }
+    }
+  }
+
   static __global__ void extract_eps(const int n, const float4 *d_vel, float *d_epsTree)
   {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1096,17 +1140,8 @@ void Treecode<real_t>::buildTree(const int nLeaf)
       fprintf(stderr, " buildOctree done in %g sec : %g Mptcl/sec\n",  dt, nPtcl/1e6/dt);
     }
       std::swap(d_ptclPos_tmp.ptr, d_ptclVel.ptr);
-      /* After the swap, d_ptclVel is the tree-sorted vel buffer with eps in .x.
-       * Extract eps into the dedicated float array so makeGroups and computeForces can use it. */
-      {
-        const int nthread = 256;
-        const int nblock  = (nPtcl - 1) / nthread + 1;
-        treeBuild::extract_eps<<<nblock, nthread>>>(
-            nPtcl,
-            (const float4*)d_ptclVel.ptr,
-            d_ptclEpsTree.ptr);
-        kernelSuccess("extract_eps");
-      }
+      /* After the swap, d_ptclVel is the tree-sorted vel buffer with eps in .x;
+       * eps is extracted at the end of buildTree, after the leaf sort. */
   }
 
   /* sort nodes by level */
@@ -1135,6 +1170,13 @@ void Treecode<real_t>::buildTree(const int nLeaf)
     const int NTHREAD  = 256;
     const int nblock1 = (nCells-1)/NTHREAD+1;
     treeBuild::collect_leaves<NTHREAD2><<<nblock1,NTHREAD>>>(nCells, d_cellDataList, d_leafList);
+
+    /* deterministic particle order inside leaves, then per-particle eps */
+    treeBuild::sortLeafParticles<<<(nLeaves - 1)/(256/WARP_SIZE) + 1, 256>>>(
+        nLeaves, d_leafList, d_cellDataList,
+        (float4*)d_ptclPos.ptr, (float4*)d_ptclVel.ptr, d_origIdx);
+    treeBuild::extract_eps<<<(nPtcl - 1)/256 + 1, 256>>>(
+        nPtcl, (const float4*)d_ptclVel.ptr, d_ptclEpsTree.ptr);
 
     kernelSuccess("shuffle");
     const double t1 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
