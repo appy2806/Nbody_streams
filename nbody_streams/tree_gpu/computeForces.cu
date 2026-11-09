@@ -486,8 +486,13 @@ namespace computeForces
 
   __device__ double grav_potential = 0.0;
 
+  /* 6 blocks/SM (~85 registers) instead of 8 (64 registers): the NI=2
+   * quadrupole walk spilled ~100 B/thread at 64 registers; at 6 it spills
+   * ~30 B and ran 5-9% faster on sm_86.  4 blocks/SM removes all spills but
+   * is no faster (lower occupancy).  computeForces sizes the persistent grid
+   * from the resulting occupancy. */
   template<int NTHREAD2, bool STATS, int NI>
-    __launch_bounds__(1<<NTHREAD2, 1024/(1<<NTHREAD2))
+    __launch_bounds__(1<<NTHREAD2, 6)
     static __global__
     void treewalk(
         const int nGroups,
@@ -648,15 +653,39 @@ double4 Treecode<real_t>::computeForces(const bool INTCOUNT)
 {
   const int NTHREAD2 = 7;
   const int NTHREAD  = 1<<NTHREAD2;
-  cuda_mem<int> d_gmem_pool;
+  const int NWARP    = NTHREAD/WARP_SIZE;
 
-  const int nblock = 8*13;
-  d_gmem_pool.alloc(CELL_LIST_MEM_PER_WARP*nblock*(NTHREAD/WARP_SIZE));
+  /* Persistent-block launch size: fill every SM to the occupancy the kernel
+   * allows (previously a fixed 8*13 = 104 blocks, sized for a 13-SM GPU, which
+   * left large GPUs mostly idle).  Each warp needs its own cell-list ring
+   * buffer, so the pool is capped at 1/4 of free memory, allocated once and
+   * reused across calls. */
+  if (walk_nblock == 0)
+  {
+    int dev = 0, nSM = 1;
+    CUDA_SAFE_CALL(cudaGetDevice(&dev));
+    CUDA_SAFE_CALL(cudaDeviceGetAttribute(&nSM, cudaDevAttrMultiProcessorCount, dev));
+    int occ = 1, o;
+    CUDA_SAFE_CALL(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&o, computeForces::treewalk<NTHREAD2,false,1>, NTHREAD, 0)); occ = std::max(occ, o);
+    CUDA_SAFE_CALL(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&o, computeForces::treewalk<NTHREAD2,false,2>, NTHREAD, 0)); occ = std::max(occ, o);
+    CUDA_SAFE_CALL(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&o, computeForces::treewalk<NTHREAD2,true, 1>, NTHREAD, 0)); occ = std::max(occ, o);
+    CUDA_SAFE_CALL(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&o, computeForces::treewalk<NTHREAD2,true, 2>, NTHREAD, 0)); occ = std::max(occ, o);
+
+    size_t freeB = 0, totalB = 0;
+    CUDA_SAFE_CALL(cudaMemGetInfo(&freeB, &totalB));
+    const size_t bytesPerBlock = sizeof(int) * (size_t)CELL_LIST_MEM_PER_WARP * NWARP;
+    const int nblockMem = (int)std::max<size_t>(1, (freeB/4) / bytesPerBlock);
+
+    walk_nblock = std::max(1, std::min(nSM*occ, nblockMem));
+    d_gmem_pool.alloc((size_t)CELL_LIST_MEM_PER_WARP * walk_nblock * NWARP);
+    if (verbose) fprintf(stderr, "treewalk: %d SMs x %d blocks/SM -> nblock= %d (pool %g MB)\n",
+        nSM, occ, walk_nblock, bytesPerBlock*walk_nblock/1024.0/1024.0);
+  }
+  const int nblock = walk_nblock;
 
   const int starting_level = 1;
   int value = 0;
-  cudaDeviceSynchronize();
-  const double t0 = rtc();
+  const double t0 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
   unsigned long long lzero = 0;
   unsigned int       uzero = 0;
   double              fzero = 0.0;
@@ -670,62 +699,35 @@ double4 Treecode<real_t>::computeForces(const bool INTCOUNT)
     CUDA_SAFE_CALL(cudaMemcpyToSymbol(computeForces::grav_potential, &fzero, sizeof(double)));
   }
 
+#define TREEWALK_LAUNCH(STATS, NI)                                              \
+  do {                                                                          \
+    CUDA_SAFE_CALL(cudaFuncSetCacheConfig(&computeForces::treewalk<NTHREAD2,STATS,NI>, cudaFuncCachePreferL1)); \
+    computeForces::treewalk<NTHREAD2,STATS,NI><<<nblock,NTHREAD>>>(             \
+        nGroups, d_groupList, starting_level, d_level_begIdx,                   \
+        d_ptclPos, d_ptclAcc,      /* groups index tree-ordered particles */   \
+        d_gmem_pool,                                                            \
+        (const uint4*)d_cellDataList.ptr, d_cellSize.ptr, d_cellMonopole.ptr,   \
+        d_cellQuad0.ptr, d_cellQuad1.ptr,                                       \
+        d_cellEpsMax.ptr,                                                       \
+        (const float4*)d_ptclPos.ptr,                                           \
+        d_ptclEpsTree.ptr, d_ptclEpsTree.ptr);                                  \
+  } while (0)
+
+  if (nCrit > 2*WARP_SIZE)
+    assert(0);
   if (INTCOUNT)
   {
-    CUDA_SAFE_CALL(cudaFuncSetCacheConfig(&computeForces::treewalk<NTHREAD2,true,1>, cudaFuncCachePreferL1));
-    CUDA_SAFE_CALL(cudaFuncSetCacheConfig(&computeForces::treewalk<NTHREAD2,true,2>, cudaFuncCachePreferL1));
-    if (nCrit <= WARP_SIZE)
-      computeForces::treewalk<NTHREAD2,true,1><<<nblock,NTHREAD>>>(
-          nGroups, d_groupList, starting_level, d_level_begIdx,
-          d_ptclPos_tmp, d_ptclAcc,
-          d_gmem_pool,
-          (const uint4*)d_cellDataList.ptr, d_cellSize.ptr, d_cellMonopole.ptr,
-          d_cellQuad0.ptr, d_cellQuad1.ptr,
-          d_cellEpsMax.ptr,
-          (const float4*)d_ptclPos.ptr,
-          d_ptclEpsTree.ptr, d_ptclEpsGrp.ptr);
-    else if (nCrit <= 2*WARP_SIZE)
-      computeForces::treewalk<NTHREAD2,true,2><<<nblock,NTHREAD>>>(
-          nGroups, d_groupList, starting_level, d_level_begIdx,
-          d_ptclPos_tmp, d_ptclAcc,
-          d_gmem_pool,
-          (const uint4*)d_cellDataList.ptr, d_cellSize.ptr, d_cellMonopole.ptr,
-          d_cellQuad0.ptr, d_cellQuad1.ptr,
-          d_cellEpsMax.ptr,
-          (const float4*)d_ptclPos.ptr,
-          d_ptclEpsTree.ptr, d_ptclEpsGrp.ptr);
-    else
-      assert(0);
+    if (nCrit <= WARP_SIZE) TREEWALK_LAUNCH(true, 1);
+    else                    TREEWALK_LAUNCH(true, 2);
   }
   else
   {
-    CUDA_SAFE_CALL(cudaFuncSetCacheConfig(&computeForces::treewalk<NTHREAD2,false,1>, cudaFuncCachePreferL1));
-    CUDA_SAFE_CALL(cudaFuncSetCacheConfig(&computeForces::treewalk<NTHREAD2,false,2>, cudaFuncCachePreferL1));
-    if (nCrit <= WARP_SIZE)
-      computeForces::treewalk<NTHREAD2,false,1><<<nblock,NTHREAD>>>(
-          nGroups, d_groupList, starting_level, d_level_begIdx,
-          d_ptclPos_tmp, d_ptclAcc,
-          d_gmem_pool,
-          (const uint4*)d_cellDataList.ptr, d_cellSize.ptr, d_cellMonopole.ptr,
-          d_cellQuad0.ptr, d_cellQuad1.ptr,
-          d_cellEpsMax.ptr,
-          (const float4*)d_ptclPos.ptr,
-          d_ptclEpsTree.ptr, d_ptclEpsGrp.ptr);
-    else if (nCrit <= 2*WARP_SIZE)
-      computeForces::treewalk<NTHREAD2,false,2><<<nblock,NTHREAD>>>(
-          nGroups, d_groupList, starting_level, d_level_begIdx,
-          d_ptclPos_tmp, d_ptclAcc,
-          d_gmem_pool,
-          (const uint4*)d_cellDataList.ptr, d_cellSize.ptr, d_cellMonopole.ptr,
-          d_cellQuad0.ptr, d_cellQuad1.ptr,
-          d_cellEpsMax.ptr,
-          (const float4*)d_ptclPos.ptr,
-          d_ptclEpsTree.ptr, d_ptclEpsGrp.ptr);
-    else
-      assert(0);
+    if (nCrit <= WARP_SIZE) TREEWALK_LAUNCH(false, 1);
+    else                    TREEWALK_LAUNCH(false, 2);
   }
+#undef TREEWALK_LAUNCH
   kernelSuccess("treewalk");
-  const double t1 = rtc();
+  const double t1 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
   const double dt = t1 - t0;
   if (verbose) fprintf(stderr, " treewalk done in %g sec : %g Mptcl/sec\n",  dt, nPtcl/1e6/dt);
 

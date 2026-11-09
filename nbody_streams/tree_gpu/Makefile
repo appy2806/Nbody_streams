@@ -5,7 +5,7 @@
 #   make clean_all→ remove objects + library
 #
 # Optional flags:
-#   FAST_MATH=1   → add -use_fast_math  (default: off for better accuracy)
+#   FAST_MATH=0   → drop -use_fast_math  (default: FAST_MATH=1, on)
 #   VERBOSE=1     → echo compile commands
 
 # ---------------------------------------------------------------------------

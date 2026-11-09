@@ -187,8 +187,11 @@ def _compute_accelerations_gpu(
 
     mass_gpu = cp.asarray(mass, dtype=dtype)
 
+    # pos_gpu stays float64: for float32 precisions compute_nbody_forces_gpu
+    # converts it relative to a nearby centre (translation invariant), so a
+    # compact system far from the origin keeps its float32 precision.
     acc_self_gpu = compute_nbody_forces_gpu(
-        pos_gpu.astype(dtype),
+        pos_gpu,
         mass_gpu,
         softening,
         G,

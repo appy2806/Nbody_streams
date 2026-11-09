@@ -3,12 +3,13 @@
  * Per-particle softening:
  *   eps is carried through the pipeline via ptclVel.x.
  *   buildTree extracts it into d_ptclEpsTree (tree order).
- *   makeGroups shuffles it into d_ptclEpsGrp  (group order).
+ *   makeGroups builds walk groups from tree cells, so groups index the
+ *   tree-ordered arrays directly (no group-order copies).
  *   computeForces reads both:
  *     - g_ptclEpsGrp for query particles (eps_i)
  *     - g_ptclEpsTree for source particles (eps_j)
- *   Direct interaction uses: eps2_ij = 0.5*(eps_i^2 + eps_j^2)
- *   Cell approximation uses: eps_i^2  (query particle's own softening)
+ *   Direct interaction uses: eps2_ij = max(eps_i^2, eps_j^2)
+ *   Cell approximation uses: eps2_ij = max(eps_i^2, eps_cell_max^2)
  */
 #include "Treecode.h"
 #include <cstdio>
@@ -51,10 +52,9 @@ __global__ void k_load_pos_mass(
     ptclVel[i] = make_float4(global_eps, 0.0f, 0.0f, mass[i]);
 }
 
-/* AoS float4 → SoA extraction, composing two sort mappings. */
+/* AoS float4 (tree order) -> SoA in user order. */
 __global__ void k_extract_unsorted(
     int n,
-    const int* __restrict__ d_value,
     const int* __restrict__ d_origIdx,
     const float4* __restrict__ sorted_acc,
     real_t* ax, real_t* ay, real_t* az, real_t* pot)
@@ -62,7 +62,7 @@ __global__ void k_extract_unsorted(
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
 
-    int orig_idx = d_origIdx[d_value[i]];
+    int orig_idx = d_origIdx[i];
     float4 a = sorted_acc[i];
 
     ax[orig_idx]  = a.x;
@@ -134,7 +134,9 @@ extern "C" {
 
     struct Res { double x, y, z, w; };
     Res tree_compute_forces(Tree* tree) {
-        double4 r = tree->computeForces();
+        /* Interaction statistics need extra atomics in the walk; only collect
+         * them when verbose (the Python wrapper discards the return value). */
+        double4 r = tree->computeForces(tree->verbose != 0);
         return {r.x, r.y, r.z, r.w};
     }
 
@@ -142,7 +144,7 @@ extern "C" {
     void tree_get_acc_device(Tree* tree, int n,
                              real_t* ax, real_t* ay, real_t* az, real_t* pot)
     {
-        if (!tree->d_value.ptr || !tree->d_origIdx.ptr || !tree->d_ptclAcc.ptr) {
+        if (!tree->d_origIdx.ptr || !tree->d_ptclAcc.ptr) {
             fprintf(stderr, "Error: Tree data not ready for extraction.\n");
             return;
         }
@@ -150,7 +152,6 @@ extern "C" {
         int grid  = (n + block - 1) / block;
         k_extract_unsorted<<<grid, block>>>(
             n,
-            tree->d_value.ptr,
             tree->d_origIdx.ptr,
             (const float4*)tree->d_ptclAcc.ptr,
             ax, ay, az, pot);
@@ -161,5 +162,11 @@ extern "C" {
 
     void tree_set_verbose(Tree* tree, int verbose) {
         if (tree) tree->verbose = verbose;
+    }
+
+    /* theta only enters computeMultipoles (cellOp = l/theta + s), so changing
+     * it between force calls on a reused handle takes effect immediately. */
+    void tree_set_theta(Tree* tree, real_t theta) {
+        if (tree) tree->theta = theta;
     }
 }

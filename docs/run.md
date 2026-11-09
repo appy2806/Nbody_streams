@@ -97,7 +97,7 @@ KDK leapfrog:
 3. Recompute `acc`
 4. Half-kick: `vel += 0.5 * dt * acc`
 
-Positions and velocities are kept in float64 on the GPU throughout.  Force calls use `precision`-selected dtype.
+Positions and velocities are kept in float64 on the GPU throughout.  Force calls use `precision`-selected dtype; for the float32 modes the float64 positions are converted relative to a nearby centre first (see the Precision modes section of `fields.md`), so a compact system far from the origin keeps its precision: a 1-pc cluster at 40 kpc moving at 200 km/s evolves like the same cluster at rest to ~1e-8 pc.
 
 ### GPU memory management
 

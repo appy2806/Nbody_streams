@@ -44,6 +44,8 @@ try:
 except ImportError:
     raise ImportError("CuPy is required for tree_gpu.py")
 
+from .._recentre import to_float32_relative
+
 __all__ = ["tree_gravity_gpu", "TreeGPU", "cuda_alive"]
 
 G_DEFAULT = float(4.3009173e-06)  # kpc (km/s)^2 / Msun
@@ -115,6 +117,7 @@ _lib.tree_new.argtypes  = [_flt, _flt]
 _lib.tree_delete.argtypes = [_ptr]
 _lib.tree_alloc.argtypes  = [_ptr, _int]
 _lib.tree_set_verbose.argtypes = [_ptr, _int]
+_lib.tree_set_theta.argtypes   = [_ptr, _flt]
 
 # Primary load: pos + mass + per-particle eps (float* GPU pointer)
 _lib.tree_set_pos_mass_eps_device.argtypes = [
@@ -153,12 +156,19 @@ def _coerce_eps(eps, n: int) -> cp.ndarray:
       - np.ndarray   → transfer to GPU
       - cp.ndarray   → contiguous float32 view (zero-copy if already correct)
     """
-    if isinstance(eps, (int, float)):
+    if np.isscalar(eps):
+        if not float(eps) > 0.0:
+            raise ValueError(f"softening must be > 0, got {eps}")
         return cp.full(n, float(eps), dtype=cp.float32)
     if isinstance(eps, np.ndarray):
+        if not np.all(eps > 0.0):
+            raise ValueError("softening must be > 0 for every particle")
         return cp.asarray(eps, dtype=cp.float32)
-    # cp.ndarray
-    return cp.ascontiguousarray(eps, dtype=cp.float32)
+    # cp.ndarray: the check costs one reduction + a host sync
+    eps_arr = cp.ascontiguousarray(eps, dtype=cp.float32)
+    if not bool(cp.all(eps_arr > 0.0)):
+        raise ValueError("softening must be > 0 for every particle")
+    return eps_arr
 
 # ---------------------------------------------------------------------------
 # Reusable tree handle
@@ -190,6 +200,9 @@ class TreeGPU:
 
     def __init__(self, n: int, eps: float = 0.0, theta: float = 0.6,
                  verbose: bool = False):
+        self._ptr = None   # so close()/__del__ are safe if the checks below fail
+        if not 0.0 < theta < 1.15:
+            raise ValueError(f"theta must be in (0, 1.15), got {theta}")
         cap = _max_n()
         assert n <= cap, (
             f"N={n:,} exceeds GPU cap ({cap:,}); "
@@ -200,10 +213,22 @@ class TreeGPU:
         _lib.tree_alloc(self._ptr, n)
         self.n = n
         self.eps = eps
-        self.theta = theta
+        self._theta = float(theta)
+
+    @property
+    def theta(self) -> float:
+        """Barnes-Hut opening angle used by the next force evaluation."""
+        return self._theta
+
+    @theta.setter
+    def theta(self, value: float):
+        if not 0.0 < value < 1.15:
+            raise ValueError(f"theta must be in (0, 1.15), got {value}")
+        _lib.tree_set_theta(self._ptr, _flt(value))
+        self._theta = float(value)
 
     def close(self):
-        if self._ptr is not None:
+        if getattr(self, "_ptr", None) is not None:
             _lib.tree_delete(self._ptr)
             self._ptr = None
 
@@ -227,12 +252,13 @@ def tree_gravity_gpu(
     eps,
     G: float            = G_DEFAULT,
     *,
-    theta: float        = 0.6,
+    theta: float | None = None,
     nleaf: int          = 64,
     ncrit: int          = 64,
     level_split: int    = 5,
     verbose: bool       = False,
     tree: TreeGPU | None = None,
+    center=None,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     """
     Compute gravitational accelerations and potential using the GPU tree code
@@ -240,8 +266,12 @@ def tree_gravity_gpu(
 
     Parameters
     ----------
-    pos : cp.ndarray, shape (N, 3)
-        Particle positions (float32 on GPU).
+    pos : cp.ndarray or np.ndarray, shape (N, 3)
+        Particle positions.  float64 input is converted to float32 relative
+        to ``center`` (subtracted in float64), so compact structure far from
+        the origin keeps float32 precision; float32 input is used as given.
+        Forces and potential are translation invariant, so the output does
+        not depend on the centre beyond precision.
     mass : float or cp.ndarray, shape (N,)
         Particle masses.
     eps : float or cp.ndarray, shape (N,)
@@ -252,32 +282,45 @@ def tree_gravity_gpu(
                      approx:  max(eps_i^2, eps_cell_max^2)  (max convention)
     G : float
         Gravitational constant.  Default: kpc / (km/s)^2 / Msun.
-    theta : float
+    theta : float, optional
         Opening angle (smaller = more accurate).  Typical: 0.75 (fast),
-        0.5 (accurate), 0.3 (very accurate).
+        0.5 (accurate), 0.3 (very accurate).  Default: ``tree.theta`` when a
+        handle is passed, else 0.6.  Passing a value together with ``tree``
+        updates the handle's theta.
     nleaf : int
         Maximum particles per leaf cell.  Must be in {16, 24, 32, 48, 64}.
     ncrit : int
         Group size for the tree walk.  64 is a good default.
     level_split : int
-        Tree level for spatial grouping.
+        Unused; accepted for backward compatibility (walk groups are
+        cut from tree cells).
     verbose : bool
         Print timing / interaction counts from the C++ layer.
     tree : TreeGPU, optional
         Pre-allocated tree handle.  Skips ~27 ms malloc/free per call.
+    center : array_like, shape (3,), optional
+        Centre subtracted from float64 ``pos`` before the float32 cast.
+        Default: mass-weighted mean of a ~4096-particle strided subsample
+        (adds ~0.2 ms at N = 1e6).  Pass the progenitor position when most of
+        the mass has been stripped and the mean lies far from the bound core.
+        Ignored for float32 ``pos``.
 
     Returns
     -------
     acc : cp.ndarray, shape (N, 3)
         Gravitational accelerations in original particle order.
     phi : cp.ndarray, shape (N,)
-        Gravitational potential per particle in original particle order.
+        Gravitational potential per particle in original particle order,
+        excluding the particle's interaction with itself (same convention as
+        the direct-sum backend).
     """
-    # --- coerce pos to float32 F-order (column-major: x/y/z are contiguous views) ---
-    if isinstance(pos, cp.ndarray) and pos.dtype == cp.float32:
-        pos_f = cp.asfortranarray(pos)
-    else:
-        pos_f = cp.array(pos, dtype=cp.float32, order='F')
+    # --- float32 positions (relative to a centre for float64 input), F-order
+    #     so the x/y/z columns are contiguous views ---
+    if not isinstance(pos, cp.ndarray):
+        pos = np.asarray(pos)
+        pos = cp.asarray(pos, dtype=cp.float32 if pos.dtype == np.float32 else cp.float64)
+    pos_rel, _ = to_float32_relative(pos, mass, center)
+    pos_f = cp.asfortranarray(pos_rel)
 
     n = pos_f.shape[0]
 
@@ -304,18 +347,14 @@ def tree_gravity_gpu(
 
     owns_tree = tree is None
     if owns_tree:
-        cap = _max_n()
-        assert n <= cap, (
-            f"N={n:,} exceeds GPU cap ({cap:,}); "
-            f"limited by {'VRAM (80% free)' if cap < _IDX_CAP else '28-bit Particle4 index'}."
-        )
-        # Use 0.0 as dummy global eps (not used; per-particle eps drives everything)
-        _tree = _lib.tree_new(_flt(0.0), _flt(theta))
-        _lib.tree_set_verbose(_tree, int(verbose))
-        _lib.tree_alloc(_tree, n)
+        # eps=0.0 is a dummy global value; per-particle eps drives everything
+        tree = TreeGPU(n, eps=0.0, theta=0.6 if theta is None else theta,
+                       verbose=verbose)
     else:
         assert n == tree.n, f"pos has {n} particles but tree was allocated for {tree.n}"
-        _tree = tree._ptr
+        if theta is not None and theta != tree.theta:
+            tree.theta = theta
+    _tree = tree._ptr
 
     try:
         _lib.tree_set_pos_mass_eps_device(
@@ -342,9 +381,14 @@ def tree_gravity_gpu(
 
     finally:
         if owns_tree:
-            _lib.tree_delete(_tree)
+            tree.close()
 
     acc = cp.stack([ax, ay, az], axis=1)
+
+    # The leaf direct sum includes i == j (r = 0, so no force but a potential
+    # term -m_i/eps_i under the max-eps convention).  Remove it so phi matches
+    # the direct-sum backend; bound-particle criteria (phi + v^2/2 < 0) rely on it.
+    phi += mass / eps_arr
 
     if G != 1.0:
         acc *= G

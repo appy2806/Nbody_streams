@@ -69,10 +69,10 @@ compiled, parallelized code:
 | Path | Implementation | Key details |
 |---|---|---|
 | **GPU direct** | CUDA kernels compiled at runtime (CuPy + nvcc) | `float4` 128-bit vectorized loads; optional Kahan compensated summation; `--use_fast_math`; arch-tuned PTX via `compute_capability` auto-detection |
-| **GPU tree** | C++/CUDA shared library (`libtreeGPU.so`); ctypes interface | Barnes-Hut with monopole + quadrupole; per-particle softening (max convention); watchdog-guarded KDK; float32 throughout |
+| **GPU tree** | C++/CUDA shared library (`libtreeGPU.so`); ctypes interface | Barnes-Hut with monopole + quadrupole; per-particle softening (max convention); watchdog-guarded KDK; float32 tree on recentred positions |
 | **CPU direct** | Numba `@njit(parallel=True)` | Prange-parallelized inner loop; JIT-compiled on first call, cached thereafter |
 | **CPU tree / FMM** | falcON via pyfalcon (C++) | True O(N) fast multipole method; independent of the direct-force code path |
-| **Integration** | KDK symplectic leapfrog | GPU direct: float64 pos/vel; GPU tree: float32 throughout; only force calls use float32/float64 kernels |
+| **Integration** | KDK symplectic leapfrog | float64 pos/vel on every backend; float32 force calls receive positions relative to a nearby centre (see "Float32 precision" below) |
 | **External potentials** | Agama C++ library | `agama.Potential.__call__` invoked once per timestep; result added directly to N-body accelerations |
 
 ---
@@ -273,12 +273,15 @@ After building, it is available as a subpackage:
 from nbody_streams.tree_gpu import tree_gravity_gpu, TreeGPU, run_nbody_gpu_tree
 import cupy as cp
 
-# One-shot: compute forces + potential for N particles
-pos  = cp.asarray(xv[:, :3], dtype=cp.float32)
+# One-shot: compute forces + potential for N particles.
+# Pass float64 positions: they are recentred before the float32 tree sees them.
+pos  = cp.asarray(xv[:, :3])                     # float64
 mass = cp.asarray(masses,    dtype=cp.float32)
 eps  = cp.asarray(softening, dtype=cp.float32)   # per-particle or scalar
 
 acc, phi = tree_gravity_gpu(pos, mass, eps, G=4.3009e-6, theta=0.6)
+# center=[x, y, z] overrides the default centre (subsample centre of mass),
+# e.g. the progenitor position once most of the mass has been stripped.
 
 # Pre-allocated handle for time-stepping loops (saves ~27 ms of GPU malloc per step)
 with TreeGPU(N, eps=0.05, theta=0.6) as tree:
@@ -326,7 +329,8 @@ from nbody_streams import (
     make_plummer_sphere,
 )
 
-# Compute accelerations (GPU, float32 with Kahan correction)
+# Compute accelerations (GPU, float32 with Kahan correction).
+# Pass float64 pos: it is recentred before the float32 cast (see Float32 precision).
 acc = compute_nbody_forces_gpu(
     pos, mass, softening=0.01,
     precision='float32_kahan', kernel='spline',
@@ -778,81 +782,100 @@ is `False`.
 
 ## Performance
 
-GPU benchmarks (N = 10,240 particles, RTX 3080, `--use_fast_math` + arch-tuned):
+Time per force evaluation (all particles), Plummer sphere, eps = 0.01 a.
+Laptop: RTX 3080 Laptop GPU + i9-11980HK (16 threads); datacenter: NVIDIA H200.
 
-| Kernel | Time/Step | Throughput | Energy Conservation |
-|--------|-----------|------------|---------------------|
-| Float32 + float4 | **1.5 ms** | ~100 Gint/s | < 0.001% |
-| Float32_kahan + float4 | 1.7 ms | ~100 Gint/s | < 0.001% |
-| Float64 | ~20 ms | ~4.5 Gint/s | < 0.001% |
+| N | CPU direct (16 thr) | FMM falcON (1 core) | GPU direct RTX / H200 | GPU tree RTX / H200 |
+|---|---|---|---|---|
+| 8,192 | 28.8 ms | 11 ms | 1.72 ms / 1.36 ms | 2.99 ms / 1.57 ms |
+| 131,072 | 7.06 s | 165 ms | 98 ms / 39.1 ms | 6.9 ms / 3.52 ms |
+| 1,048,576 | - | 1.56 s | 5.72 s / 2.08 s | 42 ms / 14.6 ms |
+| 8,388,608 | - | 13.9 s | - / 128 s | 319 ms / 102 ms |
+| 33,554,432 | - | 134 s | - | 1.29 s / 402 ms |
+| 100,000,000 | - | - | - | - / 1.23 s |
 
-Approaching the theoretical FLOP ceiling (~25 FLOPs per interaction).
+The GPU tree scales linearly from ~5e5 particles on: 4e-8 s per particle on
+the RTX 3080 Laptop (up to 3.4e7, limited by its 16 GB) and 1.2e-8 s per
+particle on the H200 up to 1e8 particles.  GPU direct kernels (N = 10,240,
+RTX 3080): float32 + float4 1.5 ms, float32_kahan 1.7 ms, float64 ~20 ms.
 
 ### Which solver should I use?
 
-The plot below compares time-per-particle for direct (CPU & GPU) and FMM/tree solvers across particle counts.
-
 <p align="center">
-  <img src="plots/acceleration_timings.png" width="700" alt="Acceleration timing comparison across solvers and hardware"/>
+  <img src="plots/acceleration_timings.png" width="700" alt="Time per particle per force evaluation against N for CPU direct, falcON FMM, and GPU direct and tree on an RTX 3080 Laptop and an H200"/>
 </p>
 
-**Recommendations:**
-
-| Particle count | Recommended method | Why |
+| Particle count | Fastest | Notes |
 |---|---|---|
-| N < 500 | **CPU direct** (Numba) | Lowest latency — no GPU kernel-launch overhead. |
-| 1K – 100K | **GPU direct** (consumer GPU) | ~10x faster than CPU direct; exact O(N²) forces with float32 Kahan precision. |
-| 100K – 500K | **GPU direct** (consumer GPU) ≈ FMM/tree | A consumer GPU (e.g. RTX 3070) matches falcON/FMM throughput up to ~500K particles. |
-| 500K – 2M | **GPU direct** (datacenter GPU) ≈ FMM/tree | An H200-class GPU keeps direct-force time competitive with tree codes up to ~2M particles. |
-| N > 2M | **Tree / FMM** (falcON) | O(N) FMM scaling wins; direct O(N²) becomes prohibitive on any current GPU. |
+| N < ~1e3 | **CPU direct** (Numba) | No kernel-launch overhead. |
+| ~1e3 - ~1.5e4 | **GPU direct** | Exact pairwise forces; `float32_kahan` matches float64 to ~1e-6 (see Float32 precision). |
+| N > ~1.5e4 | **GPU tree** | Crossover ~1.5e4 (RTX) / ~1e4 (H200).  theta = 0.6: median force error ~1e-4, 99th percentile ~5e-4; 140x faster than GPU direct at 1e6 on an H200. |
+| No GPU, large N | **FMM** (falcON) | ~1.3-1.7e-6 s per particle on one core up to ~1e7. |
+
+The shaded bands in the figure mark the fastest choice on the consumer GPU,
+from the measured crossovers.  Benchmark scripts are not yet in the repository.
 
 ---
 
 <details>
-<summary><strong>Float32 precision analysis (Newton's 3rd Law at small scales)</strong></summary>
+<summary><strong>Float32 precision</strong></summary>
 
-### Summary
+### What limits float32
 
-Float32 kernels are mathematically correct but suffer from precision loss when particle positions are at small scales (< 0.1 length units). This manifests as violation of Newton's 3rd Law at the ~1% level for scales around 0.01.
+float32 keeps ~7 significant digits *relative to the magnitude of each
+coordinate*.  Overall scale does not matter: a Plummer sphere at the origin
+gives the same float32 accuracy whether its scale radius is 10 or 0.001 length
+units (RTX 3080, N = 10,240, eps = 0.01 a):
 
-**Important:** Even without scaling, the "asymmetric" float32 forces **do not cause energy drift** over long integrations because:
-1. Integration is performed in float64 (positions, velocities)
-2. Force errors are small and largely random (not systematic)
-3. Symplectic integrators are robust to small force errors
+| Scale radius | Newton's 3rd law residual (float32 / float32_kahan) | Median force error (float32 / float32_kahan) |
+|---|---|---|
+| 10 | 3e-8 / 3e-10 | 1.2e-6 / 5e-8 |
+| 1 | 8e-9 / 3e-10 | 1.2e-6 / 5e-8 |
+| 0.01 | 3e-8 / 2e-10 | 1.2e-6 / 5e-8 |
+| 0.001 | 1e-8 / 1e-10 | 1.3e-6 / 6e-8 |
 
-### Scale-dependent error
+What does matter is **distance from the origin compared with particle
+separations**.  A position at 40 kpc is rounded to ~4e-3 pc, a few percent of
+the separation between close neighbours in a 1-pc cluster.  Rescaling units
+does not help (the rounding is relative); translating does.
 
-| Scale Factor | Typical \|r\| | Float32 Net Force | Status |
-|---|---|---|---|
-| 0.1 | 10 | 6.4e-9 | Excellent |
-| 1 | 1.0 | 1.4e-6 | Good |
-| 10 | 0.1 | 1.2e-4 | Marginal |
-| 100 | 0.01 | 1.0e-2 | Broken |
+### Recentring (automatic)
 
-### Solutions
+Every float32 force path converts **float64** positions relative to a nearby
+centre, computed and subtracted in float64 (mass-weighted mean of a ~4096
+particle subsample; one fused kernel, ~0.04 ms).  Self-gravity is translation
+invariant, so only the precision changes.  The integrators store positions in
+float64, so they always benefit; float32 input is used as given.
 
-**Option 1 — Unit scaling (recommended):** Rescale positions to O(1) before computing forces. Gives perfect Newton's 3rd Law + full float32 speed.
+1-pc Hernquist cluster at 40 kpc (eps = 0.01 pc, N = 1e5), 99th-percentile
+force error against a float64 direct sum:
 
-```python
-scale = prog_scaleradius  # e.g. 0.01 kpc
-pos_scaled = pos / scale
-acc_scaled = compute_nbody_forces_gpu(pos_scaled.astype(np.float32), ...)
-acc_physical = acc_scaled / (scale**2)
-```
+| Path | float32 absolute input | float64 input (recentred) |
+|---|---|---|
+| Direct, `float32_kahan` (default) | 1.6e-2 | 8.9e-7 |
+| Direct, `float32` | 1.6e-2 | 1.2e-5 |
+| Direct, `float64` | 8.2e-7 | 8.2e-7 |
+| GPU tree, theta = 0.6 | 1.6e-2 | 4.2e-4 (same as at the origin) |
 
-**Option 2 — Float32 as-is:** Simplest code, energy still conserved to < 0.001%. Newton's 3rd Law violated by ~1% (cosmetic only).
+The same cluster moving at 200 km/s at 40 kpc now evolves like the cluster at
+rest at the origin: final positions agree to 3e-9 pc (`run_nbody_gpu`) and
+2e-6 pc (`run_nbody_gpu_tree`), against 3.5e-4 pc and 4e-3 pc before.
+Recentring adds no measurable time to either solver.
 
-**Option 3 — Float64:** Accurate at all scales, ~10x slower. Best for small N (< 5000).
+### Direct vs tree accuracy
 
-### Comparison: direct N-body vs tree methods
+Hernquist sphere, N = 1e5, against a float64 direct sum:
 
-| Method | Force Accuracy | Energy Conservation | Speed |
-|---|---|---|---|
-| Direct N^2 (float32) | ~1% asymmetry | < 0.001% drift | 1.5 ms/step |
-| Tree (float32, theta=0.5) | 1-5% force errors | ~0.01-0.1% drift | 5 ms/step |
-| Tree (float64, theta=0.5) | 1-5% force errors | ~0.001% drift | 10 ms/step |
+| Method | Median force error | 99th percentile |
+|---|---|---|
+| Direct, `float32_kahan` | 5e-8 | 9e-7 |
+| GPU tree, theta = 0.4 | 3.1e-5 | 1.5e-4 |
+| GPU tree, theta = 0.6 (default) | 9.7e-5 | 4.0e-4 |
+| GPU tree, theta = 0.8 | 2.9e-4 | 1.5e-3 |
 
-Direct N-body with float32 gives **better energy conservation** than tree methods because tree approximation errors are systematic (monopole bias), while float32 rounding errors are random and cancel statistically.
+Energy conservation, 1e5 Msun / 1-pc Plummer cluster, dt = t_dyn/100:
+`run_nbody_gpu_tree` (theta = 0.5, N = 2e4, 2000 steps) dE/E = 1.7e-6;
+`run_nbody_gpu` (`float32_kahan`, N = 1e4, 1000 steps) dE/E = 3e-7.
 
 </details>
 

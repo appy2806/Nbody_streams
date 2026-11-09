@@ -8,8 +8,8 @@ Public API
 run_nbody_gpu_tree
     Matches the call signature of ``run_nbody_gpu`` (direct-sum) but routes
     all force evaluations through ``tree_gravity_gpu``.  Positions and
-    velocities are kept in float32 on the GPU (consistent with the float32
-    tree-code internals).
+    velocities are integrated in float64 on the GPU; the float32 tree sees
+    positions relative to a moving centre (see ``run_nbody_gpu_tree``).
 
     Optional ``debug_energy=True`` activates energy / virial diagnostics
     printed alongside the standard progress line.  Energy is essentially
@@ -177,7 +177,14 @@ def run_nbody_gpu_tree(
     Run a GPU-tree N-body simulation with KDK leapfrog integration.
 
     Force evaluations use the GPU Barnes-Hut tree code (O(N log N)).
-    Positions and velocities are kept in float32 on the GPU.
+
+    Precision: positions and velocities are integrated in float64.  The
+    float32 tree receives ``pos - c``, where ``c`` is the position of the
+    particle with the lowest self-gravity potential at the previous force
+    evaluation (the density peak of the bound progenitor).  Self-gravity is
+    translation invariant, so ``c`` does not change the physics; it keeps
+    float32 separations precise for sub-pc structure far from the origin.
+    The external potential is evaluated at the float64 positions.
 
     Parameters
     ----------
@@ -200,7 +207,7 @@ def run_nbody_gpu_tree(
     ncrit : int, optional
         Walk group size.  Default 64.
     level_split : int, optional
-        Tree level for spatial grouping.  Default 5.
+        Unused; accepted for backward compatibility.  Default 5.
     step_timeout_s : float, optional
         Seconds before the watchdog fires a KeyboardInterrupt for a hanging
         CUDA kernel.  Default 60.
@@ -323,7 +330,7 @@ def run_nbody_gpu_tree(
             "pip install agama @ git+https://github.com/GalacticDynamics-Oxford/Agama.git"
         )
 
-    # ── GPU arrays — float32 (tree code requires float32) ─────────────────────
+    # ── GPU arrays: float64 integrator state, float32 tree inputs ─────────────
     mass_f32 = cp.asarray(masses, dtype=cp.float32)
     mass_f64 = cp.asarray(masses, dtype=cp.float64)
 
@@ -332,8 +339,8 @@ def run_nbody_gpu_tree(
     else:
         eps_gpu = cp.asarray(softening, dtype=cp.float32)
 
-    pos = cp.asarray(phase_space[:, :3], dtype=cp.float32)
-    vel = cp.asarray(phase_space[:, 3:], dtype=cp.float32)
+    pos = cp.asarray(phase_space[:, :3], dtype=cp.float64)
+    vel = cp.asarray(phase_space[:, 3:], dtype=cp.float64)
 
     # ── Resume from restart ───────────────────────────────────────────────────
     start_step = 0
@@ -343,8 +350,8 @@ def run_nbody_gpu_tree(
         if restart_data is not None:
             (pv_np, t_rest, step_rest, snapctr_rest,
              _m_r, _s_r, _snames_r, _sN_r) = restart_data
-            pos        = cp.asarray(pv_np[:, :3], dtype=cp.float32)
-            vel        = cp.asarray(pv_np[:, 3:], dtype=cp.float32)
+            pos        = cp.asarray(pv_np[:, :3], dtype=cp.float64)
+            vel        = cp.asarray(pv_np[:, 3:], dtype=cp.float64)
             start_step = int(step_rest) + 1
             snap_idx   = int(snapctr_rest)
             if verbose:
@@ -396,23 +403,34 @@ def run_nbody_gpu_tree(
 
         PotentialGPU: force() accepts a CuPy array directly — no host transfer.
         agama.Potential: positions moved to CPU, result brought back to GPU.
-        Both paths return a float32 CuPy array matching the tree-code dtype.
+        Both paths take and return float64 CuPy arrays (absolute positions).
         """
         if external_potential is None:
             return None
         if _is_gpu_potential(external_potential):
             # PotentialGPU: stays on GPU entirely
-            return external_potential.force(
-                pos_.astype(cp.float64), t=t_
-            ).astype(cp.float32)
+            return cp.asarray(external_potential.force(pos_, t=t_), dtype=cp.float64)
         # agama.Potential: CPU round-trip
-        xyz_cpu = cp.asnumpy(pos_.astype(cp.float64))
-        return cp.asarray(external_potential.force(xyz_cpu, t=t_).astype(np.float32))
+        return cp.asarray(external_potential.force(cp.asnumpy(pos_), t=t_),
+                          dtype=cp.float64)
+
+    def _self_gravity(pos_: cp.ndarray, centre_: cp.ndarray):
+        """Tree self-gravity on float32 positions relative to ``centre_``.
+
+        Returns float32 (acc, phi) and the next centre: the float64 position
+        of the most bound particle (min phi).  Everything stays on the device.
+        """
+        acc_, phi_ = tree_gravity_gpu(
+            pos_, mass_f32, eps_gpu, G=G,
+            theta=theta, nleaf=nleaf, ncrit=ncrit, level_split=level_split,
+            tree=tree, center=centre_,
+        )
+        return acc_, phi_, pos_[cp.argmin(phi_)]
 
     def _save_snap_now(t_: float):
         if not save_snapshots or _save_snapshot is None:
             return
-        pv_np = cp.asnumpy(cp.concatenate([pos, vel], axis=1)).astype(np.float64)
+        pv_np = cp.asnumpy(cp.concatenate([pos, vel], axis=1))
         _save_snapshot(
             pv_np, snap_idx, t_, output_dir,
             species=species,
@@ -424,7 +442,7 @@ def run_nbody_gpu_tree(
     def _save_restart_now(step: int, t_: float):
         if _save_restart is None:
             return
-        pv_np  = cp.asnumpy(cp.concatenate([pos, vel], axis=1)).astype(np.float64)
+        pv_np  = cp.asnumpy(cp.concatenate([pos, vel], axis=1))
         m_np   = cp.asnumpy(mass_f32).astype(np.float64)
         s_np   = cp.asnumpy(eps_gpu).astype(np.float64)
         snames = [s.name for s in species] if species else None
@@ -445,19 +463,19 @@ def run_nbody_gpu_tree(
 
     t_now = time_start + start_step * dt
 
+    # Initial tree centre: mass-weighted centre of the system.  From the first
+    # force evaluation on, the centre follows the minimum of phi.
+    centre = (mass_f64[:, None] * pos).sum(axis=0) / mass_f64.sum()
+
     with watchdog:
-        acc, phi = tree_gravity_gpu(
-            pos, mass_f32, eps_gpu, G=G,
-            theta=theta, nleaf=nleaf, ncrit=ncrit, level_split=level_split,
-            tree=tree,
-        )
+        acc, phi, centre = _self_gravity(pos, centre)
 
     _acc_ext = _ext_acc(pos, t_now)
     if _acc_ext is not None:
         acc = acc + _acc_ext
     if force_extra is not None:
         acc = acc + cp.asarray(
-            force_extra(pos, vel, masses, t_now, phi=phi), dtype=cp.float32
+            force_extra(pos, vel, masses, t_now, phi=phi), dtype=cp.float64
         )
 
     # Energy reference (only computed if debug_energy, but always store E_ref)
@@ -501,11 +519,7 @@ def run_nbody_gpu_tree(
             with watchdog:
                 vel = vel + (0.5 * dt) * acc
                 pos = pos + dt         * vel
-                acc, phi = tree_gravity_gpu(
-                    pos, mass_f32, eps_gpu, G=G,
-                    theta=theta, nleaf=nleaf, ncrit=ncrit, level_split=level_split,
-                    tree=tree,
-                )
+                acc, phi, centre = _self_gravity(pos, centre)
 
             # External potential
             if external_potential is not None and current_step % external_update_interval == 0:
@@ -514,11 +528,11 @@ def run_nbody_gpu_tree(
                 acc = acc + _acc_ext
 
             # Extra non-conservative forces (e.g. dynamical friction).
-            # pos and vel are CuPy float32 arrays on the tree-GPU path.
+            # pos and vel are CuPy float64 arrays on the tree-GPU path.
             # phi is passed for free from the tree force evaluation.
             if force_extra is not None:
                 acc = acc + cp.asarray(
-                    force_extra(pos, vel, masses, t_now, phi=phi), dtype=cp.float32
+                    force_extra(pos, vel, masses, t_now, phi=phi), dtype=cp.float64
                 )
 
             with watchdog:
@@ -596,4 +610,4 @@ def run_nbody_gpu_tree(
               f"({avg_ms:.1f} ms/step  |  {steps_done / elapsed_total:.1f} steps/s)")
 
     pv = cp.concatenate([pos, vel], axis=1)
-    return cp.asnumpy(pv).astype(np.float64)
+    return cp.asnumpy(pv)

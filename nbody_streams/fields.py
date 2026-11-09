@@ -59,6 +59,11 @@ from numpy.typing import NDArray, ArrayLike
 from typing import Literal, Union
 import warnings
 
+try:
+    from ._recentre import to_float32_relative
+except ImportError:  # imported as a top-level module
+    from _recentre import to_float32_relative
+
 try :
     from .cuda_kernels import *  # Import kernel templates
 except ImportError:
@@ -496,18 +501,29 @@ def _validate_inputs(pos, mass, softening, precision, kernel):
     dtype_np = _PRECISION_MAP[prec_key][1]  # Only use numpy dtype
     dtype = _PRECISION_MAP[prec_key][0]  if CUPY_AVAILABLE else None  # CuPy dtype if available, else None
     
-    # Validate pos (accept both numpy and cupy, but validate on CPU metadata)
+    # Validate pos (accept both numpy and cupy, but validate on CPU metadata).
+    # float32 precisions: float64 input is converted relative to a nearby
+    # centre (computed and subtracted in float64), so compact structure far
+    # from the origin keeps its precision.  Forces and potential are
+    # translation invariant.  See nbody_streams/_recentre.py.
+    to_f32 = dtype_np == np.float32
     if CUPY_AVAILABLE and isinstance(pos, cp.ndarray):
         # Just validate shape without transferring data
         if pos.ndim != 2 or pos.shape[1] != 3:
             raise ValueError(f"pos must have shape (N, 3), got {pos.shape}")
         N = pos.shape[0]
+        if to_f32 and pos.dtype != cp.float32:
+            pos, _ = to_float32_relative(pos, mass)
         pos_cpu = None  # Signal that data is already on GPU
-        
+
     else:
-        pos_cpu = np.asarray(pos, dtype=dtype_np)
-        if pos_cpu.ndim != 2 or pos_cpu.shape[1] != 3:
-            raise ValueError(f"pos must have shape (N, 3), got {pos_cpu.shape}")
+        pos_arr = np.asarray(pos)
+        if pos_arr.ndim != 2 or pos_arr.shape[1] != 3:
+            raise ValueError(f"pos must have shape (N, 3), got {pos_arr.shape}")
+        if to_f32 and pos_arr.dtype != np.float32:
+            pos_cpu, _ = to_float32_relative(pos_arr, mass)
+        else:
+            pos_cpu = np.asarray(pos_arr, dtype=dtype_np)
         N = pos_cpu.shape[0]
     
     # Handle mass
@@ -730,6 +746,10 @@ def compute_nbody_forces_gpu(
     Notes
     -----
     - All computations use single precision (float32) for optimal GPU performance
+    - With a float32 precision, float64 ``pos`` is converted relative to a
+      nearby centre (subsample centre of mass, subtracted in float64), so
+      compact systems far from the origin keep float32 precision; forces are
+      translation invariant.  Pass float32 ``pos`` to skip this.
     - Complexity is O(N^2), suitable for N ~ 10K-100K particles
     - For N > 100K, consider tree codes (Barnes-Hut) or FMM methods
     - 1M particles typically takes several seconds on RTX3080 GPU

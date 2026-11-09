@@ -278,6 +278,18 @@ The `precision` parameter of the GPU functions controls both storage dtype and t
 
 `run_simulation` defaults to `'float32_kahan'` for GPU direct.  Float64 is recommended for small-N (< 5000) or sub-kpc scale systems.
 
+**Positions far from the origin.**  With a float32 precision, float64 `pos`
+(NumPy or CuPy) is converted to float32 *relative to a nearby centre*: the
+mass-weighted mean of a ~4096-particle strided subsample, subtracted in
+float64 (`nbody_streams/_recentre.py`).  Forces and potential are translation
+invariant, so only the precision changes.  Without it, float32 rounds a
+position at 40 kpc to ~4e-3 pc: for a 1-pc Hernquist cluster at 40 kpc
+(eps = 0.01 pc) the `'float32_kahan'` 99th-percentile force error was 1.6e-2;
+with recentring it is 8.9e-7, the same as `'float64'`.  Kahan summation
+compensates rounding in the sum, not in the inputs.  float32 `pos` is used as
+given (its precision was set when it was rounded), so pass float64 positions.
+`run_nbody_gpu` keeps positions in float64 and benefits automatically.
+
 ---
 
 ## Softening convention
