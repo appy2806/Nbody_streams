@@ -44,6 +44,8 @@ try:
 except ImportError:
     raise ImportError("CuPy is required for tree_gpu.py")
 
+from .._recentre import to_float32_relative
+
 __all__ = ["tree_gravity_gpu", "TreeGPU", "cuda_alive"]
 
 G_DEFAULT = float(4.3009173e-06)  # kpc (km/s)^2 / Msun
@@ -256,6 +258,7 @@ def tree_gravity_gpu(
     level_split: int    = 5,
     verbose: bool       = False,
     tree: TreeGPU | None = None,
+    center=None,
 ) -> tuple[cp.ndarray, cp.ndarray]:
     """
     Compute gravitational accelerations and potential using the GPU tree code
@@ -263,8 +266,12 @@ def tree_gravity_gpu(
 
     Parameters
     ----------
-    pos : cp.ndarray, shape (N, 3)
-        Particle positions (float32 on GPU).
+    pos : cp.ndarray or np.ndarray, shape (N, 3)
+        Particle positions.  float64 input is converted to float32 relative
+        to ``center`` (subtracted in float64), so compact structure far from
+        the origin keeps float32 precision; float32 input is used as given.
+        Forces and potential are translation invariant, so the output does
+        not depend on the centre beyond precision.
     mass : float or cp.ndarray, shape (N,)
         Particle masses.
     eps : float or cp.ndarray, shape (N,)
@@ -290,6 +297,12 @@ def tree_gravity_gpu(
         Print timing / interaction counts from the C++ layer.
     tree : TreeGPU, optional
         Pre-allocated tree handle.  Skips ~27 ms malloc/free per call.
+    center : array_like, shape (3,), optional
+        Centre subtracted from float64 ``pos`` before the float32 cast.
+        Default: mass-weighted mean of a ~4096-particle strided subsample
+        (adds ~0.2 ms at N = 1e6).  Pass the progenitor position when most of
+        the mass has been stripped and the mean lies far from the bound core.
+        Ignored for float32 ``pos``.
 
     Returns
     -------
@@ -300,11 +313,13 @@ def tree_gravity_gpu(
         excluding the particle's interaction with itself (same convention as
         the direct-sum backend).
     """
-    # --- coerce pos to float32 F-order (column-major: x/y/z are contiguous views) ---
-    if isinstance(pos, cp.ndarray) and pos.dtype == cp.float32:
-        pos_f = cp.asfortranarray(pos)
-    else:
-        pos_f = cp.array(pos, dtype=cp.float32, order='F')
+    # --- float32 positions (relative to a centre for float64 input), F-order
+    #     so the x/y/z columns are contiguous views ---
+    if not isinstance(pos, cp.ndarray):
+        pos = np.asarray(pos)
+        pos = cp.asarray(pos, dtype=cp.float32 if pos.dtype == np.float32 else cp.float64)
+    pos_rel, _ = to_float32_relative(pos, mass, center)
+    pos_f = cp.asfortranarray(pos_rel)
 
     n = pos_f.shape[0]
 

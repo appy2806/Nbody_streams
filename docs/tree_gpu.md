@@ -60,7 +60,7 @@ tree (one-shot: allocates and frees the tree per call).
 
 | Name | Type | Description |
 |------|------|-------------|
-| `pos` | `cp.ndarray`, shape `(N, 3)` | Particle positions, float32 on GPU. Pass positions relative to the system's centre when it sits far from the origin (see [Precision](#precision)). |
+| `pos` | `cp.ndarray` or `np.ndarray`, shape `(N, 3)` | Particle positions.  float64 input is recentred before the float32 cast (see [Precision](#precision)); float32 input is used as given. |
 | `mass` | float or `cp.ndarray (N,)` | Particle masses. |
 | `eps` | float or `cp.ndarray (N,)` | Plummer softening length(s). Scalar gives uniform softening; array enables per-particle softening for multi-species runs. |
 | `G` | float | Gravitational constant. Default: kpc / (km/s)^2 / Msun. |
@@ -70,6 +70,7 @@ tree (one-shot: allocates and frees the tree per call).
 | `level_split` | int | Tree level for spatial grouping. Default 5. |
 | `verbose` | bool | Print timing / interaction counts from the C++ layer. |
 | `tree` | `TreeGPU` or None | Pre-allocated tree handle. Skips ~27 ms malloc/free per call. |
+| `center` | array_like `(3,)` or None | Centre subtracted from float64 `pos` before the float32 cast.  Default: subsample centre of mass.  Ignored for float32 `pos`. |
 
 **Returns**
 
@@ -312,10 +313,17 @@ tree should see positions measured from the system it resolves:
   centre before the first step).  Self-gravity is translation invariant, so
   `c` does not change the physics.  The external potential is evaluated at the
   absolute float64 positions.  Measured cost: about 1 ms/step at N = 1M.
-- Calling `tree_gravity_gpu` directly with absolute coordinates far from the
-  origin degrades the forces of compact structure: for a 1-pc Hernquist
-  cluster at 40 kpc the 99th-percentile force error is ~2e-2, versus ~5e-4
-  for the same cluster at the origin.  Subtract a nearby centre first.
+- `tree_gravity_gpu` does the same for **float64** `pos` (NumPy or CuPy):
+  it subtracts `center` in float64 before the float32 cast.  The default
+  centre is the mass-weighted mean of a ~4096-particle strided subsample
+  (~0.2 ms at N = 1M, within timing noise of the 39 ms call); pass
+  `center=` (e.g. the progenitor position) when most of the mass has been
+  stripped and the mean lies far from the bound core.  For a 1-pc Hernquist
+  cluster at 40 kpc the 99th-percentile force error is 4.4e-4 with float64
+  input, the same as at the origin, against 1.6e-2 for absolute float32 input.
+- float32 `pos` is used as given: its precision was fixed when it was
+  rounded, so recentring it would not help.  Rescaling units does not help
+  either (float rounding is relative); only translating does.
 
 Energy diagnostics are computed in float64.
 

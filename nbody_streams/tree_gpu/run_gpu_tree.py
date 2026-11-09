@@ -420,11 +420,10 @@ def run_nbody_gpu_tree(
         Returns float32 (acc, phi) and the next centre: the float64 position
         of the most bound particle (min phi).  Everything stays on the device.
         """
-        rel = (pos_ - centre_).astype(cp.float32)
         acc_, phi_ = tree_gravity_gpu(
-            rel, mass_f32, eps_gpu, G=G,
+            pos_, mass_f32, eps_gpu, G=G,
             theta=theta, nleaf=nleaf, ncrit=ncrit, level_split=level_split,
-            tree=tree,
+            tree=tree, center=centre_,
         )
         return acc_, phi_, pos_[cp.argmin(phi_)]
 
