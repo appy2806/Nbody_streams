@@ -60,11 +60,11 @@ tree (one-shot: allocates and frees the tree per call).
 
 | Name | Type | Description |
 |------|------|-------------|
-| `pos` | `cp.ndarray`, shape `(N, 3)` | Particle positions, float32 on GPU. |
+| `pos` | `cp.ndarray`, shape `(N, 3)` | Particle positions, float32 on GPU. Pass positions relative to the system's centre when it sits far from the origin (see [Precision](#precision)). |
 | `mass` | float or `cp.ndarray (N,)` | Particle masses. |
 | `eps` | float or `cp.ndarray (N,)` | Plummer softening length(s). Scalar gives uniform softening; array enables per-particle softening for multi-species runs. |
 | `G` | float | Gravitational constant. Default: kpc / (km/s)^2 / Msun. |
-| `theta` | float | Barnes-Hut opening angle. 0.75 = fast; 0.5 = accurate; 0.3 = very accurate. Default 0.6. |
+| `theta` | float or None | Barnes-Hut opening angle. 0.75 = fast; 0.5 = accurate; 0.3 = very accurate. Default: `tree.theta` when a handle is passed (a value passed together with `tree` updates the handle), else 0.6. |
 | `nleaf` | int | Max particles per leaf cell. Must be in {16, 24, 32, 48, 64}. Default 64. |
 | `ncrit` | int | Group size for the tree walk. Default 64. |
 | `level_split` | int | Tree level for spatial grouping. Default 5. |
@@ -76,14 +76,16 @@ tree (one-shot: allocates and frees the tree per call).
 | Name | Type | Description |
 |------|------|-------------|
 | `acc` | `cp.ndarray`, shape `(N, 3)` | Gravitational accelerations in original particle order. |
-| `phi` | `cp.ndarray`, shape `(N,)` | Gravitational potential per particle. |
+| `phi` | `cp.ndarray`, shape `(N,)` | Gravitational potential per particle, excluding the particle's interaction with itself (same convention as the direct-sum backend). |
 
 **Softening convention** (matches nbody_streams direct-sum):
 
 - Direct particle-particle: `eps2_ij = max(eps_i^2, eps_j^2)`
 - Cell approximation: `eps2_ij = max(eps_i^2, eps_cell_max^2)`
 
-Both use the Plummer kernel: `r^2 -> r^2 + eps2`.
+Both use the Plummer kernel: `r^2 -> r^2 + eps2`.  Softening must be
+strictly positive (`ValueError` otherwise).  Zero-mass particles (tracers)
+are allowed: they feel forces but exert none.
 
 **Example**
 
@@ -116,11 +118,12 @@ context manager.
 |------|------|-------------|
 | `n` | int | Number of particles. Must not exceed available VRAM (80% free, capped at 28-bit Particle4 index). |
 | `eps` | float | Default fallback softening length. |
-| `theta` | float | Barnes-Hut opening angle. |
+| `theta` | float | Barnes-Hut opening angle, in (0, 1.15). |
 | `verbose` | bool | Print timing from C++ layer. |
 
-**Methods**
+**Attributes and methods**
 
+- `theta` — settable property; the new value applies from the next force call.
 - `close()` — free GPU memory.
 - Context manager: `__enter__` / `__exit__` call `close()`.
 
@@ -296,12 +299,25 @@ watchdog.close()
 
 ---
 
-## Float32 note
+## Precision
 
-All force evaluations inside the tree code operate in **float32**.  Positions
-and velocities in `run_nbody_gpu_tree` are also kept in float32 on the GPU
-(consistent with the tree-code internals).  Energy diagnostics are computed
-in float64.
+All force evaluations inside the tree code operate in **float32**.  float32
+spacing grows with distance from the origin (about 4e-3 pc at 40 kpc), so the
+tree should see positions measured from the system it resolves:
+
+- `run_nbody_gpu_tree` integrates positions and velocities in **float64**.
+  Each step it passes `pos - c` to the tree, where `c` is the float64
+  position of the particle with the lowest self-gravity potential at the
+  previous step (the density peak of the bound progenitor; the mass-weighted
+  centre before the first step).  Self-gravity is translation invariant, so
+  `c` does not change the physics.  The external potential is evaluated at the
+  absolute float64 positions.  Measured cost: about 1 ms/step at N = 1M.
+- Calling `tree_gravity_gpu` directly with absolute coordinates far from the
+  origin degrades the forces of compact structure: for a 1-pc Hernquist
+  cluster at 40 kpc the 99th-percentile force error is ~2e-2, versus ~5e-4
+  for the same cluster at the origin.  Subtract a nearby centre first.
+
+Energy diagnostics are computed in float64.
 
 ---
 
@@ -376,24 +392,40 @@ executes four CUDA kernels in sequence:
 #### Phase 1 — `buildTree`
 
 1. Bounding-box reduction over all particle positions (warp-level `fminf`/`fmaxf`, then inter-warp shared-memory reduction).
-2. Morton key assignment — each particle's (x,y,z) is mapped to a 30-bit Morton Z-order key relative to the bounding box.
-3. Radix sort of particles by Morton key (Thrust `device_sort`).
-4. Octree construction: **host-driven iterative build** (replaced CDP1 recursive kernel launches for CUDA 12 compatibility).  A `PendingWork` queue on the host drives per-level CUDA kernel launches; each kernel processes one octant level in parallel.  The work queue has a compile-time depth of `BUILD_MAX_WORK = 262144` (safe for N ≤ 4M balanced trees; increase and recompile for highly clustered configurations).
-5. A permutation array `d_origIdx[tree_idx] = original_user_idx` is built so output forces can be returned in user order.
+2. Octree construction: **host-driven iterative build** (replaced CDP1 recursive kernel launches for CUDA 12 compatibility).  Each split of a cell scatters its particles into octants (no particle sort by space-filling-curve key happens here) and appends work items for children that need further splitting to a `PendingWork` queue.  Per level, the host reads the queue back, buckets the items by grid size (a power of two, at most 10 buckets), uploads them to a second queue and launches **one batched kernel per bucket** (`buildOctantBatch`: `blockIdx.z` = work item, `blockIdx.y` = octant).  This replaced one launch per work item (~7000 launches per build at N = 1M; build time 30 ms -> 6 ms on an RTX 3080 Laptop).  The queues have a compile-time depth of `BUILD_MAX_WORK = 262144` (safe for N ≤ 4M balanced trees; increase and recompile for highly clustered configurations).
+3. Cells are then stable-sorted by tree level (Thrust `stable_sort_by_key`) so each level is contiguous.
+4. A permutation array `d_origIdx[tree_idx] = original_user_idx` is built so output forces can be returned in user order.
 
 #### Phase 2 — `computeMultipoles`
 
-Bottom-up cell moment accumulation using warp-level shuffle reductions
-(`shfl_xor`):
+Bottom-up, O(N + nCells):
 
-- **Monopole**: total mass and centre-of-mass position accumulated in
-  double precision per warp, then reduced to float and stored as `(cx, cy, cz, mass)` in `d_cellMonopole`.
-- **Quadrupole**: 6 independent components of `Q_ij = Σ_k m_k (r_ki r_kj - δ_ij r_k²/3)` accumulated in double per warp, stored as `float4 + float2` in `d_cellQuad0/1`.
-- **Per-cell max softening**: `d_cellEpsMax[cell] = max(eps_k)` over all particles in the cell, propagated bottom-up alongside the moments.  Used in the force kernel for the cell-approximation softening.
+1. `leafMultipoles` — one warp per leaf reduces the leaf's particles with
+   warp shuffles (`shfl_xor`).  Moments are taken about the leaf's first
+   particle (so `<xx> - <x><x>` does not cancel for small cells far from the
+   origin) with per-warp float partial sums accumulated in double.
+2. `nodeMultipoles` — one thread per node, one launch per level from the
+   deepest up, combines the (at most 8) children with the parallel-axis
+   theorem: `M = Σ m_c`, `com = Σ m_c com_c / M`,
+   `Q = Σ m_c (Q_c + d_c d_c^T) / M` with `d_c = com_c - com`.  Centres of
+   mass are carried between levels in double (`d_cellComD`).
+
+Per cell this stores:
+
+- **Monopole** `(com_x, com_y, com_z, mass)` in `d_cellMonopole`.
+- **Quadrupole**: the 6 components of the mass-normalised central second
+  moment `Q_ij = <x_i x_j> - <x_i><x_j>` (not trace-free; the force kernel
+  uses the trace explicitly), stored as `float4 + float2` in `d_cellQuad0/1`.
+- **Opening radius** `(l/theta + s)^2` in `d_cellSize.w` (see below), from the
+  tight particle bounding box (union of the children's boxes for nodes).
+- **Max softening** `d_cellEpsMax[cell] = max(eps_k)` over the cell's particles.
+
+A cell whose particles are all massless gets zero mass and quadrupole and a
+finite COM inside the cell, so it contributes nothing to the forces.
 
 #### Phase 3 — `makeGroups`
 
-Particles are re-sorted into *interaction groups* by splitting the tree at
+Particles are sorted by a Peano-Hilbert key (Thrust `sort_by_key`) and grouped into *interaction groups* by splitting the tree at
 `level_split` (default 5).  Each group is a contiguous block of ≤ `ncrit`
 particles from the same sub-tree, which gives coalesced global-memory reads
 in the force kernel.  The sorted-group index array `d_ptclEpsGrp` is
@@ -401,21 +433,31 @@ populated here from `d_ptclEpsTree` via the group permutation.
 
 #### Phase 4 — `computeForces`
 
-Each interaction group walks the tree in parallel.  The walk uses a
-per-warp ring-buffer (size `CELL_LIST_MEM_PER_WARP = 4096 × 32`) to hold
-the pending cell list, avoiding global atomics.
+Each interaction group walks the tree in parallel.  The kernel is
+persistent: `nblock = (number of SMs) × (resident blocks per SM from
+cudaOccupancyMaxActiveBlocksPerMultiprocessor)` blocks of 4 warps pull groups
+from an atomic counter (capped so the ring buffers below use at most 1/4 of
+free memory).  This replaced a fixed `8*13 = 104` blocks, which left large
+GPUs mostly idle.  `__launch_bounds__(128, 6)` allows ~85 registers so the
+quadrupole walk spills little.  Each warp has its own ring buffer (size
+`CELL_LIST_MEM_PER_WARP = 4096 × 32` ints) holding the pending cell list,
+avoiding global atomics.
 
-**Opening criterion** — improved Barnes-Hut (`split_node_grav_impbh`):
+**Opening criterion** — Bonsai group MAC with the Salmon-Warren offset (`split_node_grav_impbh`):
 
 ```
-dr = max(0, |r_group_center - r_cell_center| - r_group_half_size)
-split if  |dr|² < |cellSize.w|
+dr = max(0, |r_group_center - r_cell_com| - r_group_half_size)   (per axis)
+split if  |dr|^2 < cellSize.w
+cellSize.w = (l/theta + s)^2
 ```
 
-This is the *min-distance* criterion: a cell is only approximated if the
-closest point of the interaction group's bounding box is far enough from the
-cell centre.  It is more conservative (and more accurate) than the
-classic single-particle criterion `d < θ × l`.
+`dr` is the per-axis minimum distance from the interaction group's bounding
+box to the cell's centre of mass (COM).  In `computeMultipoles`, `l` is the
+longest side of the cell's tight particle bounding box (clamped to >= 1e-6)
+and `s` is the distance between that bounding-box centre and the COM
+(Salmon-Warren offset).  Because the test uses the group box rather than a
+single particle, it is more conservative than the classic criterion
+`d < l/theta`.  Cells containing fewer than 3 particles are always opened.
 
 **Interaction types** (once a cell passes the opening criterion):
 
@@ -460,8 +502,8 @@ arrays:
 ```
 user eps[i]
   → k_load_pos_mass_eps: ptclVel[i].x = eps[i]
-  → buildTree (Morton sort): d_ptclEpsTree[tree_order_i] extracted
-  → makeGroups (group sort): d_ptclEpsGrp[group_order_i] extracted
+  → buildTree (octant scatter): d_ptclEpsTree[tree_order_i] extracted
+  → makeGroups (Peano-Hilbert group sort): d_ptclEpsGrp[group_order_i] extracted
   → computeForces: reads d_ptclEpsGrp (query eps_i), d_ptclEpsTree (source eps_j)
 ```
 
@@ -470,10 +512,14 @@ pipeline; `k_load_pos_mass` broadcasts the scalar into every `ptclVel.x`.
 
 ---
 
-### GPU memory layout (per-step allocations)
+### GPU memory layout
 
-`TreeGPU.alloc(N)` makes a single bulk allocation; there are no per-step
-`cudaMalloc` / `cudaFree` calls.  The main allocations:
+`TreeGPU.alloc(N)` makes a bulk allocation of the persistent tree buffers
+listed below.  Nothing is allocated per step in steady state: the tree-walk
+ring-buffer pool (`d_gmem_pool`) is allocated on the first force call and
+reused, the `makeGroups` scratch is part of `alloc()`, and Thrust sort/scan
+scratch goes through a caching allocator owned by the tree.  The cell arrays
+grow (never shrink) with the number of cells.  The main allocations:
 
 | Buffer | Size | Purpose |
 |--------|------|---------|
@@ -483,7 +529,9 @@ pipeline; `k_load_pos_mass` broadcasts the scalar into every `ptclVel.x`.
 | `d_cellDataList` | N × 16 bytes | Cell metadata |
 | `d_cellMonopole`, `d_cellQuad0/1` | N × 16 + 8 bytes | Monopole + quadrupole moments |
 | `d_cellEpsMax` | N × 4 bytes | Per-cell max softening |
-| Build scratch (`d_build_workQueue`) | `262144 × 64` bytes ≈ 16 MB | Host-driven build queue |
+| `d_cellComD`, `d_cellBoxMin/Max` | nCells × 64 bytes | Bottom-up multipole scratch |
+| Build scratch (`d_build_workQueue`, `d_build_workQueueIn`) | 2 × `262144 × 64` bytes ≈ 32 MB | Host-driven build queues |
+| Walk pool (`d_gmem_pool`) | 2 MB per persistent block | e.g. 384 blocks ≈ 768 MB on a 48-SM GPU; capped at 1/4 of free memory |
 
 Total VRAM for N = 1M particles: approximately **700 MB** before quadrupole
 storage.  `TreeGPU` checks that 80% of free VRAM is available before allocating.
@@ -525,7 +573,7 @@ make clean            # remove .o files
 make clean_all        # remove .o files + libtreeGPU.so
 ```
 
-`FAST_MATH` is **on by default** (see Makefile line 10).  Disable for
+`FAST_MATH` is **on by default** (`FAST_MATH ?= 1`, Makefile line 15; the Makefile header comment saying "default: off" is stale).  Disable for
 higher floating-point accuracy at ~5-10% throughput cost.
 
 ---
@@ -539,13 +587,15 @@ The Python layer calls `libtreeGPU.so` via `ctypes`.  Exported C symbols:
 | `tree_new` | `(eps, theta) → Tree*` | Allocate Treecode struct |
 | `tree_delete` | `(Tree*)` | Free struct + GPU buffers |
 | `tree_alloc` | `(Tree*, n)` | `cudaMalloc` all buffers |
+| `tree_set_verbose` | `(Tree*, verbose)` | Timing / interaction-count output |
+| `tree_set_theta` | `(Tree*, theta)` | Change the opening angle of an existing handle |
 | `tree_set_pos_mass_eps_device` | `(Tree*, n, x, y, z, mass, eps)` | Load per-particle eps |
 | `tree_set_pos_mass_device` | `(Tree*, n, x, y, z, mass)` | Uniform-eps path |
 | `tree_build` | `(Tree*, nleaf)` | Run buildTree |
-| `tree_multipoles` | `(Tree*)` | Run computeMultipoles |
-| `tree_groups` | `(Tree*, level_split, ncrit)` | Run makeGroups |
-| `tree_forces` | `(Tree*)` | Run computeForces |
-| `tree_get_acc_pot_device` | `(Tree*, ax, ay, az, pot)` | Copy results to output arrays |
+| `tree_compute_multipoles` | `(Tree*)` | Run computeMultipoles |
+| `tree_make_groups` | `(Tree*, level_split, ncrit)` | Run makeGroups |
+| `tree_compute_forces` | `(Tree*)` | Run computeForces (interaction statistics only when verbose) |
+| `tree_get_acc_device` | `(Tree*, n, ax, ay, az, pot)` | Copy results to output arrays in user order |
 
 All pointer arguments are raw CUDA device pointers obtained from CuPy
 via `arr.data.ptr`.  The Python wrapper (`tree_gravity_gpu`) handles
@@ -556,6 +606,7 @@ argument marshalling and the two-sort permutation to restore user order.
 ### Known limitations
 
 - **Single GPU only** — the ctypes interface always operates on device 0.  Multi-GPU support would require per-device `Tree*` instances and explicit `cudaSetDevice` calls in the C interface.
-- **float32 positions** — precision loss accumulates for simulations spanning dynamic ranges > ~10^6 (e.g. a cluster embedded in a cosmological box).  Consider recentring particles at each snapshot output for long-duration runs.
+- **float32 tree** — the tree itself works in float32; see [Precision](#precision) for how `run_nbody_gpu_tree` keeps this from limiting compact structure far from the origin, and what direct callers of `tree_gravity_gpu` should do.
+- **Device-side failures terminate the process** — device-side checks call `assert` / `exit`, which kills the Python process rather than raising an exception.  Pipeline phases are not synchronised individually; set the environment variable `TREE_SYNC_CHECK=1` to synchronise after each phase so an execution error is reported at the kernel that caused it.
 - **Fixed timestep only** — `run_nbody_gpu_tree` uses a global fixed dt (KDK leapfrog).  Individual/block timesteps are not implemented.
 - **No periodic boundary conditions** — the bounding box is recomputed from actual particle positions each step.

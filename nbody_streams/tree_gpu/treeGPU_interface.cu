@@ -7,8 +7,8 @@
  *   computeForces reads both:
  *     - g_ptclEpsGrp for query particles (eps_i)
  *     - g_ptclEpsTree for source particles (eps_j)
- *   Direct interaction uses: eps2_ij = 0.5*(eps_i^2 + eps_j^2)
- *   Cell approximation uses: eps_i^2  (query particle's own softening)
+ *   Direct interaction uses: eps2_ij = max(eps_i^2, eps_j^2)
+ *   Cell approximation uses: eps2_ij = max(eps_i^2, eps_cell_max^2)
  */
 #include "Treecode.h"
 #include <cstdio>
@@ -134,7 +134,9 @@ extern "C" {
 
     struct Res { double x, y, z, w; };
     Res tree_compute_forces(Tree* tree) {
-        double4 r = tree->computeForces();
+        /* Interaction statistics need extra atomics in the walk; only collect
+         * them when verbose (the Python wrapper discards the return value). */
+        double4 r = tree->computeForces(tree->verbose != 0);
         return {r.x, r.y, r.z, r.w};
     }
 
@@ -161,5 +163,11 @@ extern "C" {
 
     void tree_set_verbose(Tree* tree, int verbose) {
         if (tree) tree->verbose = verbose;
+    }
+
+    /* theta only enters computeMultipoles (cellOp = l/theta + s), so changing
+     * it between force calls on a reused handle takes effect immediately. */
+    void tree_set_theta(Tree* tree, real_t theta) {
+        if (tree) tree->theta = theta;
     }
 }

@@ -31,10 +31,11 @@ run_nbody_gpu_tree
 
 Notes
 -----
-All force evaluations inside the tree code operate in **float32**.  Positions
-and velocities in ``run_nbody_gpu_tree`` are also kept in float32 on the GPU
-(consistent with the precision of the tree code itself).  Energy diagnostics
-are computed in float64.
+All force evaluations inside the tree code operate in **float32**.
+``run_nbody_gpu_tree`` integrates positions and velocities in float64 and
+hands the tree positions relative to the current density peak, so float32
+precision is not limited by the distance from the origin.  Energy
+diagnostics are computed in float64.
 
 The softening convention matches nbody_streams direct-sum:
     direct:  ``eps2_ij = max(eps_i^2, eps_j^2)``

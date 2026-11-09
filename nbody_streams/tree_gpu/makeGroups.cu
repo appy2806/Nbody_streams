@@ -3,6 +3,7 @@
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <thrust/scan.h>
+#include <thrust/execution_policy.h>
 
 namespace makeGroups
 {
@@ -264,8 +265,7 @@ void Treecode<real_t>::makeGroups(int levelSplit, const int nCrit)
   const int nblock  = (nPtcl-1)/nthread + 1;
   const int NBINS = 21; 
 
-  cudaDeviceSynchronize();
-  const double t0 = rtc();
+  const double t0 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
   makeGroups::computeKeys<NBINS,real_t><<<nblock,nthread>>>(nPtcl, d_domain, d_ptclPos, d_keys, d_values);
 
   levelSplit = std::max(1,levelSplit);  /* pick the coarse segment boundaries at the levelSplit */
@@ -285,7 +285,7 @@ void Treecode<real_t>::makeGroups(int levelSplit, const int nCrit)
   thrust::device_ptr<unsigned long long> keys_end(d_keys + nPtcl);
   thrust::device_ptr<int> vals_beg(d_value.ptr);
 #if 1
-  thrust::sort_by_key(keys_beg, keys_end, vals_beg); 
+  thrust::sort_by_key(thrust::cuda::par(thrust_alloc), keys_beg, keys_end, vals_beg);
 #else
   thrust::sort_by_key(keys_beg, keys_end, vals_beg, makeGroups::keyCompare());
 #endif
@@ -297,20 +297,18 @@ void Treecode<real_t>::makeGroups(int levelSplit, const int nCrit)
    * can load eps_i (query particle softening) directly by group index. */
   makeGroups::gather_float<<<nblock,nthread>>>(nPtcl, d_value, d_ptclEpsTree.ptr, d_ptclEpsGrp.ptr);
 
-  cuda_mem<int> d_ptclBegIdx, d_ptclEndIdx;
-  cuda_mem<unsigned long long> d_keys_inv;
-  d_ptclBegIdx.alloc(nPtcl);
-  d_ptclEndIdx.alloc(nPtcl);
-  d_keys_inv.alloc(nPtcl);
+  cuda_mem<int> &d_ptclBegIdx = d_grpBegIdx;
+  cuda_mem<int> &d_ptclEndIdx = d_grpEndIdx;
+  cuda_mem<unsigned long long> &d_keys_inv = d_grpKeysInv;
   makeGroups::mask_keys<<<nblock,nthread,(nthread+2)*sizeof(unsigned long long)>>>(nPtcl, mask, d_keys, d_keys_inv, d_ptclBegIdx, d_ptclEndIdx);
 
   thrust::device_ptr<int> valuesBeg(d_ptclBegIdx.ptr);
   thrust::device_ptr<int> valuesEnd(d_ptclEndIdx.ptr);
-  thrust::inclusive_scan_by_key(keys_beg,     keys_end,    valuesBeg, valuesBeg);
+  thrust::inclusive_scan_by_key(thrust::cuda::par(thrust_alloc), keys_beg,     keys_end,    valuesBeg, valuesBeg);
 
   thrust::device_ptr<unsigned long long> keys_inv_beg(d_keys_inv.ptr);
   thrust::device_ptr<unsigned long long> keys_inv_end(d_keys_inv.ptr + nPtcl);
-  thrust::inclusive_scan_by_key(keys_inv_beg, keys_inv_end, valuesEnd, valuesEnd);
+  thrust::inclusive_scan_by_key(thrust::cuda::par(thrust_alloc), keys_inv_beg, keys_inv_end, valuesEnd, valuesEnd);
 
 #if 0
   std::vector<int> beg(nPtcl), end(nPtcl);
@@ -328,9 +326,9 @@ void Treecode<real_t>::makeGroups(int levelSplit, const int nCrit)
 #endif
 
   kernelSuccess("makeGroups");
-  const double t1 = rtc();
-  const double dt = t1 - t0;
   if (verbose){
+    cudaDeviceSynchronize();
+    const double dt = rtc() - t0;
     fprintf(stderr, " makeGroups done in %g sec : %g Mptcl/sec\n",  dt, nPtcl/1e6/dt);
   }
   

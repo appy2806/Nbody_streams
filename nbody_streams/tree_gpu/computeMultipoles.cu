@@ -2,12 +2,27 @@
 
 #include "cuda_primitives.h"
 
+/* Cell multipoles (monopole + quadrupole), bounding boxes and max softening.
+ *
+ * Bottom-up scheme:
+ *   1. leafMultipoles   : one warp per leaf, reduces the leaf's particles.
+ *   2. nodeMultipoles   : one thread per node, one launch per tree level from
+ *                         the deepest level up, combines the (at most 8)
+ *                         children with the parallel-axis theorem.
+ * Total work is O(N + nCells).  The previous scheme reduced every cell
+ * directly over all of its particles, i.e. O(N x depth), with the 8 top
+ * cells each streaming N/8 particles through a single warp.
+ *
+ * Precision: leaf moments are accumulated about a reference point inside the
+ * leaf (its first particle), so the quadrupole Q = <xx> - <x><x> does not
+ * cancel catastrophically when a cell is small compared with its distance
+ * from the origin.  Centres of mass are carried between levels in double
+ * (d_cellComD) and child offsets d = com_child - com_parent are formed in
+ * double, so node quadrupoles keep the same property.
+ */
+
 namespace multipoles
 {
-
-#if 0  /* just a test case, but works for float only */
-#define _USE_RESTRICT_ 
-#endif
 
   template<typename treal, typename real_t>
     static __device__ __forceinline__
@@ -67,157 +82,221 @@ namespace multipoles
       _Q.yz() += Q.yz();
     }
 
-#if 0
-  template<int NTHREAD2, typename real_t>
-    static __global__ void computeCellMultipoles(
-        const int level, 
-        const int2 *levelInfo,
-        const CellData *cells,
-        const Particle4<real_t> *ptclPos);
-#endif
+  /* Write the per-cell outputs shared by the leaf and node passes. */
+  template<typename real_t>
+    static __device__ __forceinline__
+    void storeCell(
+        const int cellIdx,
+        const double4 comD,                 /* absolute COM (xyz) and mass (w) */
+        const Quadrupole<double> &Q,        /* central second moments per unit mass */
+        const float3 rmin, const float3 rmax,
+        const float cellEpsMax,
+        const real_t inv_theta,
+        typename vec<4,real_t>::type *sizeList,
+        typename vec<4,real_t>::type *monopoleList,
+        typename vec<4,real_t>::type *quadrpl0List,
+        typename vec<2,real_t>::type *quadrpl1List,
+        float  *epsMaxList,
+        double4 *comDList,
+        float4 *boxMinList,
+        float4 *boxMaxList)
+    {
+      typedef typename vec<4,real_t>::type real4_t;
+      typedef typename vec<2,real_t>::type real2_t;
 
-  __device__ unsigned int nflops = 0;
+      /* Opening radius l/theta + s: l = longest side of the tight particle
+       * box, s = |box centre - COM| (Salmon-Warren offset). */
+      const real_t cx = (rmax.x+rmin.x)*real_t(0.5f), hx = (rmax.x-rmin.x)*real_t(0.5f);
+      const real_t cy = (rmax.y+rmin.y)*real_t(0.5f), hy = (rmax.y-rmin.y)*real_t(0.5f);
+      const real_t cz = (rmax.z+rmin.z)*real_t(0.5f), hz = (rmax.z-rmin.z)*real_t(0.5f);
+      const real_t dx = cx - real_t(comD.x);
+      const real_t dy = cy - real_t(comD.y);
+      const real_t dz = cz - real_t(comD.z);
+      const real_t s  = sqrt(dx*dx + dy*dy + dz*dz);
+      const real_t l  = max(real_t(2.0f)*max(hx, max(hy, hz)), real_t(1.0e-6f));
+      const real_t cellOp = l*inv_theta + s;
 
+      sizeList    [cellIdx] = make_float4(comD.x, comD.y, comD.z, cellOp*cellOp);
+      monopoleList[cellIdx] = (real4_t){real_t(comD.x), real_t(comD.y), real_t(comD.z), real_t(comD.w)};
+      const double4 q0 = Q.get_q0();
+      const double2 q1 = Q.get_q1();
+      quadrpl0List[cellIdx] = (real4_t){real_t(q0.x), real_t(q0.y), real_t(q0.z), real_t(q0.w)};
+      quadrpl1List[cellIdx] = (real2_t){real_t(q1.x), real_t(q1.y)};
+      epsMaxList  [cellIdx] = cellEpsMax;
+      comDList    [cellIdx] = comD;
+      boxMinList  [cellIdx] = make_float4(rmin.x, rmin.y, rmin.z, 0.0f);
+      boxMaxList  [cellIdx] = make_float4(rmax.x, rmax.y, rmax.z, 0.0f);
+    }
+
+  /* Pass 1: one warp per leaf. */
   template<int NTHREAD2, typename real_t>
     static __global__
     __launch_bounds__(1<<NTHREAD2, 1024/(1<<NTHREAD2))
-    void computeCellMultipoles(
-        const int nPtcl,
-        const int nCells,
+    void leafMultipoles(
+        const int nLeaves,
+        const int *leafList,
         const CellData *cells,
-#ifdef _USE_RESTRICT_
-        const float4* __restrict__ ptclPos,
-#else
         const Particle4<real_t> *ptclPos,
-#endif
         const float * __restrict__ ptclEps,     /* eps for tree-sorted particles (d_ptclEpsTree) */
         const real_t inv_theta,
         __out typename vec<4,real_t>::type *sizeList,
         __out typename vec<4,real_t>::type *monopoleList,
         __out typename vec<4,real_t>::type *quadrpl0List,
         __out typename vec<2,real_t>::type *quadrpl1List,
-        __out float                        *epsMaxList)   /* max eps per cell */
+        __out float   *epsMaxList,
+        __out double4 *comDList,
+        __out float4  *boxMinList,
+        __out float4  *boxMaxList)
     {
       const int warpIdx = threadIdx.x >> WARP_SIZE2;
       const int laneIdx = threadIdx.x & (WARP_SIZE-1);
 
       const int NWARP2  = NTHREAD2 - WARP_SIZE2;
-      const int cellIdx = (blockIdx.x<<NWARP2) + warpIdx;
-      if (cellIdx >= nCells) return;
+      const int leafIdx = (blockIdx.x<<NWARP2) + warpIdx;
+      if (leafIdx >= nLeaves) return;
 
-      /* a warp compute properties of each cell */
-
+      const int cellIdx = leafList[leafIdx];
       const CellData cell = cells[cellIdx];
 
       const real_t huge = static_cast<real_t>(1e10f);
       typename vec<3,real_t>::type rmin = {+huge,+huge,+huge};
       typename vec<3,real_t>::type rmax = {-huge,-huge,-huge};
       double4 M = {0.0};
-      /* Moments are accumulated about a reference point inside the cell (its
-       * first particle), not about the coordinate origin.  The quadrupole is
-       * Q = <xx> - <x><x>; with float32 raw moments about the origin this
-       * cancels catastrophically when the cell is small compared with its
-       * distance from the origin (relative error ~ 6e-8 (|X|/l)^2, e.g. 1 pc
-       * cells at 40 kpc). */
-      double refx = 0.0, refy = 0.0, refz = 0.0;
       Quadrupole<double> Q;
-      float cellEpsMax = 0.0f;   /* max eps over all particles in this cell */
+      float cellEpsMax = 0.0f;
 
-      unsigned int nflop = 0;
-#if 0
-      if (cell.isNode())
+      const int firstBody = cell.pbeg();
+      const int  lastBody = cell.pend();
+      const Particle4<real_t> pref(ptclPos[firstBody]);
+      const double refx = pref.x();
+      const double refy = pref.y();
+      const double refz = pref.z();
+
+      for (int i = firstBody; i < lastBody; i += WARP_SIZE)
       {
-      }
-      else
-#endif
-      {
-        const int firstBody = cell.pbeg();
-        const int  lastBody = cell.pend();
-        const Particle4<real_t> pref(ptclPos[firstBody]);
-        refx = pref.x();
-        refy = pref.y();
-        refz = pref.z();
+        Particle4<real_t> ptcl(ptclPos[min(i+laneIdx,lastBody-1)]);
+        if (i + laneIdx >= lastBody)
+          ptcl.mass() = static_cast<real_t>(0.0f);
 
-        for (int i = firstBody; i < lastBody; i += WARP_SIZE)
-        {
-          nflop++;
-          Particle4<real_t> ptcl(ptclPos[min(i+laneIdx,lastBody-1)]);
-          if (i + laneIdx >= lastBody)
-            ptcl.mass() = static_cast<real_t>(0.0f);
+        addBoxSize(rmin, rmax, Position<real_t>(ptcl.x(),ptcl.y(),ptcl.z()));
 
-          addBoxSize(rmin, rmax, Position<real_t>(ptcl.x(),ptcl.y(),ptcl.z()));
-#if 0
-          typedef double treal;
-#else
-          typedef float treal;
-#endif
-          Particle4<real_t> prel = ptcl;   /* position relative to the reference point */
-          prel.x() -= static_cast<real_t>(refx);
-          prel.y() -= static_cast<real_t>(refy);
-          prel.z() -= static_cast<real_t>(refz);
-          addMonopole<treal>(M, prel);
-          addQuadrupole<treal>(Q, prel);
+        Particle4<real_t> prel = ptcl;   /* position relative to the reference point */
+        prel.x() -= static_cast<real_t>(refx);
+        prel.y() -= static_cast<real_t>(refy);
+        prel.z() -= static_cast<real_t>(refz);
+        addMonopole<float>(M, prel);
+        addQuadrupole<float>(Q, prel);
 
-          /* warp-level max reduction for eps */
-          const float ei_raw = __ldg(&ptclEps[min(i+laneIdx, lastBody-1)]);
-          float ei = (i + laneIdx < lastBody) ? ei_raw : 0.0f;
+        /* warp-level max reduction for eps */
+        const float ei_raw = __ldg(&ptclEps[min(i+laneIdx, lastBody-1)]);
+        float ei = (i + laneIdx < lastBody) ? ei_raw : 0.0f;
 #pragma unroll
-          for (int k = WARP_SIZE2-1; k >= 0; k--)
-            ei = fmaxf(ei, __shfl_xor_sync(0xFFFFFFFF, ei, 1<<k));
-          cellEpsMax = fmaxf(cellEpsMax, ei);
-        }
+        for (int k = WARP_SIZE2-1; k >= 0; k--)
+          ei = fmaxf(ei, __shfl_xor_sync(0xFFFFFFFF, ei, 1<<k));
+        cellEpsMax = fmaxf(cellEpsMax, ei);
       }
-
 
       if (laneIdx == 0)
       {
-        const double inv_mass = 1.0/M.w;
+        /* A leaf holding only massless particles (e.g. tracers) has M.w == 0:
+         * give it zero mass and quadrupole and a COM at the reference point
+         * (a finite point inside the cell) so it contributes nothing instead
+         * of propagating NaN into the opening test and every force. */
+        const double inv_mass = M.w > 0.0 ? 1.0/M.w : 0.0;
         M.x *= inv_mass;
         M.y *= inv_mass;
         M.z *= inv_mass;
-#if 1
         Q.xx() = Q.xx()*inv_mass - M.x*M.x;
         Q.yy() = Q.yy()*inv_mass - M.y*M.y;
         Q.zz() = Q.zz()*inv_mass - M.z*M.z;
         Q.xy() = Q.xy()*inv_mass - M.x*M.y;
         Q.xz() = Q.xz()*inv_mass - M.x*M.z;
         Q.yz() = Q.yz()*inv_mass - M.y*M.z;
-#endif
         /* back to absolute coordinates (the quadrupole is translation invariant) */
-        M.x += refx;
-        M.y += refy;
-        M.z += refz;
-#if 0
-        {
-          const double Qtmp = Q1.y;
-          Q1.y = Q1.z;
-          Q1.z = Qtmp;
-        }
-#endif
+        const double4 comD = make_double4(M.x + refx, M.y + refy, M.z + refz, M.w);
 
-        const Position<real_t> cvec((rmax.x+rmin.x)*real_t(0.5f), (rmax.y+rmin.y)*real_t(0.5f), (rmax.z+rmin.z)*real_t(0.5f));
-        const Position<real_t> hvec((rmax.x-rmin.x)*real_t(0.5f), (rmax.y-rmin.y)*real_t(0.5f), (rmax.z-rmin.z)*real_t(0.5f));
-        const Position<real_t> com(M.x, M.y, M.z);
-        const real_t dx = cvec.x - com.x;
-        const real_t dy = cvec.y - com.y;
-        const real_t dz = cvec.z - com.z;
-        const real_t  s = sqrt(dx*dx + dy*dy + dz*dz);
-        const real_t  l = max(static_cast<real_t>(2.0f)*max(hvec.x, max(hvec.y, hvec.z)), static_cast<real_t>(1.0e-6f));
-        const real_t cellOp = l*inv_theta + s;
-        const real_t cellOp2 = cellOp*cellOp;
-
-        atomicAdd(&nflops, nflop);
-        sizeList[cellIdx]   = make_float4(com.x, com.y, com.z, cellOp2);
-        epsMaxList[cellIdx] = cellEpsMax;
-
-        typedef typename vec<4,real_t>::type real4_t;
-        typedef typename vec<2,real_t>::type real2_t;
-        monopoleList[cellIdx] = (real4_t){M.x, M.y, M.z, M.w};  
-        const double4 q0 = Q.get_q0();
-        const double2 q1 = Q.get_q1();
-        quadrpl0List[cellIdx] = (real4_t){q0.x, q0.y, q0.z, q0.w};
-        quadrpl1List[cellIdx] = (real2_t){q1.x, q1.y};
+        storeCell<real_t>(cellIdx, comD, Q,
+            make_float3(rmin.x, rmin.y, rmin.z), make_float3(rmax.x, rmax.y, rmax.z),
+            cellEpsMax, inv_theta,
+            sizeList, monopoleList, quadrpl0List, quadrpl1List, epsMaxList,
+            comDList, boxMinList, boxMaxList);
       }
+    }
+
+  /* Pass 2: one thread per node of one level; children are already done. */
+  template<typename real_t>
+    static __global__
+    void nodeMultipoles(
+        const int cellBeg,
+        const int cellEnd,                      /* exclusive */
+        const CellData *cells,
+        const real_t inv_theta,
+        __out typename vec<4,real_t>::type *sizeList,
+        __out typename vec<4,real_t>::type *monopoleList,
+        __out typename vec<4,real_t>::type *quadrpl0List,
+        __out typename vec<2,real_t>::type *quadrpl1List,
+        __out float   *epsMaxList,
+        __out double4 *comDList,
+        __out float4  *boxMinList,
+        __out float4  *boxMaxList)
+    {
+      const int cellIdx = cellBeg + blockIdx.x*blockDim.x + threadIdx.x;
+      if (cellIdx >= cellEnd) return;
+
+      const CellData cell = cells[cellIdx];
+      if (cell.isLeaf()) return;
+
+      const int first = cell.first();
+      const int nChild = cell.n();
+
+      /* COM about the first child's COM (double) */
+      const double4 ref = comDList[first];
+      double mtot = 0.0, sx = 0.0, sy = 0.0, sz = 0.0;
+      float3 rmin = make_float3(+1e10f, +1e10f, +1e10f);
+      float3 rmax = make_float3(-1e10f, -1e10f, -1e10f);
+      float cellEpsMax = 0.0f;
+      for (int k = 0; k < nChild; k++)
+      {
+        const int c = first + k;
+        const double4 cc = comDList[c];
+        mtot += cc.w;
+        sx   += cc.w * (cc.x - ref.x);
+        sy   += cc.w * (cc.y - ref.y);
+        sz   += cc.w * (cc.z - ref.z);
+        const float4 bmin = boxMinList[c];
+        const float4 bmax = boxMaxList[c];
+        rmin.x = fminf(rmin.x, bmin.x); rmax.x = fmaxf(rmax.x, bmax.x);
+        rmin.y = fminf(rmin.y, bmin.y); rmax.y = fmaxf(rmax.y, bmax.y);
+        rmin.z = fminf(rmin.z, bmin.z); rmax.z = fmaxf(rmax.z, bmax.z);
+        cellEpsMax = fmaxf(cellEpsMax, epsMaxList[c]);
+      }
+      const double inv_mass = mtot > 0.0 ? 1.0/mtot : 0.0;
+      const double4 comD = make_double4(ref.x + sx*inv_mass, ref.y + sy*inv_mass,
+                                        ref.z + sz*inv_mass, mtot);
+
+      /* parallel-axis theorem: Q = sum_c m_c (Q_c + d_c d_c^T) / M */
+      Quadrupole<double> Q;
+      for (int k = 0; k < nChild; k++)
+      {
+        const int c = first + k;
+        const double4 cc = comDList[c];
+        const Quadrupole<real_t> qc(quadrpl0List[c], quadrpl1List[c]);
+        const double dx = cc.x - comD.x;
+        const double dy = cc.y - comD.y;
+        const double dz = cc.z - comD.z;
+        Q.xx() += cc.w * (double(qc.xx()) + dx*dx);
+        Q.yy() += cc.w * (double(qc.yy()) + dy*dy);
+        Q.zz() += cc.w * (double(qc.zz()) + dz*dz);
+        Q.xy() += cc.w * (double(qc.xy()) + dx*dy);
+        Q.xz() += cc.w * (double(qc.xz()) + dx*dz);
+        Q.yz() += cc.w * (double(qc.yz()) + dy*dz);
+      }
+      Q.xx() *= inv_mass; Q.yy() *= inv_mass; Q.zz() *= inv_mass;
+      Q.xy() *= inv_mass; Q.xz() *= inv_mass; Q.yz() *= inv_mass;
+
+      storeCell<real_t>(cellIdx, comD, Q, rmin, rmax, cellEpsMax, inv_theta,
+          sizeList, monopoleList, quadrpl0List, quadrpl1List, epsMaxList,
+          comDList, boxMinList, boxMaxList);
     }
 
 };
@@ -230,107 +309,54 @@ void Treecode<real_t>::computeMultipoles()
   d_cellQuad0   .realloc(nCells);
   d_cellQuad1   .realloc(nCells);
   d_cellEpsMax  .realloc(nCells);
+  d_cellComD    .realloc(nCells);
+  d_cellBoxMin  .realloc(nCells);
+  d_cellBoxMax  .realloc(nCells);
 
-  const int NTHREAD2 = 8;
-  const int NTHREAD  = 1<< NTHREAD2;
-  const int NWARP    = 1<<(NTHREAD2-WARP_SIZE2);
-  const int nblock   = (nCells-1)/NWARP + 1;
+  const double t0 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
+  const real_t inv_theta = real_t(1.0/theta);
 
-  if (verbose) fprintf(stderr, "nblock= %d  nCells= %d\n", nblock, nCells);
-
-  CUDA_SAFE_CALL(cudaFuncSetCacheConfig(&multipoles::computeCellMultipoles<NTHREAD2,real_t>,cudaFuncCachePreferL1));
-  cudaDeviceSynchronize();
-  const double t0 = rtc();
-#ifdef _USE_RESTRICT_
-  multipoles::computeCellMultipoles<NTHREAD2,real_t><<<nblock,NTHREAD>>>(
-      nPtcl, nCells, d_cellDataList, (float4*)d_ptclPos.ptr,
-      d_ptclEpsTree.ptr, 1.0/theta,
-      d_cellSize, d_cellMonopole, d_cellQuad0, d_cellQuad1, d_cellEpsMax.ptr);
-#else
-  multipoles::computeCellMultipoles<NTHREAD2,real_t><<<nblock,NTHREAD>>>(
-      nPtcl, nCells, d_cellDataList, d_ptclPos,
-      d_ptclEpsTree.ptr, 1.0/theta,
-      d_cellSize, d_cellMonopole, d_cellQuad0, d_cellQuad1, d_cellEpsMax.ptr);
-#endif
-  kernelSuccess("cellMultipole");
-  const double dt = rtc() - t0;
-  if (verbose) fprintf(stderr, " cellMultipole done in %g sec : %g Mptcl/sec  %g Mcell/sec\n",  dt, nPtcl/1e6/dt, nCells/1e6/dt);
-
-  unsigned int nflops;
-  const double SCALEDP = WARP_SIZE*10.0*5;
-  const double SCALESP = WARP_SIZE*(5*6.0 + 15.0);
-  CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&nflops, multipoles::nflops, sizeof(int)));
-  if (verbose) fprintf(stderr, "flop_rate: DP= %g, SP= %g, tot= %g GFLOP/s \n",
-      nflops*SCALEDP/1e9/dt,
-      nflops*SCALESP/1e9/dt,
-      nflops*(SCALESP+SCALEDP)/1e9/dt);
-
-#if 0
+  /* pass 1: leaves */
   {
-    std::vector<float4> cellSize(nCells), cellMonopole(nCells);
-    std::vector<float4> cellQuad0(nCells);
-    std::vector<float2> cellQuad1(nCells);
-    d_cellSize.d2h(&cellSize[0]);
-    d_cellMonopole.d2h(&cellMonopole[0]);
-    d_cellQuad0.d2h(&cellQuad0[0]);
-    d_cellQuad1.d2h(&cellQuad1[0]);
-
-#if 0
-    for (int i = 0; i < nCells; i++)
-    {
-      printf("cell= %d:   size= %g %g %g | %g \n",
-          i, cellSize[i].x, cellSize[i].y, cellSize[i].z, cellSize[i].w);
-    }
-    assert(0);
-#endif
-
-    float3 bmin = {+1e10f}, bmax = {-1e10f};
-    double mtot = 0.0;
-    double3 com = {0.0};
-    Quadrupole<double> Q;
-    for (int i = 0; i < 8; i++)
-    {
-      const float4 m = cellMonopole[i];
-      const float4 c = cellSize    [i];
-      const Quadrupole<real_t> q(cellQuad0[i], cellQuad1[i]);
-      const float h = sqrt(c.w)*0.5;
-      bmin.x = std::min(bmin.x, c.x - h);
-      bmin.y = std::min(bmin.y, c.y - h);
-      bmin.z = std::min(bmin.z, c.z - h);
-      bmax.x = std::max(bmax.x, c.x + h);
-      bmax.y = std::max(bmax.y, c.y + h);
-      bmax.z = std::max(bmax.z, c.z + h);
-      mtot += m.w;
-      com.x += m.x*m.w;
-      com.y += m.y*m.w;
-      com.z += m.z*m.w;
-      Q.xx() += q.xx();
-      Q.yy() += q.yy();
-      Q.zz() += q.zz();
-      Q.xy() += q.xy();
-      Q.xz() += q.xz();
-      Q.yz() += q.yz();
-      fprintf(stderr," cell= %d  m= %g \n", i, m.w);
-    }
-    const double inv_mass = 1.0/mtot;
-    com.x *= inv_mass;
-    com.y *= inv_mass;
-    com.z *= inv_mass;
-    Q.xx() = Q.xx()*inv_mass - com.x*com.x;
-    Q.yy() = Q.yy()*inv_mass - com.x*com.x;
-    Q.zz() = Q.zz()*inv_mass - com.x*com.x;
-    Q.xy() = Q.xy()*inv_mass - com.x*com.x;
-    Q.xz() = Q.xz()*inv_mass - com.x*com.x;
-    Q.yz() = Q.yz()*inv_mass - com.x*com.x;
-    printf("bmin= %g %g %g \n", bmin.x, bmin.y, bmin.z);
-    printf("bmax= %g %g %g \n", bmax.x, bmax.y, bmax.z);
-    printf("mtot= %g\n", mtot);
-    printf("com = %g %g %g\n", com.x, com.y, com.z);
-    printf("Q0= %g %g %g  \n", Q.xx(), Q.yy(), Q.zz());
-    printf("Q1= %g %g %g  \n", Q.xy(), Q.xz(), Q.yz());
+    const int NTHREAD2 = 8;
+    const int NTHREAD  = 1<<NTHREAD2;
+    const int NWARP    = 1<<(NTHREAD2-WARP_SIZE2);
+    const int nblock   = (nLeaves-1)/NWARP + 1;
+    multipoles::leafMultipoles<NTHREAD2,real_t><<<nblock,NTHREAD>>>(
+        nLeaves, d_leafList, d_cellDataList, d_ptclPos,
+        d_ptclEpsTree.ptr, inv_theta,
+        d_cellSize, d_cellMonopole, d_cellQuad0, d_cellQuad1, d_cellEpsMax.ptr,
+        d_cellComD.ptr, d_cellBoxMin.ptr, d_cellBoxMax.ptr);
   }
-#endif
+
+  /* pass 2: nodes, deepest level first.  Cells are sorted by level and
+   * d_level_begIdx[L] = (first, last) cell of level L for L = 1..nLevels
+   * (entries above nLevels may be stale from an earlier, deeper tree). */
+  {
+    int2 levels[32];
+    d_level_begIdx.d2h(levels, 32);
+    const int maxLevel = std::min(nLevels, 31);
+    const int NTHREAD = 128;
+    for (int L = maxLevel; L >= 1; L--)
+    {
+      const int beg = levels[L].x;
+      const int end = levels[L].y + 1;
+      if (beg < 0 || end > nCells || end <= beg) continue;
+      const int nblock = (end - beg - 1)/NTHREAD + 1;
+      multipoles::nodeMultipoles<real_t><<<nblock,NTHREAD>>>(
+          beg, end, d_cellDataList, inv_theta,
+          d_cellSize, d_cellMonopole, d_cellQuad0, d_cellQuad1, d_cellEpsMax.ptr,
+          d_cellComD.ptr, d_cellBoxMin.ptr, d_cellBoxMax.ptr);
+    }
+  }
+
+  if (verbose)
+  {
+    kernelSuccess("cellMultipole");
+    const double dt = rtc() - t0;
+    fprintf(stderr, " cellMultipole done in %g sec : %g Mptcl/sec  %g Mcell/sec\n",
+        dt, nPtcl/1e6/dt, nCells/1e6/dt);
+  }
 }
 
 #include "TreecodeInstances.h"
-

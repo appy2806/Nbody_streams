@@ -7,6 +7,7 @@
 // 1048576 is 2^20, which should be enough for 10^7 particles, but you can increase it further if you have more particles
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
+#include <thrust/execution_policy.h>
 
 #include "cuda_primitives.h"
 
@@ -183,10 +184,13 @@ namespace treeBuild
 
   /*******************/
 
+  /* Body of one octant-split step.  Called by buildOctant (root level, one
+   * launch) and buildOctantBatch (all work items of a level in one launch).
+   * Uses blockIdx.y to pick the child octant and gridDim.x for the
+   * last-block ticket, so every block of a launch must share gridDim.x. */
   template<int NLEAF, typename T, bool STOREIDX>
-    static __global__ void
-    __launch_bounds__( 256, 8)
-    buildOctant(
+    static __device__ __forceinline__ void
+    buildOctantBody(
         Box<T> box,
         const int cellParentIndex,
         const int cellIndexBase,
@@ -574,6 +578,47 @@ namespace treeBuild
       }
     }
 
+  template<int NLEAF, typename T, bool STOREIDX>
+    static __global__ void
+    __launch_bounds__( 256, 8)
+    buildOctant(
+        Box<T> box,
+        const int cellParentIndex,
+        const int cellIndexBase,
+        const int octantMask,
+        __out int *octCounterBase,
+        Particle4<T> *ptcl,
+        Particle4<T> *buff,
+        const int level,
+        PendingWork<T> *pendingWork,
+        int *pendingWorkCount)
+    {
+      buildOctantBody<NLEAF,T,STOREIDX>(box, cellParentIndex, cellIndexBase, octantMask,
+          octCounterBase, ptcl, buff, level, pendingWork, pendingWorkCount);
+    }
+
+  /* One launch per (level, grid-size bucket) instead of one per work item:
+   * blockIdx.z selects the work item, blockIdx.y the octant.  Items whose
+   * nSubNodes_y is smaller than gridDim.y exit immediately (block-uniform,
+   * before any barrier).  `items` must not alias `pendingWork`. */
+  template<int NLEAF, typename T>
+    static __global__ void
+    __launch_bounds__( 256, 8)
+    buildOctantBatch(
+        const PendingWork<T> * __restrict__ items,
+        int *memPoolBase,
+        Particle4<T> *ptcl,
+        Particle4<T> *buff,
+        PendingWork<T> *pendingWork,
+        int *pendingWorkCount)
+    {
+      const PendingWork<T> w = items[blockIdx.z];
+      if ((int)blockIdx.y >= w.nSubNodes_y) return;
+      buildOctantBody<NLEAF,T,false>(w.box, w.cellParentIndex, w.cellFirstChildIndex,
+          w.octant_mask, memPoolBase + w.mempool_offset,
+          ptcl, buff, w.level, pendingWork, pendingWorkCount);
+    }
+
   template<typename T>
     static __global__ void countAtRootNode(
         const int n,
@@ -641,7 +686,8 @@ namespace treeBuild
         /* Pre-allocated scratch (eliminates per-step cudaMalloc/cudaFree): */
         int  *d_octCounter_pre,    /* (8+8)        ints */
         int  *d_octCounterN_pre,   /* (8+8+8+64+8) ints */
-        void *d_workQueue_pre,     /* max_work × sizeof(PendingWork<T>) bytes */
+        void *d_workQueue_pre,     /* max_work × sizeof(PendingWork<T>) bytes (written by kernels) */
+        void *d_workQueueIn_pre,   /* max_work × sizeof(PendingWork<T>) bytes (read by kernels) */
         int  *d_workCount_pre,     /* 1 int */
         int   max_work)            /* capacity of d_workQueue_pre in PendingWork<T> units */
     {
@@ -684,7 +730,7 @@ namespace treeBuild
       CUDA_SAFE_CALL(cudaMemset(d_octCounter, 0, (8+8)*sizeof(int)));
 
       countAtRootNode<T><<<256, 256>>>(n, d_octCounter, h_domain, ptcl);
-      CUDA_SAFE_CALL(cudaDeviceSynchronize());
+      /* the blocking cudaMemcpy below orders the read after the kernel */
 
       /* --- read counts back to host --- */
       int h_octCounter[16];
@@ -734,17 +780,25 @@ namespace treeBuild
         buildOctant<NLEAF,T,true><<<grid, block>>>(
             h_domain, 0, 0, 0, d_octCounterN,
             ptcl, buff, 0, d_workQueue, d_workCount);
-        CUDA_SAFE_CALL(cudaDeviceSynchronize());
+        /* the first level's blocking cudaMemcpy of d_workCount waits for it */
       }
 
-      /* --- host-driven level-by-level loop --- */
-      std::vector<PendingWork<T>> h_workItems(max_work);
+      /* --- host-driven level-by-level loop ---
+       * Each level's work items are read back, bucketed by their grid.x
+       * (rounded up to a power of two, so <= 10 buckets), uploaded to a
+       * separate input queue and launched as one batched kernel per bucket.
+       * This replaces one launch per work item (~7000 launches per build at
+       * N = 1e6) with a few launches per level. */
+      PendingWork<T> *d_workIn = reinterpret_cast<PendingWork<T>*>(d_workQueueIn_pre);
+      static thread_local std::vector<PendingWork<T>> h_items, h_sorted;
+      const int NBUCKET = 10;                 /* grid.x in {1,2,4,...,512} */
+      const int MAX_GRID_Z = 65535;
 
       for (int level = 1; level < 32; level++)
       {
         int h_workCount = 0;
         CUDA_SAFE_CALL(cudaMemcpy(&h_workCount, d_workCount, sizeof(int), cudaMemcpyDeviceToHost));
-        
+
         if (h_workCount > max_work) {
             fprintf(stderr, "FATAL: work queue overflow (h_workCount=%d, capacity=%d).\n"
                             "       Increase BUILD_MAX_WORK in Treecode.h and recompile.\n",
@@ -754,8 +808,9 @@ namespace treeBuild
 
         if (h_workCount == 0) break;
 
-        assert(h_workCount <= max_work);
-        CUDA_SAFE_CALL(cudaMemcpy(h_workItems.data(), d_workQueue,
+        h_items.resize(h_workCount);
+        h_sorted.resize(h_workCount);
+        CUDA_SAFE_CALL(cudaMemcpy(h_items.data(), d_workQueue,
               h_workCount * sizeof(PendingWork<T>), cudaMemcpyDeviceToHost));
 
         /* reset counter for next level */
@@ -768,22 +823,37 @@ namespace treeBuild
 
         const int NTHREADS = (1<<NWARPS_OCTREE2) * WARP_SIZE;
 
+        /* counting sort of items by grid.x bucket */
+        int count[NBUCKET] = {0}, start[NBUCKET + 1] = {0}, maxY[NBUCKET] = {0};
+        std::vector<int> bucketOf(h_workCount);
         for (int i = 0; i < h_workCount; i++)
         {
-          const PendingWork<T> &w = h_workItems[i];
-          dim3 block(NTHREADS);
-          dim3 grid(std::min(std::max(w.nCellmax/(NTHREADS*4), 1), 512));
-          grid.y = w.nSubNodes_y;
-
-          int *octCounterNbase = d_stack_memory_pool + w.mempool_offset;
-
-          buildOctant<NLEAF,T,false><<<grid, block>>>(
-              w.box, w.cellParentIndex, w.cellFirstChildIndex,
-              w.octant_mask, octCounterNbase,
-              ptcl_arg, buff_arg, w.level,
-              d_workQueue, d_workCount);
+          const int gx = std::min(std::max(h_items[i].nCellmax/(NTHREADS*4), 1), 512);
+          int b = 0;
+          while ((1 << b) < gx) b++;
+          bucketOf[i] = b;
+          count[b]++;
+          maxY[b] = std::max(maxY[b], h_items[i].nSubNodes_y);
         }
-        CUDA_SAFE_CALL(cudaDeviceSynchronize());
+        for (int b = 0; b < NBUCKET; b++) start[b+1] = start[b] + count[b];
+        {
+          int fill[NBUCKET];
+          for (int b = 0; b < NBUCKET; b++) fill[b] = start[b];
+          for (int i = 0; i < h_workCount; i++) h_sorted[fill[bucketOf[i]]++] = h_items[i];
+        }
+        CUDA_SAFE_CALL(cudaMemcpy(d_workIn, h_sorted.data(),
+              h_workCount * sizeof(PendingWork<T>), cudaMemcpyHostToDevice));
+
+        for (int b = 0; b < NBUCKET; b++)
+          for (int off = 0; off < count[b]; off += MAX_GRID_Z)
+          {
+            dim3 block(NTHREADS);
+            dim3 grid(1 << b, maxY[b], std::min(MAX_GRID_Z, count[b] - off));
+            buildOctantBatch<NLEAF,T><<<grid, block>>>(
+                d_workIn + start[b] + off, d_stack_memory_pool,
+                ptcl_arg, buff_arg, d_workQueue, d_workCount);
+          }
+        /* the next level's cudaMemcpy of d_workCount synchronises the device */
       }
 
       /* --- no cleanup needed: scratch buffers are owned by the Treecode struct --- */
@@ -908,7 +978,9 @@ namespace treeBuild
 
       __syncthreads();
 
-      if (cell.isLeaf())
+      /* gidx < n guard: out-of-range threads read the clamped last cell and
+       * would otherwise scatter a bogus index over another block's slot. */
+      if (gidx < n && cell.isLeaf())
         leafList[shdata[0] + scatter] = gidx;
     }
 }
@@ -927,14 +999,13 @@ void Treecode<real_t>::buildTree(const int nLeaf)
     const int NBLOCK   = NTHREAD;
 
     assert(2*NBLOCK <= 2048);  /* see Treecode constructor for d_minmax allocation */
-    cudaDeviceSynchronize();
-    kernelSuccess("cudaDomainSize0");
-    const double t0 = rtc();
+    const double t0 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
     treeBuild::computeBoundingBox<NTHREAD2,real_t><<<NBLOCK,NTHREAD,NTHREAD*sizeof(float2)>>>
       (nPtcl, d_minmax, d_domain, d_ptclPos);
     kernelSuccess("cudaDomainSize");
-    const double dt = rtc() - t0;
     if (verbose){
+      cudaDeviceSynchronize();
+      const double dt = rtc() - t0;
       fprintf(stderr, "cudaDomainSize done in %g sec : %g Mptcl/sec\n",  dt, nPtcl/1e6/dt);
     }
   }
@@ -965,12 +1036,12 @@ void Treecode<real_t>::buildTree(const int nLeaf)
 
   {
     CUDA_SAFE_CALL(cudaMemset(d_stack_memory_pool,0,stack_size*sizeof(int)));
-    cudaDeviceSynchronize();
-    const double t0 = rtc();
+    const double t0 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
     /* Pass pre-allocated scratch to eliminate 4× cudaMalloc/cudaFree per step. */
     #define _BONSAI_SCRATCH \
         d_build_octCounter.ptr, d_build_octCounterN.ptr, \
-        d_build_workQueue.ptr,  d_build_workCount.ptr,   \
+        d_build_workQueue.ptr,  d_build_workQueueIn.ptr, \
+        d_build_workCount.ptr,                           \
         BUILD_MAX_WORK
     switch(nLeaf)
     {
@@ -1004,7 +1075,7 @@ void Treecode<real_t>::buildTree(const int nLeaf)
     }
     #undef _BONSAI_SCRATCH
     kernelSuccess("buildOctree");
-    const double t1 = rtc();
+    const double t1 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
     const double dt = t1 - t0;
     CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&nLevels, treeBuild::nlevels, sizeof(int)));
     CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&nCells,  treeBuild::ncells, sizeof(int)));
@@ -1029,8 +1100,7 @@ void Treecode<real_t>::buildTree(const int nLeaf)
 
   /* sort nodes by level */
   {
-    cudaDeviceSynchronize();
-    const double t0 = rtc();
+    const double t0 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
     const int nthread = 256;
     const int nblock  = (nCells-1)/nthread  + 1;
     treeBuild::get_cell_levels<<<nblock,nthread>>>(nCells, d_cellDataList, d_cellDataList_tmp, d_key, d_value);
@@ -1039,7 +1109,7 @@ void Treecode<real_t>::buildTree(const int nLeaf)
     thrust::device_ptr<int> keys_end(d_key.ptr + nCells);
     thrust::device_ptr<int> vals_beg(d_value.ptr);
 
-    thrust::stable_sort_by_key(keys_beg, keys_end, vals_beg); 
+    thrust::stable_sort_by_key(thrust::cuda::par(thrust_alloc), keys_beg, keys_end, vals_beg);
 
     /* compute begining & end of each level */
     treeBuild::compute_level_begIdx<<<nblock,nthread,(nthread+2)*sizeof(int)>>>(nCells, d_key, d_level_begIdx);
@@ -1056,7 +1126,7 @@ void Treecode<real_t>::buildTree(const int nLeaf)
     treeBuild::collect_leaves<NTHREAD2><<<nblock1,NTHREAD>>>(nCells, d_cellDataList, d_leafList);
 
     kernelSuccess("shuffle");
-    const double t1 = rtc();
+    const double t1 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
     const double dt = t1 - t0;
     if (verbose) {
       fprintf(stderr, " shuffle done in %g sec : %g Mptcl/sec\n",  dt, nPtcl/1e6/dt);

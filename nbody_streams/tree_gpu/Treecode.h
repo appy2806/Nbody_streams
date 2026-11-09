@@ -8,6 +8,9 @@
 #include <string>
 #include <sstream>
 #include <vector>
+#include <algorithm>
+#include <map>
+#include <cstdlib>
 
 #define __out
 
@@ -15,15 +18,60 @@
 #define QUADRUPOLE
 #endif
 
+/* Launch check after each pipeline phase.  By default this only reads the
+ * launch error (no device sync), so the phases queue back-to-back; set the
+ * environment variable TREE_SYNC_CHECK=1 to synchronise and surface execution
+ * errors at the kernel that caused them. */
 static void kernelSuccess(const char kernel[] = "kernel")
 {
-  const cudaError_t err = cudaDeviceSynchronize();
+  static const bool sync = std::getenv("TREE_SYNC_CHECK") != NULL;
+  const cudaError_t err = sync ? cudaDeviceSynchronize() : cudaGetLastError();
   if (err != cudaSuccess)
   {
     fprintf(stderr, "%s launch failed: %s\n", kernel, cudaGetErrorString(err));
     assert(0);
   }
 }
+
+/* Caching allocator for Thrust temporary storage (sort/scan scratch), so
+ * the per-step sorts do not cudaMalloc/cudaFree.  Blocks are kept until the
+ * Treecode is destroyed.  Used as thrust::cuda::par(allocator). */
+struct ThrustCachingAllocator
+{
+  typedef char value_type;
+  std::multimap<std::ptrdiff_t, char*> free_blocks;
+  std::map<char*, std::ptrdiff_t> allocated;
+
+  char* allocate(std::ptrdiff_t n)
+  {
+    char *p = NULL;
+    std::multimap<std::ptrdiff_t, char*>::iterator it = free_blocks.lower_bound(n);
+    if (it != free_blocks.end())
+    {
+      n = it->first;
+      p = it->second;
+      free_blocks.erase(it);
+    }
+    else
+      CUDA_SAFE_CALL(cudaMalloc(&p, n));
+    allocated[p] = n;
+    return p;
+  }
+  void deallocate(char *p, size_t)
+  {
+    std::map<char*, std::ptrdiff_t>::iterator it = allocated.find(p);
+    free_blocks.insert(std::make_pair(it->second, p));
+    allocated.erase(it);
+  }
+  ~ThrustCachingAllocator()
+  {
+    /* no error checks: may run after the CUDA context is torn down */
+    for (std::multimap<std::ptrdiff_t, char*>::iterator it = free_blocks.begin(); it != free_blocks.end(); ++it)
+      cudaFree(it->second);
+    for (std::map<char*, std::ptrdiff_t>::iterator it = allocated.begin(); it != allocated.end(); ++it)
+      cudaFree(it->first);
+  }
+};
 
 struct GroupData
 {
@@ -139,7 +187,6 @@ struct Treecode
     int get_nCrit() const { return nCrit; }
     int get_nLeaf() const { return nLeaf; }
 
-  host_mem<Particle> h_ptclPos, h_ptclVel;
   std::vector<Particle> ptcl0;
   cuda_mem<Particle> d_ptclPos, d_ptclVel, d_ptclPos_tmp, d_ptclAcc;
   cuda_mem<Box<real_t> > d_domain;
@@ -174,6 +221,12 @@ struct Treecode
    * consistent with nbody_streams and standard multi-species N-body practice. */
   cuda_mem<float> d_cellEpsMax;
 
+  /* Bottom-up multipole scratch: per-cell COM + mass in double (so node
+   * quadrupoles can be combined without float cancellation) and the tight
+   * particle bounding box (union of the children's boxes for nodes). */
+  cuda_mem<double4> d_cellComD;
+  cuda_mem<float4>  d_cellBoxMin, d_cellBoxMax;
+
   /* Pre-allocated scratch for buildOctreeHost — eliminates 4× cudaMalloc/cudaFree per step.
    * BUILD_MAX_WORK  : work-queue depth (must be >= max nodes at any single tree level).
    *                   65536 is safe for NLEAF=64, N<=4M balanced trees.
@@ -186,7 +239,20 @@ struct Treecode
   cuda_mem<int>  d_build_octCounter;    /* (8+8)        = 16 ints                           */
   cuda_mem<int>  d_build_octCounterN;   /* (8+8+8+64+8) = 96 ints                           */
   cuda_mem<char> d_build_workQueue;     /* BUILD_MAX_WORK × BUILD_PENDING_WORK_BYTES bytes   */
+  cuda_mem<char> d_build_workQueueIn;   /* same size: sorted copy read by the batched kernel */
   cuda_mem<int>  d_build_workCount;     /* 1 int                                             */
+
+  /* Tree-walk scratch: one cell-list ring buffer per resident warp.  Allocated
+   * on the first force call (and grown only if the launch size grows), so the
+   * pool is not cudaMalloc'd/cudaFree'd on every step. */
+  cuda_mem<int> d_gmem_pool;
+  int walk_nblock = 0;
+
+  /* makeGroups scratch (allocated once in alloc()) */
+  cuda_mem<int> d_grpBegIdx, d_grpEndIdx;
+  cuda_mem<unsigned long long> d_grpKeysInv;
+
+  ThrustCachingAllocator thrust_alloc;
 
   double grav_potential;
   int verbose;
@@ -206,8 +272,6 @@ struct Treecode
   void alloc(const int nPtcl)
   {
     this->nPtcl = nPtcl;
-    h_ptclPos.alloc(nPtcl);
-    h_ptclVel.alloc(nPtcl);
     d_ptclPos.alloc(nPtcl);
     d_ptclVel.alloc(nPtcl);
     d_ptclPos_tmp.alloc(nPtcl);
@@ -229,8 +293,11 @@ struct Treecode
     if (verbose) fprintf(stderr, "celldata= %g MB \n", cell_max*sizeof(CellData)/1024.0/1024.0);
     d_cellDataList.alloc(cell_max);
     d_cellDataList_tmp.alloc(cell_max);
-    d_key.alloc(cell_max);
+    d_key.alloc(2*cell_max);      /* 2x: makeGroups reuses it for 64-bit keys */
     d_value.alloc(cell_max);
+    d_grpBegIdx .alloc(nPtcl);
+    d_grpEndIdx .alloc(nPtcl);
+    d_grpKeysInv.alloc(nPtcl);
     d_origIdx.alloc(nPtcl);
 
     /* Pre-allocate d_leafList so d_leafList.realloc(nLeaves) in buildTree is a no-op.
@@ -241,6 +308,7 @@ struct Treecode
     d_build_octCounter .alloc(16);
     d_build_octCounterN.alloc(96);
     d_build_workQueue  .alloc(static_cast<size_t>(BUILD_MAX_WORK) * BUILD_PENDING_WORK_BYTES);
+    d_build_workQueueIn.alloc(static_cast<size_t>(BUILD_MAX_WORK) * BUILD_PENDING_WORK_BYTES);
     d_build_workCount  .alloc(1);
   };
 
