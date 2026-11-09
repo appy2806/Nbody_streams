@@ -207,7 +207,7 @@ def run_nbody_gpu_tree(
     ncrit : int, optional
         Walk group size.  Default 64.
     level_split : int, optional
-        Tree level for spatial grouping.  Default 5.
+        Unused; accepted for backward compatibility.  Default 5.
     step_timeout_s : float, optional
         Seconds before the watchdog fires a KeyboardInterrupt for a hanging
         CUDA kernel.  Default 60.

@@ -138,7 +138,7 @@ result = run_simulation(
 | `precision` | gpu direct | `'float32_kahan'` | Force computation precision: `'float32'`, `'float64'`, or `'float32_kahan'` |
 | `nleaf` | gpu tree | `64` | Min leaf node size. Must be in {16, 24, 32, 48, 64} |
 | `ncrit` | gpu tree | `64` | Group criticality threshold |
-| `level_split` | gpu tree | `5` | Tree level for spatial grouping |
+| `level_split` | gpu tree | `5` | Unused; accepted for backward compatibility |
 | `step_timeout_s` | gpu tree | `60.0` | Per-step watchdog timeout (seconds) before raising `RuntimeError` |
 
 ### Dynamical friction kwargs

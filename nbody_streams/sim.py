@@ -176,7 +176,8 @@ def run_simulation(
 
         * ``nleaf`` (int, default 64) -- Minimum leaf node size.
         * ``ncrit`` (int, default 64) -- Group criticality threshold.
-        * ``level_split`` (int, default 5) -- Level at which tree splits groups.
+        * ``level_split`` (int, default 5) -- Unused; accepted for backward
+          compatibility.
         * ``step_timeout_s`` (float, default 60.0) -- Per-step watchdog timeout
           in seconds; raises ``RuntimeError`` if a step exceeds this.
 

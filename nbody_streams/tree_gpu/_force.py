@@ -292,7 +292,8 @@ def tree_gravity_gpu(
     ncrit : int
         Group size for the tree walk.  64 is a good default.
     level_split : int
-        Tree level for spatial grouping.
+        Unused; accepted for backward compatibility (walk groups are
+        cut from tree cells).
     verbose : bool
         Print timing / interaction counts from the C++ layer.
     tree : TreeGPU, optional

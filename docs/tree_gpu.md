@@ -67,9 +67,9 @@ tree (one-shot: allocates and frees the tree per call).
 | `theta` | float or None | Barnes-Hut opening angle. 0.75 = fast; 0.5 = accurate; 0.3 = very accurate. Default: `tree.theta` when a handle is passed (a value passed together with `tree` updates the handle), else 0.6. |
 | `nleaf` | int | Max particles per leaf cell. Must be in {16, 24, 32, 48, 64}. Default 64. |
 | `ncrit` | int | Group size for the tree walk. Default 64. |
-| `level_split` | int | Tree level for spatial grouping. Default 5. |
+| `level_split` | int | Unused; accepted for backward compatibility (groups are cut from tree cells, see Phase 3). Default 5. |
 | `verbose` | bool | Print timing / interaction counts from the C++ layer. |
-| `tree` | `TreeGPU` or None | Pre-allocated tree handle. Skips ~27 ms malloc/free per call. |
+| `tree` | `TreeGPU` or None | Pre-allocated tree handle. Skips the per-call allocation (~40 ms at N = 1M on an RTX 3080 Laptop, more than the force pass itself). |
 | `center` | array_like `(3,)` or None | Centre subtracted from float64 `pos` before the float32 cast.  Default: subsample centre of mass.  Ignored for float32 `pos`. |
 
 **Returns**
@@ -109,7 +109,7 @@ acc, phi = tree_gravity_gpu(pos, mass, eps)
 TreeGPU(n, eps=0.0, theta=0.6, verbose=False)
 ```
 
-Pre-allocated GPU tree handle for time-stepping loops.  Avoids ~27 ms of
+Pre-allocated GPU tree handle for time-stepping loops.  Avoids ~40 ms (N = 1M) of
 GPU malloc/free overhead per step.  Must be closed explicitly or used as a
 context manager.
 
@@ -214,7 +214,7 @@ evaluations through `tree_gravity_gpu`.
 | `theta` | float | Opening angle (0.75 fast — 0.5 accurate). Default 0.6. |
 | `nleaf` | int | Max particles per leaf cell (must be in {16,24,32,48,64}). Default 64. |
 | `ncrit` | int | Walk group size. Default 64. |
-| `level_split` | int | Tree level for spatial grouping. Default 5. |
+| `level_split` | int | Unused; accepted for backward compatibility (groups are cut from tree cells, see Phase 3). Default 5. |
 | `step_timeout_s` | float | Seconds before the watchdog fires `KeyboardInterrupt` for a hanging CUDA kernel. Default 60. |
 | `external_potential` | `agama.Potential` or None | External time-varying potential (requires Agama). |
 | `external_update_interval` | int | Evaluate external potential every N steps. Default 1. |
@@ -400,7 +400,7 @@ executes four CUDA kernels in sequence:
 #### Phase 1 — `buildTree`
 
 1. Bounding-box reduction over all particle positions (warp-level `fminf`/`fmaxf`, then inter-warp shared-memory reduction).
-2. Octree construction: **host-driven iterative build** (replaced CDP1 recursive kernel launches for CUDA 12 compatibility).  Each split of a cell scatters its particles into octants (no particle sort by space-filling-curve key happens here) and appends work items for children that need further splitting to a `PendingWork` queue.  Per level, the host reads the queue back, buckets the items by grid size (a power of two, at most 10 buckets), uploads them to a second queue and launches **one batched kernel per bucket** (`buildOctantBatch`: `blockIdx.z` = work item, `blockIdx.y` = octant).  This replaced one launch per work item (~7000 launches per build at N = 1M; build time 30 ms -> 6 ms on an RTX 3080 Laptop).  The queues have a compile-time depth of `BUILD_MAX_WORK = 262144` (safe for N ≤ 4M balanced trees; increase and recompile for highly clustered configurations).
+2. Octree construction: **host-driven iterative build** (replaced CDP1 recursive kernel launches for CUDA 12 compatibility).  Each split of a cell scatters its particles into octants (no particle sort by space-filling-curve key happens here) and appends work items for children that need further splitting to a `PendingWork` queue.  Per level, the host reads the queue back, buckets the items by grid size (a power of two, at most 10 buckets), uploads them to a second queue and launches **one batched kernel per bucket** (`buildOctantBatch`: `blockIdx.z` = work item, `blockIdx.y` = octant).  This replaced one launch per work item (~7000 launches per build at N = 1M; build time 30 ms -> 6 ms on an RTX 3080 Laptop).  The queues hold `max(262144, N/16 + 1)` work items, sized at allocation: nodes split at one level are disjoint and each holds more than `nleaf` >= 16 particles, so N/16 always suffices.  (This was a fixed 262144, which overflowed near ~20M particles.)
    Depth is capped at level 30 (`TREE_MAX_LEVEL`): children created there become leaves even if they hold more than `nleaf` particles, so particles that cannot be separated (exact duplicates, or closer than the float resolution of the box) end up in one oversized leaf whose forces the walk sums directly.  Balanced trees are ~15-20 levels deep, so the cap never triggers in normal use.
 3. Cells are then stable-sorted by tree level (Thrust `stable_sort_by_key`) so each level is contiguous.
 4. A permutation array `d_origIdx[tree_idx] = original_user_idx` is built so output forces can be returned in user order.
@@ -553,7 +553,7 @@ grow (never shrink) with the number of cells.  The main allocations:
 | `d_cellMonopole`, `d_cellQuad0/1` | N × 16 + 8 bytes | Monopole + quadrupole moments |
 | `d_cellEpsMax` | N × 4 bytes | Per-cell max softening |
 | `d_cellComD`, `d_cellBoxMin/Max` | nCells × 64 bytes | Bottom-up multipole scratch |
-| Build scratch (`d_build_workQueue`, `d_build_workQueueIn`) | 2 × `262144 × 64` bytes ≈ 32 MB | Host-driven build queues |
+| Build scratch (`d_build_workQueue`, `d_build_workQueueIn`) | 2 × `max(262144, N/16) × 64` bytes (32 MB up to N = 4M; 8 bytes/particle above) | Host-driven build queues |
 | Walk pool (`d_gmem_pool`) | 2 MB per persistent block | e.g. 384 blocks ≈ 768 MB on a 48-SM GPU; capped at 1/4 of free memory |
 
 Total VRAM for N = 1M particles: approximately **700 MB** before quadrupole
