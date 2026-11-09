@@ -193,7 +193,9 @@ struct Treecode
   cuda_mem<Position<real_t> > d_minmax;
   cuda_mem<int2> d_level_begIdx;
 
-  int node_max, cell_max, stack_size;
+  int node_max, cell_max;
+  size_t stack_size;            /* ints; 96 per node, exceeds INT_MAX above ~110M particles */
+  int last_nodes_used = 0;      /* nodes whose memPool slots the last build dirtied */
   cuda_mem<int>  d_stack_memory_pool;
   cuda_mem<CellData> d_cellDataList, d_cellDataList_tmp;
   cuda_mem<GroupData> d_groupList;
@@ -225,17 +227,18 @@ struct Treecode
   cuda_mem<float4>  d_cellBoxMin, d_cellBoxMax;
 
   /* Pre-allocated scratch for buildOctreeHost — eliminates 4× cudaMalloc/cudaFree per step.
-   * BUILD_MAX_WORK  : work-queue depth (must be >= max nodes at any single tree level).
-   *                   65536 is safe for NLEAF=64, N<=4M balanced trees.
-   *                   Increase for highly-clustered configurations.
+   * build_max_work : work-queue depth = max nodes split at any single level.
+   *                  Nodes of one level are disjoint and each holds > nleaf >= 16
+   *                  particles, so N/16 always suffices (was a fixed 262144,
+   *                  which overflowed near ~20M particles).
    * BUILD_PENDING_WORK_BYTES : must be >= sizeof(PendingWork<real_t>) in buildTree.cu.
-   *                   Verified at compile time via static_assert in buildOctreeHost. */
-  static constexpr int BUILD_MAX_WORK          = 262144;   /* 4× original 65536 */
+   *                  Verified at compile time via static_assert in buildOctreeHost. */
+  int build_max_work = 0;
   static constexpr int BUILD_PENDING_WORK_BYTES = 64;      /* >= sizeof(PendingWork<float>)=44 */
 
   cuda_mem<int>  d_build_octCounter;    /* (8+8)        = 16 ints                           */
   cuda_mem<int>  d_build_octCounterN;   /* (8+8+8+64+8) = 96 ints                           */
-  cuda_mem<char> d_build_workQueue;     /* BUILD_MAX_WORK × BUILD_PENDING_WORK_BYTES bytes   */
+  cuda_mem<char> d_build_workQueue;     /* build_max_work × BUILD_PENDING_WORK_BYTES bytes   */
   cuda_mem<char> d_build_workQueueIn;   /* same size: sorted copy read by the batched kernel */
   cuda_mem<int>  d_build_workCount;     /* 1 int                                             */
 
@@ -276,9 +279,12 @@ struct Treecode
     /* allocate stack memory */
     node_max = nPtcl/5;
     if (node_max < 65536) node_max = 65536;
-    stack_size = (8+8+8+64+8)*node_max;
+    stack_size = (size_t)(8+8+8+64+8)*node_max;
     if (verbose) fprintf(stderr, "stack_size= %g MB \n", sizeof(int)*stack_size/1024.0/1024.0);
     d_stack_memory_pool.alloc(stack_size);
+    /* zeroed once here; each build clears only the node slots it used */
+    CUDA_SAFE_CALL(cudaMemset(d_stack_memory_pool, 0, stack_size*sizeof(int)));
+    last_nodes_used = 0;
 
     /* allocate celldata memory */
     cell_max = nPtcl;
@@ -296,8 +302,9 @@ struct Treecode
     /* Pre-allocate buildOctreeHost scratch (eliminates per-step GPU malloc/free churn). */
     d_build_octCounter .alloc(16);
     d_build_octCounterN.alloc(96);
-    d_build_workQueue  .alloc(static_cast<size_t>(BUILD_MAX_WORK) * BUILD_PENDING_WORK_BYTES);
-    d_build_workQueueIn.alloc(static_cast<size_t>(BUILD_MAX_WORK) * BUILD_PENDING_WORK_BYTES);
+    build_max_work = std::max(262144, nPtcl/16 + 1);
+    d_build_workQueue  .alloc(static_cast<size_t>(build_max_work) * BUILD_PENDING_WORK_BYTES);
+    d_build_workQueueIn.alloc(static_cast<size_t>(build_max_work) * BUILD_PENDING_WORK_BYTES);
     d_build_workCount  .alloc(1);
   };
 

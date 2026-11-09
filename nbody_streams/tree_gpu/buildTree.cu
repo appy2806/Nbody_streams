@@ -12,8 +12,6 @@
  * walk (direct sum over its particles in warp-sized chunks) and by
  * leafMultipoles.  Balanced trees are ~15-20 levels deep. */
 #define TREE_MAX_LEVEL 30
-#define MAX_WORK 262144 // default was 65536 (2^16), try to increase if you get "Error: pending work queue overflow, increase MAX_WORK and recompile" message
-// 1048576 is 2^20, which should be enough for 10^7 particles, but you can increase it further if you have more particles
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
@@ -47,6 +45,7 @@ namespace treeBuild
   __device__ unsigned int retirementCount = 0;
 
   __constant__ int d_node_max;
+  __constant__ int d_max_work;     /* capacity of the pending-work queue */
   __constant__ int d_cell_max;
 
   __device__ unsigned int nnodes = 0;
@@ -520,9 +519,9 @@ namespace treeBuild
         if (threadIdx.x == 0)
         {
           const int wi = atomicAdd(pendingWorkCount, 1);
-          if (wi >= MAX_WORK)
+          if (wi >= d_max_work)
           {
-            printf("Error: pending work queue overflow, increase MAX_WORK and recompile\n");
+            printf("Error: pending work queue overflow (capacity %d)\n", d_max_work);
             assert(0);
           }
           pendingWork[wi].box                = box;
@@ -856,7 +855,7 @@ namespace treeBuild
 
         if (h_workCount > max_work) {
             fprintf(stderr, "FATAL: work queue overflow (h_workCount=%d, capacity=%d).\n"
-                            "       Increase BUILD_MAX_WORK in Treecode.h and recompile.\n",
+                            "       (sized N/16 in Treecode::alloc; please report this.)\n",
                             h_workCount, max_work);
             exit(1);
           }
@@ -1090,14 +1089,18 @@ void Treecode<real_t>::buildTree(const int nLeaf)
   CUDA_SAFE_CALL(cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte));
 
   {
-    CUDA_SAFE_CALL(cudaMemset(d_stack_memory_pool,0,stack_size*sizeof(int)));
+    /* clear the node slots the previous build used (the pool was zeroed at alloc) */
+    if (last_nodes_used > 0)
+      CUDA_SAFE_CALL(cudaMemset(d_stack_memory_pool, 0,
+            std::min(stack_size, (size_t)(last_nodes_used + 1)*(8+8+8+64+8))*sizeof(int)));
     const double t0 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
     /* Pass pre-allocated scratch to eliminate 4× cudaMalloc/cudaFree per step. */
     #define _BONSAI_SCRATCH \
         d_build_octCounter.ptr, d_build_octCounterN.ptr, \
         d_build_workQueue.ptr,  d_build_workQueueIn.ptr, \
         d_build_workCount.ptr,                           \
-        BUILD_MAX_WORK
+        build_max_work
+    CUDA_SAFE_CALL(cudaMemcpyToSymbol(treeBuild::d_max_work, &build_max_work, sizeof(int)));
     switch(nLeaf)
     {
       case 16:
@@ -1136,6 +1139,7 @@ void Treecode<real_t>::buildTree(const int nLeaf)
     CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&nCells,  treeBuild::ncells, sizeof(int)));
     CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&nNodes,  treeBuild::nnodes, sizeof(int)));
     CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&nLeaves, treeBuild::nleaves, sizeof(int)));
+    last_nodes_used = nNodes;
     if (verbose){
       fprintf(stderr, " buildOctree done in %g sec : %g Mptcl/sec\n",  dt, nPtcl/1e6/dt);
     }
