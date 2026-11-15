@@ -145,19 +145,23 @@ def _get_cylspl_module() -> cp.RawModule:
                 f"CylSpline CUDA kernel file not found: {_CYLSPL_KERNEL_FILE}\n"
                 "Expected _cylspl_potential_kernel.cu in the same directory as _potential.py."
             )
+        # -Xptxas -O0: disable PTX-level (ptxas) optimizations on sm_90+.
+        # Required on sm_90 (Hopper) with CUDA 12/13: the ptxas optimizer
+        # miscompiles the bicubic Hermite evaluation loop in this kernel,
+        # producing catastrophically wrong potential values for interior grid
+        # cells (while grid-node evaluations remain exact).  -G (full debug)
+        # and -Xptxas -O0 both suppress the bug; -Xptxas -O0 is cheaper
+        # because it only disables PTX assembly-time optimizations, not
+        # nvcc-level transformations.  Earlier architectures are not affected
+        # and keep the optimizer: on an RTX 3080 (sm_86) -O0 makes the m12i
+        # mmax=8 force 17% slower in float64 and 80% slower in float32.
+        options = ("--use_fast_math", "-std=c++14")
+        if int(cp.cuda.Device().compute_capability) >= 90:
+            options += ("-Xptxas", "-O0")
         _CYLSPL_MODULE = cp.RawModule(
             code=_CYLSPL_KERNEL_FILE.read_text(),
             backend="nvcc",
-            # -Xptxas -O0: disable PTX-level (ptxas) optimizations.
-            # Required on sm_90 (Hopper) with CUDA 12/13: the ptxas optimizer
-            # miscompiles the bicubic Hermite evaluation loop in this kernel,
-            # producing catastrophically wrong potential values for interior grid
-            # cells (while grid-node evaluations remain exact).  -G (full debug)
-            # and -Xptxas -O0 both suppress the bug; -Xptxas -O0 is cheaper
-            # because it only disables PTX assembly-time optimizations, not
-            # nvcc-level transformations.  Performance impact is small because
-            # the kernel is memory-bandwidth bound.
-            options=("--use_fast_math", "-std=c++14", "-Xptxas", "-O0"),
+            options=options,
         )
     return _CYLSPL_MODULE
 
@@ -1605,6 +1609,13 @@ class CylSplinePotentialGPU(_GPUPotBase):
     ----------
     coefs : CylSplineCoefs
         Parsed coefficient object (from ``read_cylspl_coefs``).
+    precision : {'float64', 'float32'}
+        ``'float32'`` evaluates the m != 0 harmonics of ``potential``/``force``
+        in single precision (mixed precision): the asinh coordinates, the grid
+        search, the m = 0 term with its log-scaling, the region off the grid
+        and the final combination stay float64, so the error is ~1e-7 times
+        the non-axisymmetric part of the force.  Hessian and density stay
+        float64.  Inputs and outputs are float64 either way.
     """
 
     def __init__(self, coefs, precision: str = 'float64') -> None:
@@ -1635,9 +1646,9 @@ class CylSplinePotentialGPU(_GPUPotBase):
     def _set_precision(self, precision: str) -> None:
         if precision not in ('float64', 'float32'):
             raise ValueError(f"precision must be 'float64' or 'float32', got {precision!r}.")
-        if precision == 'float32':
-            raise NotImplementedError("CylSplinePotentialGPU precision='float32' is not implemented yet.")
         self._precision = precision
+        self._d_node_arrF = (self._d_node_arr.astype(cp.float32) if precision == 'float32'
+                             else None)
 
     @property
     def precision(self) -> str:
@@ -1696,24 +1707,27 @@ class CylSplinePotentialGPU(_GPUPotBase):
         d_z = cp.ascontiguousarray(arr[:, 2])
         return d_x, d_y, d_z, N, was_single
 
-    def _launch_eval(self, d_x, d_y, d_z, N: int, do_grad: bool):
-        phi_out  = cp.empty(N,     dtype=cp.float64)
-        grad_out = cp.empty(3 * N, dtype=cp.float64) if do_grad \
-                   else cp.empty(0, dtype=cp.float64)
+    def _launch_eval(self, arr, do_grad: bool):
+        """Potential, and the force when *do_grad*, for a C-contiguous float64
+        (N,3) array: the kernel reads it directly and writes -grad(Phi)."""
+        N = arr.shape[0]
+        phi_out   = cp.empty(N, dtype=cp.float64)
+        force_out = cp.empty((N, 3), dtype=cp.float64) if do_grad \
+                    else cp.empty(0, dtype=cp.float64)
+        if N == 0:
+            return phi_out, (force_out if do_grad else None)
 
-        kname  = "cylspl_force_kernel" if do_grad else "cylspl_potential_kernel"
+        kname = "cylspl_force_kernel" if do_grad else "cylspl_potential_kernel"
+        args  = self._common_args()
+        if self._d_node_arrF is not None:       # node table is args[5]
+            kname += "_f32"
+            args = args[:6] + (self._d_node_arrF,) + args[6:]
         blocks = (N + _THREADS_PER_BLOCK - 1) // _THREADS_PER_BLOCK
-        if do_grad:
-            _get_cylspl_kernel(kname)(
-                (blocks,), (_THREADS_PER_BLOCK,),
-                (d_x, d_y, d_z) + self._common_args() + (phi_out, grad_out, np.int32(N)),
-            )
-        else:
-            _get_cylspl_kernel(kname)(
-                (blocks,), (_THREADS_PER_BLOCK,),
-                (d_x, d_y, d_z) + self._common_args() + (phi_out, np.int32(N)),
-            )
-        return phi_out, (grad_out if do_grad else None)
+        _get_cylspl_kernel(kname)(
+            (blocks,), (_THREADS_PER_BLOCK,),
+            (arr,) + args + (phi_out, force_out, np.int32(N)),
+        )
+        return phi_out, (force_out if do_grad else None)
 
     def _launch_hess(self, d_x, d_y, d_z, N: int):
         phi_out  = cp.empty(N,     dtype=cp.float64)
@@ -1730,14 +1744,13 @@ class CylSplinePotentialGPU(_GPUPotBase):
     # ---- public Agama-compatible API ----------------------------------------
 
     def potential(self, xyz, t: float = 0.0) -> cp.ndarray:
-        d_x, d_y, d_z, N, single = self._unpack_xyz(xyz)
-        phi, _ = self._launch_eval(d_x, d_y, d_z, N, do_grad=False)
+        arr, single = _prep_xyz(xyz)
+        phi, _ = self._launch_eval(arr, do_grad=False)
         return phi[0] if single else phi
 
     def force(self, xyz, t: float = 0.0) -> cp.ndarray:
-        d_x, d_y, d_z, N, single = self._unpack_xyz(xyz)
-        _, grad = self._launch_eval(d_x, d_y, d_z, N, do_grad=True)
-        force = -grad.reshape(N, 3)
+        arr, single = _prep_xyz(xyz)
+        _, force = self._launch_eval(arr, do_grad=True)
         return force[0] if single else force
 
     def density(self, xyz, t: float = 0.0) -> cp.ndarray:

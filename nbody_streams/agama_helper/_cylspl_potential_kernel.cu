@@ -25,9 +25,10 @@
 //  radius from determineAsympt.
 //
 //  Kernel entry points:
-//    cylspl_potential_kernel  (phi only)
-//    cylspl_force_kernel      (phi + gradient)
-//    cylspl_hess_kernel       (phi + gradient + Hessian)
+//    cylspl_potential_kernel[_f32]  (phi only)       (N,3) positions in
+//    cylspl_force_kernel[_f32]      (phi + force)    (N,3) positions in, -grad out
+//    cylspl_hess_kernel             (phi + gradient + Hessian), x/y/z inputs
+//  _f32: mixed precision (m != 0 harmonics in float, see cylspl_eval_pf).
 //
 //  Hessian output layout (same as Multipole):
 //    hess_out per particle: [Hxx, Hyy, Hzz, Hxy, Hyz, Hxz]
@@ -864,77 +865,274 @@ __device__ __forceinline__ void cylspl_eval_device(
 
 
 // ---------------------------------------------------------------------------
-//  Kernel entry points
-//  Grid stride: each thread handles one particle.
+//  Potential + force path (cylspl_potential_kernel / cylspl_force_kernel and
+//  their _f32 variants).  The Hessian kernel keeps cylspl_eval_device above.
+//
+//  Same spline as cylspl_eval_device, organised for speed and mixed precision:
+//    - the cell geometry (t, 1-t, t(1-t), h, 1/h in lR and lz) is computed
+//      once per particle, not once per harmonic;
+//    - cos/sin(m phi) come from a recurrence started at x/R, y/R (no atan2 and
+//      no cos/sin per harmonic);
+//    - the m = 0 patch (log-scaled Phi_0), its exp, the asinh coordinates, the
+//      grid search, the region off the grid and the final combination are
+//      double; the m != 0 patches (stored as ratios Phi_m / Phi_0) and their
+//      Fourier sums run in F: double reproduces the full-precision kernel,
+//      float is the mixed-precision mode reading a float copy of the node
+//      table (nodeF).  With log-scaling
+//          Phi       = Phi0 (1 + S),            S   = sum ratio_m trig_m
+//          dPhi/dlR  = Phi0 (dlnPhi0/dlR (1 + S) + S_R),   likewise z
+//          dPhi/dphi = Phi0 S_phi
+//      so float rounding enters at ~1e-7 times the non-axisymmetric part.
+//  Reads the C-contiguous float64 (N,3) positions and writes -grad(Phi).
 // ---------------------------------------------------------------------------
 
-extern "C" __global__ __launch_bounds__(256, 2) void cylspl_potential_kernel(
-    const double* __restrict__ x_in,
-    const double* __restrict__ y_in,
-    const double* __restrict__ z_in,
-    // Spline params
+template <typename F>
+struct CylCell {
+    F tR, TR, tTR, hR, ihR;     // t = (lR - lR_lo)/hR, T = 1 - t, tT = t T
+    F tz, Tz, tTz, hz, ihz;
+};
+
+// Cubic Hermite value and derivative on one interval (Agama's
+// evalCubicSplines<1>, with t, T, tT, h, 1/h precomputed).
+template <typename F>
+__device__ __forceinline__ F herm_val(F fl, F fh, F f1l, F f1h, F t, F T, F tT, F h)
+{
+    F dif = fh - fl;
+    return fl*T + fh*t + (dif*(t - T) + (f1l*T - f1h*t)*h) * tT;
+}
+
+template <typename F>
+__device__ __forceinline__ F herm_der(F fl, F fh, F f1l, F f1h, F t, F T, F tT, F ih)
+{
+    F Q = F(3) * (f1l + f1h) - F(6) * (fh - fl) * ih;
+    return f1l*T + f1h*t - Q * tT;
+}
+
+// One harmonic's bicubic patch: value and (DO_GRAD) d/dlR, d/dlz.
+// off_sel picks the corner whose fval is subtracted for numerical stability,
+// as Agama's CubicSpline2d::evalDeriv does (0: ll, 1: lu, 2: ul, 3: uu).
+template <bool DO_GRAD, typename F>
+__device__ __forceinline__ void bicubic_patch(
+    const F* __restrict__ node, int ill, int nz, const CylCell<F>& c, int off_sel,
+    F* val, F* dlR, F* dlz)
+{
+    const int ilu = ill + 1, iul = ill + nz, iuu = iul + 1;
+    F v_ll = __ldg(node + ill*4), v_lu = __ldg(node + ilu*4);
+    F v_ul = __ldg(node + iul*4), v_uu = __ldg(node + iuu*4);
+    const F x_ll = __ldg(node + ill*4 + 1), x_lu = __ldg(node + ilu*4 + 1);
+    const F x_ul = __ldg(node + iul*4 + 1), x_uu = __ldg(node + iuu*4 + 1);
+    const F y_ll = __ldg(node + ill*4 + 2), y_lu = __ldg(node + ilu*4 + 2);
+    const F y_ul = __ldg(node + iul*4 + 2), y_uu = __ldg(node + iuu*4 + 2);
+    const F xy_ll = __ldg(node + ill*4 + 3), xy_lu = __ldg(node + ilu*4 + 3);
+    const F xy_ul = __ldg(node + iul*4 + 3), xy_uu = __ldg(node + iuu*4 + 3);
+
+    const F off = (off_sel == 0) ? v_ll : (off_sel == 1) ? v_lu : (off_sel == 2) ? v_ul : v_uu;
+    v_ll -= off; v_lu -= off; v_ul -= off; v_uu -= off;
+
+    // z direction, 4 lanes: fval and fx at lR_lo / lR_hi
+    const F F0 = herm_val(v_ll, v_lu, y_ll,  y_lu,  c.tz, c.Tz, c.tTz, c.hz);
+    const F F1 = herm_val(v_ul, v_uu, y_ul,  y_uu,  c.tz, c.Tz, c.tTz, c.hz);
+    const F F2 = herm_val(x_ll, x_lu, xy_ll, xy_lu, c.tz, c.Tz, c.tTz, c.hz);
+    const F F3 = herm_val(x_ul, x_uu, xy_ul, xy_uu, c.tz, c.Tz, c.tTz, c.hz);
+    // lR direction
+    *val = herm_val(F0, F1, F2, F3, c.tR, c.TR, c.tTR, c.hR) + off;
+    if (DO_GRAD) {
+        *dlR = herm_der(F0, F1, F2, F3, c.tR, c.TR, c.tTR, c.ihR);
+        const F D0 = herm_der(v_ll, v_lu, y_ll,  y_lu,  c.tz, c.Tz, c.tTz, c.ihz);
+        const F D1 = herm_der(v_ul, v_uu, y_ul,  y_uu,  c.tz, c.Tz, c.tTz, c.ihz);
+        const F D2 = herm_der(x_ll, x_lu, xy_ll, xy_lu, c.tz, c.Tz, c.tTz, c.ihz);
+        const F D3 = herm_der(x_ul, x_uu, xy_ul, xy_uu, c.tz, c.Tz, c.tTz, c.ihz);
+        *dlz = herm_val(D0, D1, D2, D3, c.tR, c.TR, c.tTR, c.hR);
+    }
+}
+
+template <bool DO_GRAD, typename F>
+__device__ __forceinline__ void cylspl_eval_pf(
+    int i,
+    const double* __restrict__ pos,
     double Rscale,
     const double* __restrict__ lR_grid, int nR,
     const double* __restrict__ lz_grid, int nz,
     const double* __restrict__ node_arr,
-    int n_harm,
-    const int* __restrict__ m_arr,
-    int mmax,
-    int log_scaling,
-    // Outer
+    const F* __restrict__ nodeF,
+    int n_harm, const int* __restrict__ m_arr, int mmax, int log_scaling,
     const double* __restrict__ W_outer, double r0_outer,
     int lmax_outer, int mmax_outer,
-    // Output
-    double* __restrict__ phi_out,
-    int N)
+    double* __restrict__ phi_out, double* __restrict__ force_out)
+{
+    const double px = pos[3*i], py = pos[3*i + 1], pz = pos[3*i + 2];
+    const double R2 = px*px + py*py;
+    const double R  = sqrt(R2);
+    const double lR = asinh(R  / Rscale);
+    const double lz = asinh(pz / Rscale);
+
+    // Off the grid: outer asymptotic expansion (double)
+    if (lR < lR_grid[0] || lR > lR_grid[nR-1] || lz < lz_grid[0] || lz > lz_grid[nz-1]) {
+        double g[3] = {0, 0, 0};
+        eval_outer_asympt(px, py, pz, W_outer, r0_outer, lmax_outer, mmax_outer,
+                          phi_out + i, DO_GRAD ? g : NULL, NULL);
+        if (DO_GRAD) { force_out[3*i] = -g[0]; force_out[3*i+1] = -g[1]; force_out[3*i+2] = -g[2]; }
+        return;
+    }
+
+    int iR = binSearch_device(lR, lR_grid, nR);
+    int iz = binSearch_device(lz, lz_grid, nz);
+    iR = max(0, min(iR, nR - 2));
+    iz = max(0, min(iz, nz - 2));
+    const double lR_lo = lR_grid[iR], lR_hi = lR_grid[iR+1];
+    const double lz_lo = lz_grid[iz], lz_hi = lz_grid[iz+1];
+    const int off_sel = ((lR == lR_hi) ? 2 : 0) + ((lz == lz_hi) ? 1 : 0);
+
+    CylCell<double> cd;
+    cd.hR = lR_hi - lR_lo; cd.ihR = 1.0 / cd.hR;
+    cd.tR = (lR - lR_lo) * cd.ihR; cd.TR = 1.0 - cd.tR; cd.tTR = cd.tR * cd.TR;
+    cd.hz = lz_hi - lz_lo; cd.ihz = 1.0 / cd.hz;
+    cd.tz = (lz - lz_lo) * cd.ihz; cd.Tz = 1.0 - cd.tz; cd.tTz = cd.tz * cd.Tz;
+    CylCell<F> cf;
+    cf.tR = (F)cd.tR; cf.TR = (F)cd.TR; cf.tTR = (F)cd.tTR; cf.hR = (F)cd.hR; cf.ihR = (F)cd.ihR;
+    cf.tz = (F)cd.tz; cf.Tz = (F)cd.Tz; cf.tTz = (F)cd.tTz; cf.hz = (F)cd.hz; cf.ihz = (F)cd.ihz;
+
+    const int cell = iR * nz + iz;
+    const int nRz  = nR * nz;
+
+    // Harmonic layout: m_arr sorted ascending.  mm0 = index of m = 0;
+    // positive m from ip upward, negative m from in downward (|m| ascending).
+    int mm0 = -1, ip = n_harm, in = -1;
+    for (int mm = 0; mm < n_harm; mm++) {
+        const int m = m_arr[mm];
+        if (m == 0) mm0 = mm;
+        else if (m > 0 && ip == n_harm) ip = mm;
+        else if (m < 0) in = mm;
+    }
+
+    // m = 0, double
+    double v0 = 0.0, d0R = 0.0, d0z = 0.0;
+    if (mm0 >= 0)
+        bicubic_patch<DO_GRAD, double>(node_arr, mm0 * nRz + cell, nz, cd, off_sel, &v0, &d0R, &d0z);
+
+    // m != 0, F.  cos/sin(phi) from x/R, y/R (phi = 0 at R = 0, as atan2(0,0)).
+    const double cos_phi = (R > 0.0) ? px / R : 1.0;
+    const double sin_phi = (R > 0.0) ? py / R : 0.0;
+    const F cph = (F)cos_phi, sph = (F)sin_phi;
+    F cm = cph, sm = sph;                    // cos/sin(absm phi), absm = 1
+    F S = F(0), S_R = F(0), S_z = F(0), S_p = F(0);
+    for (int absm = 1; absm <= mmax; absm++) {
+        F v, dR = F(0), dz = F(0);
+        if (ip < n_harm && m_arr[ip] == absm) {           // cos(m phi)
+            bicubic_patch<DO_GRAD, F>(nodeF, ip * nRz + cell, nz, cf, off_sel, &v, &dR, &dz);
+            S += v * cm;
+            if (DO_GRAD) { S_R += dR * cm; S_z += dz * cm; S_p -= F(absm) * v * sm; }
+            ip++;
+        }
+        if (in >= 0 && m_arr[in] == -absm) {              // sin(m phi)
+            bicubic_patch<DO_GRAD, F>(nodeF, in * nRz + cell, nz, cf, off_sel, &v, &dR, &dz);
+            S += v * sm;
+            if (DO_GRAD) { S_R += dR * sm; S_z += dz * sm; S_p += F(absm) * v * cm; }
+            in--;
+        }
+        const F t = cm*cph - sm*sph; sm = sm*cph + cm*sph; cm = t;
+    }
+
+    // Combine in double (Agama's evalCyl)
+    double Phi, dPhidlR = 0.0, dPhidlz = 0.0, dPhidphi = 0.0;
+    if (log_scaling) {
+        const double Phi0 = -exp(v0);            // m = 0 stores log(-Phi0)
+        const double sum  = 1.0 + (double)S;     // m != 0 store Phi_m / Phi0
+        Phi = Phi0 * sum;
+        if (DO_GRAD) {
+            dPhidlR  = Phi0 * ((double)S_R + d0R * sum);
+            dPhidlz  = Phi0 * ((double)S_z + d0z * sum);
+            dPhidphi = Phi0 * (double)S_p;
+        }
+    } else {
+        Phi = v0 + (double)S;
+        if (DO_GRAD) {
+            dPhidlR  = d0R + (double)S_R;
+            dPhidlz  = d0z + (double)S_z;
+            dPhidphi = (double)S_p;
+        }
+    }
+    phi_out[i] = Phi;
+    if (!DO_GRAD) return;
+
+    // Scaled -> physical (dlX/dX = 1/sqrt(X^2 + Rscale^2)) -> Cartesian force
+    const double dPhidR = dPhidlR / sqrt(R2 + Rscale*Rscale);
+    const double dPhidz = dPhidlz / sqrt(pz*pz + Rscale*Rscale);
+    double gx = 0.0, gy = 0.0;
+    if (R > 1e-30) {
+        // At R=0 the x/y force is taken as zero, as in cylspl_eval_device
+        const double Rinv = 1.0 / R, R2inv = Rinv * Rinv;
+        gx = dPhidR * (px * Rinv) - dPhidphi * (py * R2inv);
+        gy = dPhidR * (py * Rinv) + dPhidphi * (px * R2inv);
+    }
+    force_out[3*i]     = -gx;
+    force_out[3*i + 1] = -gy;
+    force_out[3*i + 2] = -dPhidz;
+}
+
+
+// ---------------------------------------------------------------------------
+//  Kernel entry points
+//  Each thread handles one particle.  *_f32: m != 0 sums in float from nodeF.
+// ---------------------------------------------------------------------------
+
+#define CYL_PF_PARAMS                                                           \
+    double Rscale,                                                              \
+    const double* __restrict__ lR_grid, int nR,                                 \
+    const double* __restrict__ lz_grid, int nz,                                 \
+    const double* __restrict__ node_arr
+
+#define CYL_PF_TAIL                                                             \
+    int n_harm, const int* __restrict__ m_arr, int mmax, int log_scaling,       \
+    const double* __restrict__ W_outer, double r0_outer,                        \
+    int lmax_outer, int mmax_outer,                                             \
+    double* __restrict__ phi_out, double* __restrict__ force_out, int N
+
+#define CYL_PF_ARGS(NODEF)                                                      \
+    i, pos, Rscale, lR_grid, nR, lz_grid, nz, node_arr, NODEF,                  \
+    n_harm, m_arr, mmax, log_scaling, W_outer, r0_outer, lmax_outer, mmax_outer,\
+    phi_out, force_out
+
+extern "C" __global__ __launch_bounds__(256, 2) void cylspl_potential_kernel(
+    const double* __restrict__ pos, CYL_PF_PARAMS, CYL_PF_TAIL)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= N) return;
-    cylspl_eval_device<false, false>(
-        x_in[i], y_in[i], z_in[i],
-        Rscale, lR_grid, lz_grid, nR, nz,
-        node_arr, n_harm, m_arr, mmax, log_scaling,
-        W_outer, r0_outer, lmax_outer, mmax_outer,
-        phi_out + i, NULL, NULL);
+    cylspl_eval_pf<false, double>(CYL_PF_ARGS(node_arr));
 }
-
 
 extern "C" __global__ __launch_bounds__(256, 2) void cylspl_force_kernel(
-    const double* __restrict__ x_in,
-    const double* __restrict__ y_in,
-    const double* __restrict__ z_in,
-    // Spline params
-    double Rscale,
-    const double* __restrict__ lR_grid, int nR,
-    const double* __restrict__ lz_grid, int nz,
-    const double* __restrict__ node_arr,
-    int n_harm,
-    const int* __restrict__ m_arr,
-    int mmax,
-    int log_scaling,
-    // Outer
-    const double* __restrict__ W_outer, double r0_outer,
-    int lmax_outer, int mmax_outer,
-    // Output
-    double* __restrict__ phi_out,
-    double* __restrict__ grad_out,   // (3*N,) [dPhi/dx, dPhi/dy, dPhi/dz] interleaved
-    int N)
+    const double* __restrict__ pos, CYL_PF_PARAMS, CYL_PF_TAIL)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= N) return;
-    double g[3];
-    cylspl_eval_device<true, false>(
-        x_in[i], y_in[i], z_in[i],
-        Rscale, lR_grid, lz_grid, nR, nz,
-        node_arr, n_harm, m_arr, mmax, log_scaling,
-        W_outer, r0_outer, lmax_outer, mmax_outer,
-        phi_out + i, g, NULL);
-    grad_out[3*i+0] = g[0];
-    grad_out[3*i+1] = g[1];
-    grad_out[3*i+2] = g[2];
+    cylspl_eval_pf<true, double>(CYL_PF_ARGS(node_arr));
 }
 
+extern "C" __global__ __launch_bounds__(256, 2) void cylspl_potential_kernel_f32(
+    const double* __restrict__ pos, CYL_PF_PARAMS,
+    const float* __restrict__ nodeF, CYL_PF_TAIL)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    cylspl_eval_pf<false, float>(CYL_PF_ARGS(nodeF));
+}
 
+extern "C" __global__ __launch_bounds__(256, 2) void cylspl_force_kernel_f32(
+    const double* __restrict__ pos, CYL_PF_PARAMS,
+    const float* __restrict__ nodeF, CYL_PF_TAIL)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    cylspl_eval_pf<true, float>(CYL_PF_ARGS(nodeF));
+}
+
+#undef CYL_PF_PARAMS
+#undef CYL_PF_TAIL
+#undef CYL_PF_ARGS
+
+
+// Hessian kernel: (x, y, z) inputs, cylspl_eval_device.
 extern "C" __global__ __launch_bounds__(256, 2) void cylspl_hess_kernel(
     const double* __restrict__ x_in,
     const double* __restrict__ y_in,

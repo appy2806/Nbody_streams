@@ -763,8 +763,38 @@ m12i z = 0 DM halo, 1e6 particles at 1-200 kpc, RTX 3080 Laptop:
 | force error vs float64, median / max | 1e-8 / 3e-7 | 1.5e-8 / 5e-7 |
 | tidal ΔF over 1 pc at 40 kpc, median | 4e-4 | 7e-4 (pure float32: 4e-3) |
 
-float32 needs |m| ≤ 28 (PREFACT[m] underflows float beyond). The CylSpline
-is float64 only for now.
+float32 needs |m| ≤ 28 (PREFACT[m] underflows float beyond).
+
+**CylSpline: mixed precision.** Same idea: the m = 0 harmonic is stored as
+log(-Φ_0) and the others as Φ_m/Φ_0, so Φ = Φ_0 (1 + Σ ratio_m trig_m). The
+asinh coordinates, grid search, m = 0 patch and its `exp`, the outer
+asymptotic region and the combination stay float64; the m ≠ 0 bicubic
+patches (from a float copy of the node table) and the Fourier sums run in
+float32. Both precisions now compute the cell geometry once per particle
+rather than per harmonic and take cos/sin(mφ) from a recurrence started at
+x/R, y/R (the old kernel called `atan2` plus `cos`/`sin` per harmonic).
+Axisymmetric files (`axi_*`, m = 0 only) gain nothing from float32.
+
+m12i z = 0 baryons, 1e6 particles at 1-200 kpc, RTX 3080 Laptop:
+
+| | mmax = 4 | mmax = 8 | axisymmetric |
+|---|---|---|---|
+| force, before | 12.8 ms | 21.7 ms | 3.3 ms |
+| force, float64 now | 7.9 ms | 14.6 ms | 3.2 ms |
+| force, float32 (mixed) | 3.1 ms | 3.5 ms | 3.0 ms |
+| force error vs float64, median / max | 5e-9 / 8e-7 | 5e-9 / 8e-7 | — |
+
+The largest float32 errors (~3e-6) sit within 10 pc of the centre, where
+the force goes through zero.
+
+The CylSpline module is compiled with `-Xptxas -O0` only on compute
+capability ≥ 9.0, the workaround for a Hopper ptxas miscompile; earlier
+GPUs (RTX 30xx, L40) keep the optimizer, which on the 3080 is 17% (float64)
+and 80% (float32) faster.
+
+**Whole m12i host** (DM Multipole lmax = 8 + baryon CylSpline mmax = 8),
+1e6 particles: 47.1 ms → 6.6 ms per force call, max deviation 1.4e-7; a
+GPU-tree step with that host goes from 75.5 to 38.0 ms.
 `run_simulation`'s `precision=` sets the self-gravity only: set the host's
 precision on the potential.
 

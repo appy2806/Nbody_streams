@@ -21,6 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   force directly (no column copies or negation pass), and take cos/sin(phi)
   from x/R, y/R instead of atan2 + sincos.
 
+- **Mixed precision CylSpline: `CylSplinePotentialGPU(precision='float32')`.**
+  The m != 0 harmonics run in float32; the asinh coordinates, grid search,
+  m = 0 term, outer region and combination stay float64. m12i baryons at
+  mmax = 8: 21.7 -> 3.5 ms per 1e6 forces (float64 path 14.6 ms), within
+  ~5e-9 of float64 (max 8e-7). Whole m12i host: 47.1 -> 6.6 ms; a 1e6-particle
+  GPU-tree step 75.5 -> 38.0 ms (RTX 3080 Laptop).
+
+### Changed
+
+- CylSpline potential/force kernels compute the cell geometry once per
+  particle and cos/sin(m phi) by recurrence (no atan2 / cos / sin per
+  harmonic), read the (N,3) array and write the force directly.
+- The CylSpline module keeps `-Xptxas -O0` (Hopper ptxas workaround) only on
+  compute capability >= 9.0.
+
 ### Fixed
 
 - Multipole force exactly on the -z axis had the wrong sign in its x/y
