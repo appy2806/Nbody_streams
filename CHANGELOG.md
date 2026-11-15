@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`precision='float32'` for the analytic GPU potentials.** NFW, Plummer,
+  Hernquist, Isochrone, MiyamotoNagai, LogHalo, spherical Dehnen,
+  DiskAnsatz and UniformAcceleration (and `PotentialGPU(type=..., precision=)`)
+  run their arithmetic in single precision: ~1e-7 typical error, ~0.12 ms
+  per 1e6 forces (bandwidth floor) versus 0.2-1.5 ms in float64 on an RTX
+  3080 Laptop. Inputs and outputs stay float64. Multipole-backed types raise
+  for float32.
+
+### Changed
+
+- **Analytic GPU kernels return the force and `-Hessian` directly**, reading
+  the float64 `(N,3)` positions in-kernel: the separate negation and
+  per-axis slicing passes are gone, 1.2-3x faster in float64 too.
+- **Fewer passes around the GPU tree.** `tree_gravity_gpu` writes the
+  recentred float32 positions straight into the tree's SoA layout, finishes
+  with one kernel (layout, self-term, G), and checks a softening array only
+  the first time a tree handle sees it (the check cost a host sync).
+  `run_nbody_gpu_tree` updates positions, velocities and acceleration in
+  place with two fused kick kernels. 1.9 -> 0.8 ms per step at 1e6 particles;
+  tree forces are bitwise unchanged, and the kick increment `h a` is now
+  formed in float64 also without an external potential.
+
+### Fixed
+
+- Cancellation in the analytic kernels: NFW force/Hessian at r << rs
+  (2e-11 at 1 pc), cusp Hessians' radial component, `DiskAnsatz` potential
+  near the midplane (1e-2 at |z| < 1e-3 h), Dehnen potential at r >> a,
+  isochrone density at r >> b.
+
+### Added
+
 - **Time-dependent halo shapes: `SpheroidPotentialGPU`.** Agama's Spheroid
   density (same keywords; also NFW and Dehnen) with `axisRatioY`,
   `axisRatioZ`, `mass` or `densityNorm` given as `[t, value]` tables. The

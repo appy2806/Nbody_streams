@@ -76,6 +76,25 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
+# Fused leapfrog updates
+# ---------------------------------------------------------------------------
+# Each replaces two or three CuPy passes and their temporaries; positions,
+# velocities and the total acceleration stay float64 and are updated in place.
+if _CUPY_OK:
+    # first half kick + drift
+    _kick_drift = cp.ElementwiseKernel(
+        "float64 a, float64 h, float64 dt", "float64 v, float64 x",
+        "v += h * a; x += dt * v;", "tree_kick_drift")
+    # total acceleration (float32 self-gravity + float64 external) + second half kick
+    _kick_ext = cp.ElementwiseKernel(
+        "float32 a_self, float64 a_ext, float64 h", "float64 a, float64 v",
+        "a = (double)a_self + a_ext; v += h * a;", "tree_kick_ext")
+    _kick_self = cp.ElementwiseKernel(
+        "float32 a_self, float64 h", "float64 a, float64 v",
+        "a = (double)a_self; v += h * a;", "tree_kick_self")
+
+
+# ---------------------------------------------------------------------------
 # Watchdog
 # ---------------------------------------------------------------------------
 
@@ -339,8 +358,10 @@ def run_nbody_gpu_tree(
     else:
         eps_gpu = cp.asarray(softening, dtype=cp.float32)
 
-    pos = cp.asarray(phase_space[:, :3], dtype=cp.float64)
-    vel = cp.asarray(phase_space[:, 3:], dtype=cp.float64)
+    # Own C-contiguous copies: the loop updates them in place, and must not
+    # write into a CuPy phase_space passed by the caller.
+    pos = cp.array(phase_space[:, :3], dtype=cp.float64, order="C")
+    vel = cp.array(phase_space[:, 3:], dtype=cp.float64, order="C")
 
     # ── Resume from restart ───────────────────────────────────────────────────
     start_step = 0
@@ -350,8 +371,8 @@ def run_nbody_gpu_tree(
         if restart_data is not None:
             (pv_np, t_rest, step_rest, snapctr_rest,
              _m_r, _s_r, _snames_r, _sN_r) = restart_data
-            pos        = cp.asarray(pv_np[:, :3], dtype=cp.float64)
-            vel        = cp.asarray(pv_np[:, 3:], dtype=cp.float64)
+            pos        = cp.array(pv_np[:, :3], dtype=cp.float64, order="C")
+            vel        = cp.array(pv_np[:, 3:], dtype=cp.float64, order="C")
             start_step = int(step_rest) + 1
             snap_idx   = int(snapctr_rest)
             if verbose:
@@ -468,15 +489,25 @@ def run_nbody_gpu_tree(
     centre = (mass_f64[:, None] * pos).sum(axis=0) / mass_f64.sum()
 
     with watchdog:
-        acc, phi, centre = _self_gravity(pos, centre)
+        acc_self, phi, centre = _self_gravity(pos, centre)
 
+    def _ext_total(acc_ext_, t_):
+        """External + extra (non-conservative) acceleration, float64, or None.
+
+        pos and vel are CuPy float64 arrays on the tree-GPU path; phi is passed
+        for free from the tree force evaluation.
+        """
+        if force_extra is None:
+            return acc_ext_
+        extra = cp.asarray(force_extra(pos, vel, masses, t_, phi=phi), dtype=cp.float64)
+        return extra if acc_ext_ is None else acc_ext_ + extra
+
+    # Total acceleration (float64), updated in place every step.
     _acc_ext = _ext_acc(pos, t_now)
-    if _acc_ext is not None:
-        acc = acc + _acc_ext
-    if force_extra is not None:
-        acc = acc + cp.asarray(
-            force_extra(pos, vel, masses, t_now, phi=phi), dtype=cp.float64
-        )
+    acc = acc_self.astype(cp.float64)
+    a_ext = _ext_total(_acc_ext, t_now)
+    if a_ext is not None:
+        acc += a_ext
 
     # Energy reference (only computed if debug_energy, but always store E_ref)
     E_ref = 0.0
@@ -517,26 +548,21 @@ def run_nbody_gpu_tree(
             t_now = time_start + current_step * dt
 
             with watchdog:
-                vel = vel + (0.5 * dt) * acc
-                pos = pos + dt         * vel
-                acc, phi, centre = _self_gravity(pos, centre)
+                _kick_drift(acc, 0.5 * dt, dt, vel, pos)
+                acc_self, phi, centre = _self_gravity(pos, centre)
 
             # External potential
             if external_potential is not None and current_step % external_update_interval == 0:
                 _acc_ext = _ext_acc(pos, t_now)
-            if _acc_ext is not None:
-                acc = acc + _acc_ext
 
             # Extra non-conservative forces (e.g. dynamical friction).
-            # pos and vel are CuPy float64 arrays on the tree-GPU path.
-            # phi is passed for free from the tree force evaluation.
-            if force_extra is not None:
-                acc = acc + cp.asarray(
-                    force_extra(pos, vel, masses, t_now, phi=phi), dtype=cp.float64
-                )
+            a_ext = _ext_total(_acc_ext, t_now)
 
             with watchdog:
-                vel = vel + (0.5 * dt) * acc
+                if a_ext is None:
+                    _kick_self(acc_self, 0.5 * dt, acc, vel)
+                else:
+                    _kick_ext(acc_self, a_ext, 0.5 * dt, acc, vel)
 
             # ── Progress update (every ~5% of steps) ──────────────────────────
             # When tqdm is active it already shows step count / rate / ETA,

@@ -327,6 +327,22 @@ tree should see positions measured from the system it resolves:
 
 Energy diagnostics are computed in float64.
 
+### Passes around the tree
+
+At N = 1M the work outside the tree walk is 0.8 ms per step (it was 1.9 ms):
+
+- `tree_gravity_gpu`: one kernel subtracts the centre, casts to float32 and
+  writes the `(3, N)` layout the tree reads (`to_float32_relative_soa`); one
+  kernel after the walk transposes the accelerations, removes the self term
+  from `phi` and multiplies by `G`, with the same float32 operations as
+  before (outputs are bitwise unchanged). With a `TreeGPU` handle, an `eps`
+  array is checked for positive values only the first time that array object
+  is passed (the check costs a host sync).
+- `run_nbody_gpu_tree`: positions, velocities and the total float64
+  acceleration are updated in place by two kernels per step, kick + drift
+  and (self-gravity + external) + kick. The kick increment `h a` is formed in
+  float64 in both cases.
+
 ---
 
 ## `G_DEFAULT`

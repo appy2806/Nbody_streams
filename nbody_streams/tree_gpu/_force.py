@@ -44,7 +44,7 @@ try:
 except ImportError:
     raise ImportError("CuPy is required for tree_gpu.py")
 
-from .._recentre import to_float32_relative
+from .._recentre import to_float32_relative_soa
 
 __all__ = ["tree_gravity_gpu", "TreeGPU", "cuda_alive"]
 
@@ -214,6 +214,9 @@ class TreeGPU:
         self.n = n
         self.eps = eps
         self._theta = float(theta)
+        # Softening array validated by the last tree_gravity_gpu call; the
+        # same array object is not re-checked (the check costs a host sync).
+        self._eps_checked = None
 
     @property
     def theta(self) -> float:
@@ -245,6 +248,19 @@ class TreeGPU:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+# One pass after the tree walk: SoA (3, N) -> (N, 3), remove the self term
+# from phi, scale by G.  Same float32 operations, in the same order, as the
+# separate stack / += / *= passes it replaces.
+_finish_kernel = cp.ElementwiseKernel(
+    "raw float32 a, float32 m, float32 e, float32 G, int64 n",
+    "raw float32 acc, float32 phi",
+    """
+    acc[3*i]     = a[i] * G;
+    acc[3*i + 1] = a[n + i] * G;
+    acc[3*i + 2] = a[2*n + i] * G;
+    phi = (phi + m / e) * G;
+    """, "tree_finish")
 
 def tree_gravity_gpu(
     pos: cp.ndarray,
@@ -305,6 +321,10 @@ def tree_gravity_gpu(
         the mass has been stripped and the mean lies far from the bound core.
         Ignored for float32 ``pos``.
 
+    With a ``tree`` handle, an ``eps`` array is checked for positive values
+    only the first time that array object is passed: modify it in place
+    between calls only with positive values.
+
     Returns
     -------
     acc : cp.ndarray, shape (N, 3)
@@ -314,15 +334,15 @@ def tree_gravity_gpu(
         excluding the particle's interaction with itself (same convention as
         the direct-sum backend).
     """
-    # --- float32 positions (relative to a centre for float64 input), F-order
-    #     so the x/y/z columns are contiguous views ---
+    # --- float32 positions (relative to a centre for float64 input) as
+    #     (3, N): the x/y/z rows are the contiguous arrays the tree reads ---
     if not isinstance(pos, cp.ndarray):
         pos = np.asarray(pos)
         pos = cp.asarray(pos, dtype=cp.float32 if pos.dtype == np.float32 else cp.float64)
-    pos_rel, _ = to_float32_relative(pos, mass, center)
-    pos_f = cp.asfortranarray(pos_rel)
+    assert pos.ndim == 2 and pos.shape[1] == 3, f"pos must be (N,3), got {pos.shape}"
+    pos_soa, _ = to_float32_relative_soa(pos, mass, center)
 
-    n = pos_f.shape[0]
+    n = pos_soa.shape[1]
 
     # --- coerce mass ---
     if isinstance(mass, (np.ndarray, cp.ndarray)):
@@ -333,17 +353,18 @@ def tree_gravity_gpu(
         mass = cp.full(n, mass, dtype=cp.float32)
 
     # --- coerce eps (scalar or array) ---
-    eps_arr = _coerce_eps(eps, n)
+    if tree is not None and eps is tree._eps_checked:
+        eps_arr = eps
+    else:
+        eps_arr = _coerce_eps(eps, n)
+        if tree is not None:
+            tree._eps_checked = eps if eps_arr is eps else None
 
-    assert pos_f.shape == (n, 3), f"pos must be (N,3), got {pos_f.shape}"
     assert mass.shape == (n,),    f"mass must be (N,), got {mass.shape}"
     assert eps_arr.shape == (n,), f"eps must be scalar or (N,), got {eps_arr.shape}"
     assert nleaf in (16, 24, 32, 48, 64), f"nleaf must be in {{16,24,32,48,64}}"
 
-    # SoA views — F-order columns are contiguous, zero allocation
-    x = pos_f[:, 0]
-    y = pos_f[:, 1]
-    z = pos_f[:, 2]
+    x, y, z = pos_soa       # contiguous rows, zero allocation
 
     owns_tree = tree is None
     if owns_tree:
@@ -368,14 +389,13 @@ def tree_gravity_gpu(
         _lib.tree_make_groups(_tree, level_split, ncrit)
         _lib.tree_compute_forces(_tree)
 
-        ax  = cp.empty(n, dtype=cp.float32)
-        ay  = cp.empty(n, dtype=cp.float32)
-        az  = cp.empty(n, dtype=cp.float32)
-        phi = cp.empty(n, dtype=cp.float32)
+        acc_soa = cp.empty((3, n), dtype=cp.float32)
+        phi     = cp.empty(n, dtype=cp.float32)
 
         _lib.tree_get_acc_device(
             _tree, n,
-            _gpu_ptr(ax), _gpu_ptr(ay), _gpu_ptr(az), _gpu_ptr(phi),
+            _gpu_ptr(acc_soa[0]), _gpu_ptr(acc_soa[1]), _gpu_ptr(acc_soa[2]),
+            _gpu_ptr(phi),
         )
         # cp.cuda.runtime.deviceSynchronize()
 
@@ -383,15 +403,11 @@ def tree_gravity_gpu(
         if owns_tree:
             tree.close()
 
-    acc = cp.stack([ax, ay, az], axis=1)
-
     # The leaf direct sum includes i == j (r = 0, so no force but a potential
     # term -m_i/eps_i under the max-eps convention).  Remove it so phi matches
     # the direct-sum backend; bound-particle criteria (phi + v^2/2 < 0) rely on it.
-    phi += mass / eps_arr
-
-    if G != 1.0:
-        acc *= G
-        phi *= G
+    acc = cp.empty((n, 3), dtype=cp.float32)
+    if n:
+        _finish_kernel(acc_soa, mass, eps_arr, np.float32(G), np.int64(n), acc, phi)
 
     return acc, phi

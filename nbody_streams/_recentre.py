@@ -34,6 +34,7 @@ except ImportError:  # pragma: no cover - CPU-only installs
 _N_CENTRE_SAMPLE = 4096
 
 _sub_cast_kernel = None
+_sub_cast_soa_kernel = None
 _centre_module = None
 
 # One-block reduction over the strided subsample: replaces ~8 small CuPy
@@ -91,6 +92,25 @@ def _gpu_sub_cast(pos, centre):
             "float64 p, raw float64 c", "float32 r",
             "r = (float)(p - c[i % 3])", "nbody_streams_sub_cast")
     return _sub_cast_kernel(pos, centre)
+
+
+def _gpu_sub_cast_soa(pos, centre):
+    """Fused (pos - centre).astype(float32), written as a (3, N) array whose
+    rows are the x, y, z columns (the GPU tree's SoA layout)."""
+    global _sub_cast_soa_kernel
+    if _sub_cast_soa_kernel is None:
+        _sub_cast_soa_kernel = cp.ElementwiseKernel(
+            "raw float64 pos, raw float64 c, int64 n", "raw float32 r",
+            """
+            r[i]       = (float)(pos[3*i]     - c[0]);
+            r[n + i]   = (float)(pos[3*i + 1] - c[1]);
+            r[2*n + i] = (float)(pos[3*i + 2] - c[2]);
+            """, "nbody_streams_sub_cast_soa")
+    n = pos.shape[0]
+    out = cp.empty((3, n), dtype=cp.float32)
+    if n:
+        _sub_cast_soa_kernel(pos, centre, np.int64(n), out, size=n)
+    return out
 
 
 def _gpu_centre(pos, mass):
@@ -173,3 +193,20 @@ def to_float32_relative(pos, mass=None, center=None):
     if on_gpu:
         return _gpu_sub_cast(pos, c), c
     return np.ascontiguousarray((pos - c).astype(np.float32)), c
+
+
+def to_float32_relative_soa(pos, mass=None, center=None):
+    """GPU variant of :func:`to_float32_relative` returning the (3, N) layout.
+
+    Row k is the contiguous k-th coordinate, as the GPU tree reads it; the
+    subtraction, cast and transpose happen in one pass.  ``pos`` must be a
+    CuPy array.  float32 input is only transposed (``centre=None``).
+    """
+    if pos.dtype == cp.float32:
+        return cp.ascontiguousarray(pos.T), None
+    pos = cp.ascontiguousarray(pos, dtype=cp.float64)
+    if center is None:
+        c = estimate_centre(pos, mass)
+    else:
+        c = cp.asarray(center, dtype=cp.float64).reshape(3)
+    return _gpu_sub_cast_soa(pos, c), c
