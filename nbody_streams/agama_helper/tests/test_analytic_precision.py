@@ -12,8 +12,8 @@ Covers
    Dehnen potential at r >> a, isochrone density at r >> b.
 3. Force = -grad(Phi) and deriv = -Hessian (finite differences), so the
    sign folded into the kernels is right.
-4. ``PotentialGPU`` routing: precision reaches the analytic classes; types
-   built as Agama Multipole expansions reject float32.
+4. ``PotentialGPU`` routing: precision reaches the analytic classes and the
+   types Agama builds as Multipole expansions.
 """
 
 import numpy as np
@@ -212,7 +212,9 @@ def test_precision_via_potentialgpu(kw):
     dict(type='Spheroid', mass=1e10),
     dict(type='Dehnen', mass=1e10, axisRatioZ=0.8),
 ])
-def test_multipole_backed_types_reject_float32(kw):
-    with pytest.raises(ValueError, match="precision"):
-        PotentialGPU(**kw, precision='float32')
-    PotentialGPU(**kw, precision='float64')
+def test_multipole_backed_types_take_float32(kw):
+    """Types Agama builds as a Multipole run its mixed-precision kernel."""
+    x = cp.asarray([[1., 2., 3.], [10., -4., 2.]])
+    p32, p64 = PotentialGPU(**kw, precision='float32'), PotentialGPU(**kw)
+    assert (p32.precision, p64.precision) == ('float32', 'float64')
+    assert _rel(p32.force(x), p64.force(x)) < 1e-6

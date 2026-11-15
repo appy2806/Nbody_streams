@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Mixed precision Multipole: `MultipolePotentialGPU(precision='float32')`.**
+  The l > 0 harmonic sums run in float32; r, log r, the l = 0 term with its
+  log-scaling, the extrapolation and the final combination stay float64.
+  Force within ~1e-8 of float64 (max 5e-7) on m12i; 33.5 -> 3.7 ms per 1e6
+  forces at lmax = 8 (12.1 -> 2.1 ms at lmax = 4) on an RTX 3080 Laptop.
+  `precision=` now reaches every component of an INI file or composite,
+  `load_agama_potential` / `load_agama_evolving_potential(gpu=True)`, and the
+  types Agama builds as a Multipole (Spheroid, King, Disk, triaxial Dehnen).
+  The Multipole potential/force kernels read the (N,3) array and write the
+  force directly (no column copies or negation pass), and take cos/sin(phi)
+  from x/R, y/R instead of atan2 + sincos.
+
+### Fixed
+
+- Multipole force exactly on the -z axis had the wrong sign in its x/y
+  component from m = 1 terms (the pole limit of Y_l1/sin(theta) is
+  -dY/dtheta there); also in the Hessian kernel.
+
 - **`precision='float32'` for the analytic GPU potentials.** NFW, Plummer,
   Hernquist, Isochrone, MiyamotoNagai, LogHalo, spherical Dehnen,
   DiskAnsatz and UniformAcceleration (and `PotentialGPU(type=..., precision=)`)

@@ -665,11 +665,20 @@ class MultipolePotentialGPU(_GPUPotBase):
     ----------
     coefs : MultipoleCoefs
         Must include ``dphi_dr`` (use ``_DR`` coefficient files).
+    precision : {'float64', 'float32'}
+        ``'float32'`` runs the l > 0 harmonic sums of ``potential``/``force``
+        in single precision (mixed precision): r, log r, the l = 0 term with
+        its log-scaling and the final combination stay float64, so the error
+        is ~1e-7 times the non-spherical fraction of the force.  Hessian and
+        density stay float64.  Inputs and outputs are float64 either way.
     """
 
-    def __init__(self, coefs, prune_threshold: float = 1e-16) -> None:
+    def __init__(self, coefs, prune_threshold: float = 1e-16,
+                 precision: str = 'float64') -> None:
         data = _build_multipole_data(coefs, prune_threshold=prune_threshold)
+        self._init_from_data(data, precision)
 
+    def _init_from_data(self, data: dict, precision: str) -> None:
         self._d_poly = cp.asarray(data["poly"].ravel(), dtype=cp.float64)
         self._d_lm_l = cp.asarray(data["lm_l"],        dtype=cp.int32)
         self._d_lm_m = cp.asarray(data["lm_m"],        dtype=cp.int32)
@@ -689,6 +698,23 @@ class MultipolePotentialGPU(_GPUPotBase):
         self._outer_U     = float(data["outer_U"])
         self._outer_W     = float(data["outer_W"])
         self._inv_4piG    = _INV_4PIG
+        self._set_precision(precision)
+
+    def _set_precision(self, precision: str) -> None:
+        if precision not in ('float64', 'float32'):
+            raise ValueError(f"precision must be 'float64' or 'float32', got {precision!r}.")
+        mmax = int(cp.abs(self._d_lm_m).max()) if self._n_lm else 0
+        if precision == 'float32' and mmax > 28:
+            # PREFACT[m] underflows float below 1e-38 for m > 28
+            raise ValueError(f"precision='float32' supports |m| <= 28, got mmax={mmax}.")
+        self._precision = precision
+        self._d_polyF = (self._d_poly.astype(cp.float32) if precision == 'float32'
+                         else None)
+
+    @property
+    def precision(self) -> str:
+        """``'float64'``, or ``'float32'`` (mixed precision l > 0 sums)."""
+        return self._precision
 
     # ---- constructors -------------------------------------------------------
 
@@ -702,7 +728,7 @@ class MultipolePotentialGPU(_GPUPotBase):
         return cls(read_coefs(str(path)), **kw)
 
     @classmethod
-    def _from_data(cls, data: dict) -> "MultipolePotentialGPU":
+    def _from_data(cls, data: dict, precision: str = 'float64') -> "MultipolePotentialGPU":
         """Construct from a pre-built data dict (output of _build_multipole_data).
 
         Skips the CPU spline-construction step.  GPU uploads happen here in
@@ -710,24 +736,7 @@ class MultipolePotentialGPU(_GPUPotBase):
         to separate parallel CPU work from sequential GPU upload.
         """
         obj = cls.__new__(cls)
-        obj._d_poly = cp.asarray(data["poly"].ravel(), dtype=cp.float64)
-        obj._d_lm_l = cp.asarray(data["lm_l"],        dtype=cp.int32)
-        obj._d_lm_m = cp.asarray(data["lm_m"],        dtype=cp.int32)
-        obj._logr_min    = float(data["logr_min"])
-        obj._dlogr       = float(data["dlogr"])
-        obj._inv_dlogr   = float(data["inv_dlogr"])
-        obj._n_intervals = int(data["n_intervals"])
-        obj._n_lm        = int(data["n_lm"])
-        obj._lmax        = int(data["lmax"])
-        obj._log_scaling = int(data["log_scaling"])
-        obj._invPhi0     = float(data["invPhi0"])
-        obj._inner_s     = float(data["inner_s"])
-        obj._inner_U     = float(data["inner_U"])
-        obj._inner_W     = float(data["inner_W"])
-        obj._outer_s     = float(data["outer_s"])
-        obj._outer_U     = float(data["outer_U"])
-        obj._outer_W     = float(data["outer_W"])
-        obj._inv_4piG    = _INV_4PIG
+        obj._init_from_data(data, precision)
         return obj
 
     @classmethod
@@ -799,19 +808,36 @@ class MultipolePotentialGPU(_GPUPotBase):
                 np.float64(self._outer_U),
                 np.float64(self._outer_W))
 
-    def _launch_eval(self, d_x, d_y, d_z, N: int, do_grad: bool):
-        """Run potential-only or potential+gradient kernel."""
-        phi_out  = cp.empty(N, dtype=cp.float64)
-        grad_out = cp.empty(3 * N, dtype=cp.float64) if do_grad \
-                   else cp.empty(0, dtype=cp.float64)
+    def _launch_eval(self, arr, do_grad: bool):
+        """Potential, and the force when *do_grad*, for a C-contiguous float64
+        (N,3) array: the kernel reads it directly and writes -grad(Phi)."""
+        N = arr.shape[0]
+        phi_out   = cp.empty(N, dtype=cp.float64)
+        force_out = cp.empty((N, 3), dtype=cp.float64) if do_grad \
+                    else cp.empty(0, dtype=cp.float64)
+        if N == 0:
+            return phi_out, (force_out if do_grad else None)
 
-        kname  = "multipole_force_kernel" if do_grad else "multipole_potential_kernel"
+        kname = "multipole_force_kernel" if do_grad else "multipole_potential_kernel"
+        tables = (self._d_poly,)
+        if self._d_polyF is not None:
+            kname += "_f32"
+            tables = (self._d_poly, self._d_polyF)
         blocks = (N + _THREADS_PER_BLOCK - 1) // _THREADS_PER_BLOCK
         _get_kernel(kname)(
             (blocks,), (_THREADS_PER_BLOCK,),
-            (d_x, d_y, d_z) + self._common_args() + (phi_out, grad_out, np.int32(N)),
+            (arr,) + tables + self._common_args()[1:] + (phi_out, force_out, np.int32(N)),
         )
-        return phi_out, (grad_out if do_grad else None)
+        return phi_out, (force_out if do_grad else None)
+
+    def _sorted_xyz(self, xyz):
+        """Return (arr, was_single, sort_idx_or_None) with arr C-contiguous
+        float64 (N,3), sorted by radius when N >= _SORT_THRESHOLD."""
+        arr, was_single = _prep_xyz(xyz)
+        if arr.shape[0] >= _SORT_THRESHOLD:
+            sidx = cp.argsort(cp.sum(arr * arr, axis=1))
+            return cp.ascontiguousarray(arr[sidx]), was_single, sidx
+        return arr, was_single, None
 
     def _launch_hess(self, d_x, d_y, d_z, N: int):
         """Run potential+gradient+Hessian kernel."""
@@ -870,19 +896,18 @@ class MultipolePotentialGPU(_GPUPotBase):
 
     def potential(self, xyz, t: float = 0.0) -> cp.ndarray:
         """Evaluate Phi.  Returns (N,) or scalar CuPy float64 in (km/s)^2."""
-        d_x, d_y, d_z, N, single, sidx = self._unpack_xyz(xyz)
-        phi, _ = self._launch_eval(d_x, d_y, d_z, N, do_grad=False)
+        arr, single, sidx = self._sorted_xyz(xyz)
+        phi, _ = self._launch_eval(arr, do_grad=False)
         if sidx is not None:
             phi = self._desort(phi, sidx)
         return phi[0] if single else phi
 
     def force(self, xyz, t: float = 0.0) -> cp.ndarray:
         """Evaluate F = -gradPhi.  Returns (3,) or (N,3) CuPy float64 in (km/s)^2/kpc."""
-        d_x, d_y, d_z, N, single, sidx = self._unpack_xyz(xyz)
-        _, grad = self._launch_eval(d_x, d_y, d_z, N, do_grad=True)
+        arr, single, sidx = self._sorted_xyz(xyz)
+        _, force = self._launch_eval(arr, do_grad=True)
         if sidx is not None:
-            grad = self._desort(grad.reshape(N, 3), sidx).ravel()
-        force = -grad.reshape(N, 3)
+            force = self._desort(force, sidx)
         return force[0] if single else force
 
     def density(self, xyz, t: float = 0.0) -> cp.ndarray:
@@ -1582,9 +1607,10 @@ class CylSplinePotentialGPU(_GPUPotBase):
         Parsed coefficient object (from ``read_cylspl_coefs``).
     """
 
-    def __init__(self, coefs) -> None:
-        data = _build_cylspline_data(coefs)
+    def __init__(self, coefs, precision: str = 'float64') -> None:
+        self._init_from_data(_build_cylspline_data(coefs), precision)
 
+    def _init_from_data(self, data: dict, precision: str) -> None:
         nR = len(data["lR_grid"])
         nz = len(data["lz_grid"])
 
@@ -1604,6 +1630,19 @@ class CylSplinePotentialGPU(_GPUPotBase):
         self._lmax_outer  = int(data["lmax_outer"])
         self._mmax_outer  = int(data["mmax_outer"])
         self._inv_4piG    = _INV_4PIG
+        self._set_precision(precision)
+
+    def _set_precision(self, precision: str) -> None:
+        if precision not in ('float64', 'float32'):
+            raise ValueError(f"precision must be 'float64' or 'float32', got {precision!r}.")
+        if precision == 'float32':
+            raise NotImplementedError("CylSplinePotentialGPU precision='float32' is not implemented yet.")
+        self._precision = precision
+
+    @property
+    def precision(self) -> str:
+        """``'float64'``, or ``'float32'`` (mixed precision m != 0 sums)."""
+        return self._precision
 
     # ---- constructors -------------------------------------------------------
 
@@ -1617,30 +1656,14 @@ class CylSplinePotentialGPU(_GPUPotBase):
         return cls(_rc(str(path)), **kw)
 
     @classmethod
-    def _from_data(cls, data: dict) -> "CylSplinePotentialGPU":
+    def _from_data(cls, data: dict, precision: str = 'float64') -> "CylSplinePotentialGPU":
         """Construct from a pre-built data dict (output of _build_cylspline_data).
 
         Skips the CPU spline-construction step.  Used by
         load_agama_evolving_potential(gpu=True) for parallel loading.
         """
         obj = cls.__new__(cls)
-        nR = len(data["lR_grid"])
-        nz = len(data["lz_grid"])
-        obj._d_lR_grid  = cp.asarray(data["lR_grid"])
-        obj._d_lz_grid  = cp.asarray(data["lz_grid"])
-        obj._d_node_arr = cp.asarray(data["node_arr"].ravel())
-        obj._d_m_arr    = cp.asarray(data["m_arr"], dtype=cp.int32)
-        obj._d_W_outer  = cp.asarray(data["W_outer"])
-        obj._Rscale      = float(data["Rscale"])
-        obj._nR          = nR
-        obj._nz          = nz
-        obj._n_harm      = int(data["n_harm"])
-        obj._mmax        = int(data["mmax"])
-        obj._log_scaling = int(data["log_scaling"])
-        obj._r0_outer    = float(data["r0_outer"])
-        obj._lmax_outer  = int(data["lmax_outer"])
-        obj._mmax_outer  = int(data["mmax_outer"])
-        obj._inv_4piG    = _INV_4PIG
+        obj._init_from_data(data, precision)
         return obj
 
     # ---- kernel launch helpers ----------------------------------------------
@@ -2389,17 +2412,19 @@ def _kl(kw: dict) -> dict:
     return {k.lower().replace('_', ''): v for k, v in kw.items()}
 
 
-def _build_spheroid_gpu(**kw):
+def _build_spheroid_gpu(precision='float64', **kw):
     """Spheroid via Agama CPU -> Multipole export -> MultipolePotentialGPU.
     Caller may override with lmax=N (kernel supports up to lmax=32)."""
     import agama
-    return MultipolePotentialGPU.from_agama(agama.Potential(type='Spheroid', **kw))
+    return MultipolePotentialGPU.from_agama(agama.Potential(type='Spheroid', **kw),
+                                            precision=precision)
 
 
-def _build_king_gpu(**kw):
+def _build_king_gpu(precision='float64', **kw):
     """King via Agama CPU -> Multipole export -> MultipolePotentialGPU."""
     import agama
-    return MultipolePotentialGPU.from_agama(agama.Potential(type='King', **kw))
+    return MultipolePotentialGPU.from_agama(agama.Potential(type='King', **kw),
+                                            precision=precision)
 
 
 def _build_dehnen_gpu(**kw):
@@ -2433,17 +2458,13 @@ def _build_dehnen_gpu(**kw):
 
     # Triaxial or gamma=2: route through Agama as Spheroid(alpha=1, beta=4).
     prec = _pop_ci(kw, 'precision', 'float64')
-    if prec != 'float64':
-        raise ValueError(
-            f"precision={prec!r} is not available for a triaxial or gamma=2 Dehnen: "
-            "it is built as an Agama Multipole expansion, which runs in float64.")
     import agama
     return MultipolePotentialGPU.from_agama(
-        agama.Potential(type='Spheroid', alpha=1, beta=4, **kw)
+        agama.Potential(type='Spheroid', alpha=1, beta=4, **kw), precision=prec
     )
 
 
-def _build_disk_gpu(**kw):
+def _build_disk_gpu(precision='float64', **kw):
     """
     Full Disk potential via Agama CPU: DiskAnsatz + axisymmetric Multipole(lmax=32).
 
@@ -2469,6 +2490,7 @@ def _build_disk_gpu(**kw):
         scaleRadius       = float(kl.get('scaleradius', 1.0)),
         scaleHeight       = float(kl.get('scaleheight', 0.1)),
         innerCutoffRadius = float(kl.get('innercutoffradius', 0.0)),
+        precision         = precision,
     )
 
     # Build the Agama Disk and export to extract the Multipole section.
@@ -2509,7 +2531,7 @@ def _build_disk_gpu(**kw):
     except ImportError:
         from _coefs import read_coefs as _read_coefs
 
-    multipole_gpu = MultipolePotentialGPU(_read_coefs(multipole_text))
+    multipole_gpu = MultipolePotentialGPU(_read_coefs(multipole_text), precision=precision)
     return CompositePotentialGPU([disk_gpu, multipole_gpu])
 
 
@@ -2732,7 +2754,7 @@ def _is_potential_ini(p: Path) -> bool:
     return bool(__import__('re').search(r'^\[Potential', head, __import__('re').IGNORECASE | __import__('re').MULTILINE))
 
 
-def _load_potential_ini(p: Path):
+def _load_potential_ini(p: Path, precision: str = 'float64'):
     """
     Parse an Agama-style INI potential file (one or more ``[Potential ...]``
     sections) and return a single GPU potential or CompositePotentialGPU.
@@ -2747,6 +2769,9 @@ def _load_potential_ini(p: Path):
     * ``type=DiskAnsatz`` : **skipped** (Agama exports this without parameters; use
       ``type=Disk`` to get a full DiskAnsatz+Multipole composite via ``_build_disk_gpu``).
     * Everything else : dispatched via ``_build_single(params_dict)``.
+
+    *precision* is passed to every component (a ``precision=`` key in a
+    section overrides it for that section).
     """
     import re as _re
     base = p.parent
@@ -2801,7 +2826,7 @@ def _load_potential_ini(p: Path):
                 from nbody_streams.agama_helper import read_coefs as _rc
             except ImportError:
                 from _coefs import read_coefs as _rc
-            built.append(MultipolePotentialGPU(_rc(section_text)))
+            built.append(MultipolePotentialGPU(_rc(section_text), precision=precision))
             continue
 
         # ---- Multipole: file= reference ----
@@ -2815,7 +2840,7 @@ def _load_potential_ini(p: Path):
             coef_path = Path(coef_file)
             if not coef_path.is_absolute():
                 coef_path = base / coef_path
-            built.append(MultipolePotentialGPU.from_file(coef_path))
+            built.append(MultipolePotentialGPU.from_file(coef_path, precision=precision))
             continue
 
         # ---- CylSpline: inline Coefficients or file= reference ----
@@ -2826,7 +2851,7 @@ def _load_potential_ini(p: Path):
                     from nbody_streams.agama_helper import read_coefs as _rc
                 except ImportError:
                     from _coefs import read_coefs as _rc
-                built.append(CylSplinePotentialGPU(_rc(section_text)))
+                built.append(CylSplinePotentialGPU(_rc(section_text), precision=precision))
             else:
                 coef_file = str(params.get('file') or params.get('File', ''))
                 if not coef_file:
@@ -2837,7 +2862,7 @@ def _load_potential_ini(p: Path):
                 coef_path = Path(coef_file)
                 if not coef_path.is_absolute():
                     coef_path = base / coef_path
-                built.append(CylSplinePotentialGPU.from_file(coef_path))
+                built.append(CylSplinePotentialGPU.from_file(coef_path, precision=precision))
             continue
 
         # ---- UniformAcceleration: file= holds the acceleration table ----
@@ -2851,7 +2876,8 @@ def _load_potential_ini(p: Path):
             acc_path = Path(str(acc_file))
             if not acc_path.is_absolute():
                 acc_path = base / acc_path
-            built.append(PotentialGPU(type='UniformAcceleration', file=acc_path))
+            built.append(PotentialGPU(type='UniformAcceleration', file=acc_path,
+                                      precision=precision))
             continue
 
         # ---- Evolving: parse Timestamps block ----
@@ -2877,7 +2903,7 @@ def _load_potential_ini(p: Path):
                 if not snap_path.is_absolute():
                     snap_path = base / snap_path
                 times.append(t_val)
-                pots.append(_build_single(snap_path, {}))
+                pots.append(_build_single(snap_path, {'precision': precision}))
             if not pots:
                 raise ValueError(
                     f"Evolving section in {p} has no valid Timestamps entries."
@@ -2889,7 +2915,7 @@ def _load_potential_ini(p: Path):
             continue
 
         # ---- Everything else: dispatch via _build_single(dict) ----
-        built.append(_build_single(params, {}))
+        built.append(_build_single(params, {'precision': precision}))
 
     if not built:
         raise ValueError(
@@ -2926,6 +2952,7 @@ def _build_single(source, pot_kw: dict):
         am_   = float(_pop_ci(d, 'ampl') or 1.0)
         or_   = _pop_ci(d, 'orientation')
         rot_  = _pop_ci(d, 'rotation')
+        prec_ = _pop_ci(d, 'precision', pot_kw.get('precision', 'float64'))
         # Do NOT normalize here: Agama-routed factories (Spheroid, King, Disk)
         # pass kwargs directly to agama.Potential which is case-insensitive.
         # GPU-native constructors (NFW, Plummer, …) normalize inside PotentialGPU.
@@ -2935,21 +2962,21 @@ def _build_single(source, pot_kw: dict):
             coef_ref = str(d.pop('file', None) or '')
             if not coef_ref:
                 raise ValueError("CylSpline component dict requires a 'file' key.")
-            pot = CylSplinePotentialGPU.from_file(coef_ref)
+            pot = CylSplinePotentialGPU.from_file(coef_ref, precision=prec_)
         elif type_k == 'multipole':
             coef_ref = str(d.pop('file', None) or '')
             if not coef_ref:
                 raise ValueError("Multipole component dict requires a 'file' key.")
-            pot = MultipolePotentialGPU.from_file(coef_ref)
+            pot = MultipolePotentialGPU.from_file(coef_ref, precision=prec_)
         else:
-            pot = PotentialGPU(type=type_s, **d)
+            pot = PotentialGPU(type=type_s, precision=prec_, **d)
         return _apply_modifiers(pot, cen_, sc_, am_, or_, rot_)
 
     if isinstance(source, (str, Path)):
         p = Path(source)
         # Check for Agama-style coefficient/INI file (starts with [Potential])
         if _is_potential_ini(p):
-            return _load_potential_ini(p)
+            return _load_potential_ini(p, precision=pot_kw.get('precision', 'float64'))
         return MultipolePotentialGPU.from_file(source, **pot_kw)
 
     # NOTE: an agama.Potential also has callable .potential/.force, so it must be
@@ -3140,22 +3167,16 @@ def PotentialGPU(*args,
             # Agama-routed factory (_build_spheroid_gpu, _build_disk_gpu, …):
             # pass kwargs through unchanged — agama.Potential is case-insensitive
             # and the factory handles its own internal normalization via _kl.
-            # These end up (at least partly) as Multipole expansions, which are
-            # double precision only; spherical Dehnen alone reads precision=.
+            # precision= is consumed by the factory (normalised to this name).
             prec = _pop_ci(kw, 'precision', 'float64')
-            if key in ('dehnen', 'dehnensph'):
-                kw['precision'] = prec
-            elif prec != 'float64':
-                raise ValueError(
-                    f"precision={prec!r} is not available for type={type!r}: it is "
-                    "built as an Agama Multipole expansion, which runs in float64.")
-            pot = cls(**kw)
+            pot = cls(precision=prec, **kw)
         return _apply_modifiers(pot, center, scale, ampl, orientation, rotation)
 
     # --- file= shorthand ---
     if file is not None:
         p = Path(file)
-        pot = _load_potential_ini(p) if _is_potential_ini(p) \
+        pot = _load_potential_ini(p, precision=pot_kw.get('precision', 'float64')) \
+              if _is_potential_ini(p) \
               else MultipolePotentialGPU.from_file(file, **pot_kw)
         return _apply_modifiers(pot, center, scale, ampl, orientation, rotation)
 

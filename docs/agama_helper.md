@@ -736,9 +736,35 @@ float32 (and to a lesser degree float64) loses digits to cancellation:
 Float32 `exp(-r/hr)` in `DiskAnsatz` still carries ~eps r/hr, i.e. ~1e-6 at
 r = 30 kpc, where that term is negligible.
 
-Types built as an Agama Multipole expansion (static `Spheroid`, `King`,
-`Disk`, triaxial or γ=2 `Dehnen`) and the Multipole/CylSpline classes are
-float64 only; `precision='float32'` raises for them.
+**Multipole: mixed precision.** `MultipolePotentialGPU(precision='float32')`
+(also `PotentialGPU(file=..., precision='float32')`, every component of an
+INI file or composite, `load_agama_potential(..., gpu=True,
+precision='float32')`, and the types Agama builds as a Multipole: static
+`Spheroid`, `King`, `Disk`, triaxial or γ=2 `Dehnen`) splits the work. With
+Agama's log-scaling every l > 0 coefficient is stored as the ratio
+Φ_lm/Φ_0, so
+
+    Φ = C0 (MUL0 Y00 + S),           S = Σ ratio_lm Y_lm T_m
+    dΦ/dln r = dC0 (MUL0 Y00 + S) + C0 S_r,   dΦ/dθ = C0 S_θ, ...
+
+r, log r, the radial cell, the l = 0 spline and its log-scaling inverse
+(which cancels), the extrapolation off the grid and the final combination
+stay float64; the l > 0 sums (Legendre and cos/sin(mφ) recurrences, the
+quintic splines from a float copy of the table) run in float32. The sums are
+the non-spherical correction, ~7% of the force for m12i, so the error is
+~1e-7 times that. Hessian and density stay float64.
+
+m12i z = 0 DM halo, 1e6 particles at 1-200 kpc, RTX 3080 Laptop:
+
+| | lmax = 4 | lmax = 8 |
+|---|---|---|
+| force, float64 | 12.1 ms | 33.5 ms |
+| force, float32 (mixed) | 2.1 ms | 3.7 ms |
+| force error vs float64, median / max | 1e-8 / 3e-7 | 1.5e-8 / 5e-7 |
+| tidal ΔF over 1 pc at 40 kpc, median | 4e-4 | 7e-4 (pure float32: 4e-3) |
+
+float32 needs |m| ≤ 28 (PREFACT[m] underflows float beyond). The CylSpline
+is float64 only for now.
 `run_simulation`'s `precision=` sets the self-gravity only: set the host's
 precision on the potential.
 
