@@ -1213,15 +1213,13 @@ def _determine_asympt_cylspline(
         for l_idx in range(ncols):
             W[(absm + l_idx) * (absm + l_idx + 1) + m] = float(sol[l_idx])
 
-    # Agama fits every (l, m) above, but PowerLawMultipole takes its set of
-    # evaluated terms from the U array, which CylSpline passes as all zeros:
-    # the asymptote is then evaluated with full symmetry, i.e. only the m = 0,
-    # even-l coefficients (checked against agama 1.0.160 off the grid).  Keep
-    # exactly those, so that Phi off the grid and Mtot (hence Rscale) match.
-    for l in range(lmax_fit + 1):
-        for m in range(-l, l + 1):
-            if m != 0 or l % 2:
-                W[l * (l + 1) + m] = 0.0
+    # All fitted (l, m) terms are kept.  Agama fits the same terms but then
+    # evaluates only the m = 0, even-l ones: PowerLawMultipole takes its (l, m)
+    # set from the U array, which CylSpline's determineAsympt passes as zeros,
+    # so the asymptote gets full symmetry (agama 1.0.160).  That drops the
+    # non-axisymmetric and z-asymmetric part of the potential off the grid;
+    # here it is kept, so the potential is continuous across the grid edge.
+    # Only Rscale is computed from Agama's terms (see _build_cylspline_data).
 
     # Safeguard: if W[0] is not finite, fall back to average monopole amplitude
     if not np.isfinite(W[0]):
@@ -1540,13 +1538,17 @@ def _build_cylspline_data(coefs) -> dict:
     mmax_outer  = min(lmax_outer, mmax)
 
     # Mtot = -(asymptOuter at r = R_max) * R_max, as Agama's CylSpline
-    # constructor: asymptOuter->value(PosSph(gridR.back(), 0, 0)), i.e. the full
-    # expansion on the z axis (theta = 0), where only m = 0 terms survive:
-    #   Phi = MUL0 * sum_l W[l(l+1)] (r0/R_max)^(l+1) P_l^0(1)
+    # constructor: asymptOuter->value(PosSph(gridR.back(), 0, 0)), the asymptote
+    # on the z axis.  Agama evaluates its asymptote with only the m = 0, even-l
+    # terms (see _determine_asympt_cylspline), so those are used here:
+    #   Phi = MUL0 * sum_{l even} W[l(l+1)] (r0/R_max)^(l+1) P_l^0(1)
+    # Rscale only sets the asinh coordinates of the spline, but the spline
+    # interpolation depends on it, so it must equal Agama's to reproduce
+    # Agama on the grid.
     R_max = float(R_grid[-1])
     Pl0 = _sph_harm_agama_vect(lmax_outer, 0, np.ones(1), np.zeros(1))[0]
     Phi_pole = _CS_MUL0 * sum(W_outer[l * (l + 1)] * (r0_outer / R_max) ** (l + 1) * Pl0[l]
-                              for l in range(lmax_outer + 1))
+                              for l in range(0, lmax_outer + 1, 2))
     Mtot = -Phi_pole * R_max
 
     if Phi0 < 0.0 and Mtot > 0.0:

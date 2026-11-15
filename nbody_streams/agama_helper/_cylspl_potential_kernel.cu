@@ -170,88 +170,153 @@ __device__ __forceinline__ void evalCubic4_in_z(
 }
 
 // ---------------------------------------------------------------------------
-//  sphHarm_device --- compute normalized associated Legendre polynomials
-//  P_l^m(tau) for l = m..lmax using Agama's normalization (tau = z/(R+r)).
+//  sphHarmDeriv_device --- normalised associated Legendre functions
+//  Y_l^m(theta) = N_lm P_l^m(cos theta) for l = m..lmax (Agama's normalisation,
+//  without the MUL factor) and their first and second theta-derivatives.
 //
-//  cos(theta) = 2*tau/(1+tau^2),  sin(theta) = (1-tau^2)/(1+tau^2).
-//  prefact_{l,m} is updated iteratively; result[l-m] = P_l^m * prefact.
-//
-//  Matches Agama's sphHarmArray(lmax, m, tau, result).
+//  Three-term recurrence (un-normalised), differentiated term by term so that
+//  nothing is divided by sin(theta) and the derivatives stay accurate near
+//  the axis:
+//    P_l  = ((2l-1) ct P_{l-1} - (l+m-1) P_{l-2}) / (l-m)
+//    P_l' = ((2l-1) (ct P_{l-1}' - st P_{l-1}) - (l+m-1) P_{l-2}') / (l-m)
+//    P_l''= ((2l-1) (ct P_{l-1}'' - 2 st P_{l-1}' - ct P_{l-1}) - (l+m-1) P_{l-2}'') / (l-m)
 // ---------------------------------------------------------------------------
 
-__device__ void sphHarm_device(
+__device__ void sphHarmDeriv_device(
     int lmax, int m, double ct, double st,
-    double* result)   // output: lmax - m + 1 values
+    double* Y, double* dY, double* d2Y)   // lmax - m + 1 values each
 {
-    // P_m^m = COEF[m] * sin^m(theta)
-    double prefact = CS_PREFACT[m];
-    double val;
-    if (m == 0) {
-        val = prefact;
-    } else {
-        // COEF[m] = (-1)^m * (2m-1)!! * PREFACT[m]  (stored with sign)
-        double sinm_val = 1.0;
-        for (int k = 0; k < m; k++) sinm_val *= st;  // st^m
-        val = CS_COEF[m] * sinm_val / st / st;       // COEF[m] * st^(m-2) * st^2
-        // Simplify: just use COEF[m] * st^m  but COEF stores prefact * (-1)^m * dfact
-        // Re-derive: val = CS_COEF[m] * pow(st, m)
-        // But COEF[m] already encodes prefact * (-1)^m * (2m-1)!!
-        // From Agama: value = COEF[m] * sinm2 * st^2  where sinm2 = st^(m-2)
-        // => value = COEF[m] * st^m
-        val = CS_COEF[m];
-        for (int k = 0; k < m; k++) val *= st;
-    }
-    result[0] = val;
+    // P_m^m = COEF[m] / PREFACT[m] * st^m  (COEF = (-1)^m (2m-1)!! PREFACT)
+    const double c0 = CS_COEF[m] / CS_PREFACT[m];
+    double stm2 = 1.0;                                   // st^(m-2), m >= 2
+    for (int k = 2; k < m; k++) stm2 *= st;
+    const double stm1 = (m >= 1) ? ((m >= 2) ? stm2 * st : 1.0) : 0.0;
+    const double stm  = (m >= 1) ? stm1 * st : 1.0;
+    double P   = c0 * stm;
+    double dP  = (m >= 1) ? c0 * m * stm1 * ct : 0.0;
+    double d2P = (m >= 2) ? c0 * m * ((m - 1) * stm2 * ct * ct - stm)
+               : (m == 1) ? -c0 * st : 0.0;
+
+    double N = CS_PREFACT[m];                            // N_mm
+    Y[0] = P * N; dY[0] = dP * N; d2Y[0] = d2P * N;
     if (lmax == m) return;
 
-    // P_{m+1}^m = ct * (2m+1) * P_m^m / prefact_m  * prefact_{m+1}
-    // prefact_{m+1} = prefact_m * sqrt((2m+3)/(2m+1) * 1/(2m+1))... use recurrence
-    double Plm1 = result[0] / prefact;           // un-normalized P_m^m
-    double Plm  = ct * (2*m + 1) * Plm1;         // un-normalized P_{m+1}^m
+    // l = m+1
+    double P1   = ct * (2*m + 1) * P;
+    double dP1  = (2*m + 1) * (ct * dP - st * P);
+    double d2P1 = (2*m + 1) * (ct * d2P - 2.0 * st * dP - ct * P);
+    N *= sqrt((double)(2*m + 3) / (2*m + 1) / (2.0*m + 1.0));
+    Y[1] = P1 * N; dY[1] = dP1 * N; d2Y[1] = d2P1 * N;
 
-    // l = m+1: N_{m+1,m} = N_{m,m} * sqrt((2m+3)/(2m+1) * 1/(2m+1))
-    // General recurrence: N_{l,m} *= sqrt((2l+1)/(2l-1) * (l-m)/(l+m))
-    // For l=m+1: (l+m) = 2m+1, (l-m) = 1
-    prefact *= sqrt((double)(2*m + 3) / (2*m + 1) / (2.0*m + 1.0));
-    result[1] = Plm * prefact;
-
+    double Pa = P,  dPa = dP,  d2Pa = d2P;                // P_{l-2}
+    double Pb = P1, dPb = dP1, d2Pb = d2P1;               // P_{l-1}
     for (int l = m + 2; l <= lmax; l++) {
-        // P_l = ((2l-1) ct P_{l-1} - (l+m-1) P_{l-2}) / (l-m), with Plm = P_{l-1}
-        // and Plm1 = P_{l-2} (this used the stale P_{l-3} before)
-        double Plm_new = (ct * (2*l - 1) * Plm - (double)(l + m - 1) * Plm1) / (l - m);
-        prefact *= sqrt((double)(2*l + 1) / (2*l - 1) * (double)(l - m) / (l + m));
-        result[l - m] = Plm_new * prefact;
-        Plm1 = Plm;
-        Plm  = Plm_new;
+        const double a = (double)(2*l - 1), b = (double)(l + m - 1), inv = 1.0 / (l - m);
+        const double Pn   = (a * ct * Pb - b * Pa) * inv;
+        const double dPn  = (a * (ct * dPb - st * Pb) - b * dPa) * inv;
+        const double d2Pn = (a * (ct * d2Pb - 2.0 * st * dPb - ct * Pb) - b * d2Pa) * inv;
+        N *= sqrt((double)(2*l + 1) / (2*l - 1) * (double)(l - m) / (l + m));
+        Y[l - m] = Pn * N; dY[l - m] = dPn * N; d2Y[l - m] = d2Pn * N;
+        Pa = Pb; dPa = dPb; d2Pa = d2Pb;
+        Pb = Pn; dPb = dPn; d2Pb = d2Pn;
     }
 }
 
 // ---------------------------------------------------------------------------
-//  eval_outer_asympt --- PowerLaw multipole for points outside the grid.
-//
-//  Phi(r) = sum_{l,m} W[l*(l+1)+m_lin] * (r0/r)^(l+1) * Y_lm(theta, phi)
-//           / r0   [units: same as W array]
-//
-//  Actually: Phi = sum_l sum_m W[lm] * (r/r0)^{-(l+1)} * Y_lm
-//  where Y_lm = P_l^|m|(tau) * MUL * cos/sin(m*phi).
-//
-//  W_outer is indexed as W[l*(l+1) + m_index] where m_index runs from
-//  -mmax_outer to mmax_outer (so it's stored with offset mmax_outer in each l).
-//
-//  Force and hessian: only monopole analytic + full numeric for now.
-//  For simplicity: analytic closed-form gradient for monopole,
-//  and numerical central difference for higher terms would be too slow.
-//  Instead: implement closed-form derivatives via chain rule.
-//
-//  Gradient:
-//    dPhi/dr       = sum W[lm] * (-(l+1)/r) * (r0/r)^(l+1) / r0 * Y_lm ... wait
-//    Phi = sum W[lm] * (r/r0)^{-(l+1)} * Y_lm    (Y_lm has no r dependence)
-//    dPhi/dr = sum W[lm] * (-(l+1)/r) * (r/r0)^{-(l+1)} * Y_lm
-//
-//  d(Y_lm)/dtheta uses the derivative of the normalized Legendre polynomial
-//  which we don't compute here. For simplicity, we only return force,
-//  not hessian, in the outer region.
+//  cyl_hess_to_cart --- Cartesian Hessian from derivatives in (R, phi, z), R > 0.
+//  With c = cos(phi), s = sin(phi): d/dx = c d/dR - (s/R) d/dphi,
+//  d/dy = s d/dR + (c/R) d/dphi, which also give first-derivative terms.
+//  Output layout [Hxx, Hyy, Hzz, Hxy, Hyz, Hxz].
 // ---------------------------------------------------------------------------
+
+__device__ __forceinline__ void cyl_hess_to_cart(
+    double x, double y, double R,
+    double Phi_R, double Phi_p, double Phi_RR, double Phi_Rp, double Phi_pp,
+    double Phi_zz, double Phi_Rz, double Phi_zp, double* H)
+{
+    const double c = x / R, s = y / R, iR = 1.0 / R, iR2 = iR * iR;
+    const double cc = c*c, ss = s*s, cs = c*s;
+    H[0] = cc*Phi_RR - 2.0*cs*iR*Phi_Rp + ss*iR2*Phi_pp + ss*iR*Phi_R + 2.0*cs*iR2*Phi_p;
+    H[1] = ss*Phi_RR + 2.0*cs*iR*Phi_Rp + cc*iR2*Phi_pp + cc*iR*Phi_R - 2.0*cs*iR2*Phi_p;
+    H[2] = Phi_zz;
+    H[3] = cs*Phi_RR + (cc - ss)*iR*Phi_Rp - cs*iR2*Phi_pp - cs*iR*Phi_R - (cc - ss)*iR2*Phi_p;
+    H[4] = s*Phi_Rz + c*iR*Phi_zp;
+    H[5] = c*Phi_Rz - s*iR*Phi_zp;
+}
+
+// ---------------------------------------------------------------------------
+//  Outer asymptote (points off the grid): the PowerLaw multipole fitted to
+//  the grid boundary by _determine_asympt_cylspline,
+//    Phi = sum_{l,m} W_lm (r0/r)^(l+1) MUL_m Y_l^|m|(theta) trig_m(phi),
+//  trig = cos(m phi) for m >= 0, sin(|m| phi) for m < 0.  All (l, m) terms
+//  are used (Agama evaluates only m = 0, even l; see the Python fit).
+//
+//  outer_asympt_core needs R > 0; eval_outer_asympt handles the z axis.
+// ---------------------------------------------------------------------------
+
+__device__ void outer_asympt_core(
+    double x, double y, double z,
+    const double* __restrict__ W_outer, double r0_outer,
+    int lmax_outer, int mmax_outer,
+    double* phi_out, double* grad_out, double* hess_out)
+{
+    const double R2 = x*x + y*y, R = sqrt(R2);
+    const double r  = sqrt(R2 + z*z), rinv = 1.0 / r;
+    const double ct = z * rinv, st = R * rinv;
+    const double cph = x / R, sph = y / R;
+
+    // spherical derivatives: value, d/dr, d/dth, d/dphi and second derivatives
+    double P = 0, Pr = 0, Pt = 0, Pp = 0, Prr = 0, Prt = 0, Ptt = 0, Prp = 0, Ptp = 0, Ppp = 0;
+
+    double Ybuf[9], dYbuf[9], d2Ybuf[9];    // lmax_outer <= 8
+    double cm = 1.0, sm = 0.0;              // cos/sin(m phi)
+    for (int m = 0; m <= mmax_outer; m++) {
+        sphHarmDeriv_device(lmax_outer, m, ct, st, Ybuf, dYbuf, d2Ybuf);
+        const double MUL = (m == 0) ? CS_MUL0 : CS_MUL1;
+        double pw = r0_outer * rinv;
+        for (int k = 0; k < m; k++) pw *= r0_outer * rinv;      // (r0/r)^(m+1)
+        for (int l = m; l <= lmax_outer; l++) {
+            double A, Ap;                                       // angular factor, d/dphi
+            if (m == 0) { A = W_outer[l*(l+1)]; Ap = 0.0; }
+            else {
+                const double Wc = W_outer[l*(l+1) + m], Ws = W_outer[l*(l+1) - m];
+                A  = Wc * cm + Ws * sm;
+                Ap = m * (Ws * cm - Wc * sm);
+            }
+            const double App = -(double)(m * m) * A;
+            const double Y = MUL * Ybuf[l - m], dY = MUL * dYbuf[l - m], d2Y = MUL * d2Ybuf[l - m];
+            const double f = pw, fr = -(l + 1) * rinv * pw, frr = (double)((l + 1) * (l + 2)) * rinv * rinv * pw;
+            P   += f * Y * A;
+            Pr  += fr * Y * A;   Pt  += f * dY * A;   Pp  += f * Y * Ap;
+            Prr += frr * Y * A;  Prt += fr * dY * A;  Ptt += f * d2Y * A;
+            Prp += fr * Y * Ap;  Ptp += f * dY * Ap;  Ppp += f * Y * App;
+            pw *= r0_outer * rinv;
+        }
+        const double t = cm * cph - sm * sph; sm = sm * cph + cm * sph; cm = t;
+    }
+
+    if (phi_out) *phi_out = P;
+    if (!grad_out && !hess_out) return;
+
+    // (r, theta) -> (R, z): polar formulas in the (z, R) plane, theta from z
+    const double c = ct, s = st, ri2 = rinv * rinv;
+    const double Phi_R = s * Pr + c * rinv * Pt;
+    const double Phi_z = c * Pr - s * rinv * Pt;
+    if (grad_out) {
+        grad_out[0] = cph * Phi_R - sph / R * Pp;
+        grad_out[1] = sph * Phi_R + cph / R * Pp;
+        grad_out[2] = Phi_z;
+    }
+    if (hess_out) {
+        const double Phi_RR = s*s*Prr - 2.0*s*c*ri2*Pt + 2.0*s*c*rinv*Prt + c*c*rinv*Pr + c*c*ri2*Ptt;
+        const double Phi_zz = c*c*Prr + 2.0*c*s*ri2*Pt - 2.0*c*s*rinv*Prt + s*s*rinv*Pr + s*s*ri2*Ptt;
+        const double Phi_Rz = s*c*Prr + (c*c - s*s)*rinv*Prt - s*c*rinv*Pr - s*c*ri2*Ptt
+                            - (c*c - s*s)*ri2*Pt;
+        const double Phi_Rp = s * Prp + c * rinv * Ptp;
+        const double Phi_zp = c * Prp - s * rinv * Ptp;
+        cyl_hess_to_cart(x, y, R, Phi_R, Pp, Phi_RR, Phi_Rp, Ppp, Phi_zz, Phi_Rz, Phi_zp, hess_out);
+    }
+}
 
 __device__ void eval_outer_asympt(
     double x, double y, double z,
@@ -260,159 +325,28 @@ __device__ void eval_outer_asympt(
     int lmax_outer, int mmax_outer,
     double* phi_out,
     double* grad_out,  // NULL if not needed
-    double* hess_out   // NULL if not needed (set to 0)
+    double* hess_out   // NULL if not needed
 )
 {
-    double R2   = x*x + y*y;
-    double R    = sqrt(R2);
-    double r    = sqrt(R2 + z*z);
-    double rinv = 1.0 / r;
-
-    // tau = z/(R+r), ct = z/r, st = R/r
-    double ct = z * rinv;
-    double st = R * rinv;
-
-    double phi_val = 0.0;
-    double dPhi_dr  = 0.0;
-    double dPhi_dphi = 0.0;  // d(Phi)/dphi
-    double dPhi_dth  = 0.0;  // d(Phi)/dtheta
-    // second derivatives in (r, theta) of the m = 0 terms (Hessian only)
-    double d2Phi_drr = 0.0, d2Phi_drth = 0.0, d2Phi_dthth = 0.0;
-
-    // Trig recurrence for phi angle: angle = atan2(y, x)
-    // cos(m*phi), sin(m*phi) via rolling state
-    double phi_ang   = atan2(y, x);
-    double cos_phi_1 = cos(phi_ang);
-    double sin_phi_1 = sin(phi_ang);
-    double cos_mphi  = 1.0;   // cos(0*phi) = 1
-    double sin_mphi  = 0.0;   // sin(0*phi) = 0
-
-    // Legendre buffer: lmax_outer+1 values for current m
-    // Use a fixed-size buffer (lmax_outer <= 8, so 9 entries)
-    double Plm_buf[9];
-    // derivative buffer (d/dtheta): dY_lm/dtheta is complex; skip for hessian
-
-    for (int m = 0; m <= mmax_outer; m++) {
-        // Compute P_l^m(tau) for l=m..lmax_outer
-        sphHarm_device(lmax_outer, m, ct, st, Plm_buf);
-
-        double MUL = (m == 0) ? CS_MUL0 : CS_MUL1;
-
-        for (int l = m; l <= lmax_outer; l++) {
-            double factor = 1.0;
-            // (r/r0)^{-(l+1)}
-            double r_ratio = r0_outer * rinv;  // r0/r
-            double pow_val = r_ratio;           // (r0/r)^1
-            for (int k = 1; k <= l; k++) pow_val *= r_ratio;  // (r0/r)^{l+1}
-            // = (r/r0)^{-(l+1)}
-
-            double Ylm_base = Plm_buf[l - m] * MUL;
-            // dY/dtheta = (l ct Y_l - sqrt((2l+1)/(2l-1) (l-m)(l+m)) Y_{l-1}) / st
-            // (normalised P_l^m; Y_{m-1}^m = 0).  It vanishes on the axis for
-            // m != 1; the m = 1 axis limit is dropped (those terms are zero,
-            // see _determine_asympt_cylspline).
-            double dYlm = 0.0;
-            if (st > 1e-10) {
-                double Yprev = (l > m) ? Plm_buf[l - 1 - m] : 0.0;
-                dYlm = ((double)l * ct * Plm_buf[l - m]
-                        - sqrt((2.0*l + 1) / (2.0*l - 1) * (double)(l - m) * (l + m)) * Yprev)
-                       / st * MUL;
-            }
-
-            if (m == 0) {
-                int widx = l*(l+1);  // m=0
-                phi_val += W_outer[widx] * pow_val * Ylm_base;
-                dPhi_dr += W_outer[widx] * (-(l+1)) * rinv * pow_val * Ylm_base;
-                dPhi_dth += W_outer[widx] * pow_val * dYlm;
-                if (hess_out) {
-                    // Legendre's equation (m = 0): Y'' = -cot(theta) Y' - l(l+1) Y;
-                    // on the axis Y'' = -l(l+1)/2 Y
-                    double d2Y = (st > 1e-6)
-                        ? -ct / st * dYlm - (double)(l * (l + 1)) * Ylm_base
-                        : -0.5 * (double)(l * (l + 1)) * Ylm_base;
-                    double a = W_outer[widx] * pow_val;          // (r0/r)^(l+1) W
-                    d2Phi_drr   += (double)((l + 1) * (l + 2)) * rinv * rinv * a * Ylm_base;
-                    d2Phi_drth  += -(double)(l + 1) * rinv * a * dYlm;
-                    d2Phi_dthth += a * d2Y;
-                }
-            } else {
-                int widx_c = l*(l+1) + m;   // cos harmonic
-                int widx_s = l*(l+1) - m;   // sin harmonic (m<0 stored as -m)
-                double Wcos = W_outer[widx_c];
-                double Wsin = W_outer[widx_s];
-
-                double trig_c  = cos_mphi;
-                double trig_s  = sin_mphi;
-                double d_trig_c = -(double)m * sin_mphi;  // d(cos(m*phi))/dphi
-                double d_trig_s =  (double)m * cos_mphi;  // d(sin(m*phi))/dphi
-
-                double contrib = pow_val * Ylm_base * (Wcos * trig_c + Wsin * trig_s);
-                phi_val += contrib;
-                dPhi_dr += (-(l+1)) * rinv * contrib;
-                dPhi_dth += pow_val * dYlm * (Wcos * trig_c + Wsin * trig_s);
-                dPhi_dphi += pow_val * Ylm_base * (Wcos * d_trig_c + Wsin * d_trig_s);
-            }
-        }
-
-        // Update rolling trig state: cos((m+1)*phi) = 2cos(phi)*cos(mphi) - cos((m-1)*phi)
-        if (m == 0) {
-            cos_mphi = cos_phi_1;
-            sin_mphi = sin_phi_1;
-        } else {
-            double c_new = 2.0 * cos_phi_1 * cos_mphi - (m == 1 ? 1.0 : /* previous */ cos_mphi);
-            // Actually need to track previous; use a simpler direct recurrence
-            // For small mmax (<=8), just use cos/sin directly:
-            cos_mphi = cos((double)(m + 1) * phi_ang);
-            sin_mphi = sin((double)(m + 1) * phi_ang);
-        }
+    const double R = sqrt(x*x + y*y), r = sqrt(x*x + y*y + z*z);
+    if (R > 1e-6 * r) {
+        outer_asympt_core(x, y, z, W_outer, r0_outer, lmax_outer, mmax_outer,
+                          phi_out, grad_out, hess_out);
+        return;
     }
-
-    if (phi_out) *phi_out = phi_val;
-
-    if (grad_out) {
-        // dPhi/dx = dPhi/dr * dr/dx + dPhi/dtheta * dtheta/dx + dPhi/dphi * dphi/dx
-        // dr/dx = x/r,  dtheta/dx = z x / (r^2 R),  dtheta/dz = -R / r^2,
-        // dphi/dx = -y/R^2  (theta = polar angle, cos(theta) = z/r)
-        double dtheta_dx = (R > 1e-30) ? ct * x / (r * R) : 0.0;
-        double dtheta_dy = (R > 1e-30) ? ct * y / (r * R) : 0.0;
-        double dtheta_dz = -st * rinv;
-
-        double dphi_dx = (R > 1e-30) ? -y / R2 : 0.0;
-        double dphi_dy = (R > 1e-30) ?  x / R2 : 0.0;
-
-        grad_out[0] = dPhi_dr * (x * rinv) + dPhi_dth * dtheta_dx + dPhi_dphi * dphi_dx;
-        grad_out[1] = dPhi_dr * (y * rinv) + dPhi_dth * dtheta_dy + dPhi_dphi * dphi_dy;
-        grad_out[2] = dPhi_dr * (z * rinv) + dPhi_dth * dtheta_dz;
-    }
-
-    if (hess_out) {
-        // Exact Hessian of the m = 0 terms (the only ones Agama evaluates off
-        // the grid, see _determine_asympt_cylspline).  Polar formulas in the
-        // (z, R) plane, theta measured from the z axis:
-        const double c = ct, s = st, rinv2 = rinv * rinv;
-        const double Phi_r = dPhi_dr, Phi_t = dPhi_dth;
-        const double Phi_RR = s*s*d2Phi_drr - 2.0*s*c*rinv2*Phi_t + 2.0*s*c*rinv*d2Phi_drth
-                            + c*c*rinv*Phi_r + c*c*rinv2*d2Phi_dthth;
-        const double Phi_zz = c*c*d2Phi_drr + 2.0*c*s*rinv2*Phi_t - 2.0*c*s*rinv*d2Phi_drth
-                            + s*s*rinv*Phi_r + s*s*rinv2*d2Phi_dthth;
-        const double Phi_Rz = s*c*d2Phi_drr + (c*c - s*s)*rinv*d2Phi_drth - s*c*rinv*Phi_r
-                            - s*c*rinv2*d2Phi_dthth - (c*c - s*s)*rinv2*Phi_t;
-        const double Phi_R  = s*Phi_r + c*rinv*Phi_t;
-        if (R > 1e-30) {
-            const double cp = x / R, sp = y / R, PR_R = Phi_R / R;
-            hess_out[0] = Phi_RR*cp*cp + PR_R*sp*sp;   // Hxx
-            hess_out[1] = Phi_RR*sp*sp + PR_R*cp*cp;   // Hyy
-            hess_out[2] = Phi_zz;                      // Hzz
-            hess_out[3] = (Phi_RR - PR_R)*cp*sp;       // Hxy
-            hess_out[4] = Phi_Rz*sp;                   // Hyz
-            hess_out[5] = Phi_Rz*cp;                   // Hxz
-        } else {   // on the axis Phi_R/R -> Phi_RR and Phi_Rz -> 0
-            hess_out[0] = Phi_RR; hess_out[1] = Phi_RR; hess_out[2] = Phi_zz;
-            hess_out[3] = 0.0;    hess_out[4] = 0.0;    hess_out[5] = 0.0;
-        }
-    }
+    // On (or within 1e-6 r of) the z axis the expansion is smooth but the
+    // (R, phi) formulas divide by R: average the values at x = +-1e-6 r, which
+    // is exact to O(1e-12) (the odd Taylor terms cancel).
+    const double e = 1e-6 * r;
+    double p1, p2, g1[3], g2[3], h1[6], h2[6];
+    outer_asympt_core( e, 0.0, z, W_outer, r0_outer, lmax_outer, mmax_outer,
+                      &p1, grad_out ? g1 : NULL, hess_out ? h1 : NULL);
+    outer_asympt_core(-e, 0.0, z, W_outer, r0_outer, lmax_outer, mmax_outer,
+                      &p2, grad_out ? g2 : NULL, hess_out ? h2 : NULL);
+    if (phi_out) *phi_out = 0.5 * (p1 + p2);
+    if (grad_out) for (int k = 0; k < 3; k++) grad_out[k] = 0.5 * (g1[k] + g2[k]);
+    if (hess_out) for (int k = 0; k < 6; k++) hess_out[k] = 0.5 * (h1[k] + h2[k]);
 }
-
 
 // ---------------------------------------------------------------------------
 //  cylspl_eval_device --- core per-particle CylSpline evaluation.
@@ -530,6 +464,10 @@ __device__ __forceinline__ void cylspl_eval_device(
     double d2Phidphi2  = 0.0;
     double d2PhidlRdphi= 0.0;
     double d2Phidlzdphi= 0.0;
+    // On the z axis (R = 0), the limit along phi = 0 of the m != 0 terms
+    // f_m(R) trig_m with f_m = 0, f_m' = 0 at R = 0: Hxx gets f_m'' trig_m(0),
+    // Hyy gets f_m'' (1 - m^2/2) trig_m(0), Hxy gets f_m'' trig_m'(0) / 2.
+    double axis_xx = 0.0, axis_yy = 0.0, axis_xy = 0.0;   // in d2/dlR2, m != 0
 
     // Cached m=0 values (needed for log-scaling unscaling of other harmonics)
     double Phi0_sc     = 0.0;   // log-scaled m=0 value (or raw m=0 if !log_scaling)
@@ -658,6 +596,11 @@ __device__ __forceinline__ void cylspl_eval_device(
                 // Phi_sum starts at 1.0 (unchanged by m=0 in log-scaling mode)
             } else {
                 // m!=0: val_mm = Phi_m / Phi0 (normalized ratio)
+                if (DO_HESS) {
+                    axis_xx += d2val_dlR2 * trig_val;
+                    axis_yy += d2val_dlR2 * trig_val * (1.0 - 0.5 * m_val * m_val);
+                    axis_xy += 0.5 * d2val_dlR2 * dtrig_val;
+                }
                 Phi_sum       += val_mm * trig_val;
                 dPhidlR_sum   += dval_dlR * trig_val;
                 dPhidlz_sum   += dval_dlz * trig_val;
@@ -689,6 +632,11 @@ __device__ __forceinline__ void cylspl_eval_device(
                     d2Phidlz2    += d2val_dlz2;
                 }
             } else {
+                if (DO_HESS) {
+                    axis_xx += d2val_dlR2 * trig_val;
+                    axis_yy += d2val_dlR2 * trig_val * (1.0 - 0.5 * m_val * m_val);
+                    axis_xy += 0.5 * d2val_dlR2 * dtrig_val;
+                }
                 Phi_sum       += val_mm * trig_val;
                 dPhidlR_sum   += dval_dlR * trig_val;
                 dPhidlz_sum   += dval_dlz * trig_val;
@@ -857,47 +805,21 @@ __device__ __forceinline__ void cylspl_eval_device(
     double H_zp = d2Phidlzdphi_phys * dlzdz;  // d²Phi/(dz dphi)
 
     if (R > 1e-30) {
-        double Rinv  = 1.0 / R;
-        double R2inv = Rinv * Rinv;
-        double R3inv = R2inv * Rinv;
-        double x = px, y = py;
-        double x2 = x*x, y2 = y*y, xy = x*y;
-
-        // d(cos phi)/dphi = -sin phi = -y/R, d(sin phi)/dphi = cos phi = x/R
-        // d(phi)/dx = -y/R², d(phi)/dy = x/R²
-
-        // With c = cos(phi), s = sin(phi), d/dx = c d/dR - (s/R) d/dphi and
-        // d/dy = s d/dR + (c/R) d/dphi, which also produce first-derivative
-        // dPhi/dphi terms (zero only for axisymmetric potentials):
-        //   Hxx = c^2 Phi_RR - 2cs/R Phi_Rp + s^2/R^2 Phi_pp + s^2/R Phi_R + 2cs/R^2 Phi_p
-        //   Hyy = s^2 Phi_RR + 2cs/R Phi_Rp + c^2/R^2 Phi_pp + c^2/R Phi_R - 2cs/R^2 Phi_p
-        //   Hxy = cs Phi_RR + (c^2-s^2)/R Phi_Rp - cs/R^2 Phi_pp - cs/R Phi_R - (c^2-s^2)/R^2 Phi_p
-        const double R4inv = R2inv * R2inv;
-        hess_out[0] = H_RR * x2 * R2inv
-                    - 2.0 * H_Rp * xy * R3inv
-                    + H_pp * y2 * R4inv
-                    + dPhidR * y2 * R3inv
-                    + 2.0 * dPhidphi_phys * xy * R4inv;          // Hxx
-        hess_out[1] = H_RR * y2 * R2inv
-                    + 2.0 * H_Rp * xy * R3inv
-                    + H_pp * x2 * R4inv
-                    + dPhidR * x2 * R3inv
-                    - 2.0 * dPhidphi_phys * xy * R4inv;          // Hyy
-        hess_out[2] = H_zz;                                      // Hzz
-        hess_out[3] = H_RR * xy * R2inv
-                    + H_Rp * (x2 - y2) * R3inv
-                    - H_pp * xy * R4inv
-                    - dPhidR * xy * R3inv
-                    - dPhidphi_phys * (x2 - y2) * R4inv;         // Hxy
-        hess_out[4] = H_Rz * (y * Rinv) + H_zp * (x * R2inv);  // Hyz
-        hess_out[5] = H_Rz * (x * Rinv) - H_zp * (y * R2inv);  // Hxz
+        cyl_hess_to_cart(px, py, R, dPhidR, dPhidphi_phys, H_RR, H_Rp, H_pp,
+                         H_zz, H_Rz, H_zp, hess_out);
     } else {
-        // R=0: only Hzz survives; Hxx=Hyy from symmetry
-        // d²Phi/dR² at R=0 gives Hxx=Hyy, Hxy=Hxz=Hyz=0
-        hess_out[0] = H_RR;  // Hxx = Hyy by symmetry
-        hess_out[1] = H_RR;
+        // On the z axis: limit along phi = 0 (the azimuth atan2(0,0) gives).
+        // m = 0 contributes H_RR to Hxx and Hyy; each m != 0 harmonic, which
+        // vanishes with zero slope at R = 0, contributes as in axis_xx/yy/xy
+        // (exact for m = 2: 1/2 f'' (x^2 - y^2) and f'' x y).  dlR/dR = 1/Rscale
+        // and d2lR/dR2 = 0 here; with log-scaling the ratios are multiplied
+        // by Phi0 (their own value and slope vanish on the axis).
+        const double fac = (log_scaling ? -exp(Phi0_sc) : 1.0) * dlRdR * dlRdR;
+        const double H_RR0 = H_RR - fac * axis_xx;     // m = 0 part
+        hess_out[0] = H_RR;                            // Hxx
+        hess_out[1] = H_RR0 + fac * axis_yy;           // Hyy
         hess_out[2] = H_zz;
-        hess_out[3] = 0.0;
+        hess_out[3] = fac * axis_xy;                   // Hxy
         hess_out[4] = 0.0;
         hess_out[5] = 0.0;
     }

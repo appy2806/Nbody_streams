@@ -787,24 +787,33 @@ m12i z = 0 baryons, 1e6 particles at 1-200 kpc, RTX 3080 Laptop:
 The largest float32 errors (~3e-6) sit within 10 pc of the centre, where
 the force goes through zero.
 
-**Agreement with Agama** (float64; m12i `none_8` and `axi_4`, pointwise):
-potential ~1e-15, force 1e-14 typical / ≤ 3e-11, Hessian 1e-13 typical /
-≤ 4e-9, on the grid, between nodes, in the disk plane and off the grid.
-Until 2026-11-15 the force was 1e-4 to 2e-3 off (0.5% in the inner disk,
-up to 9% off the grid) because the outer-asymptote fit used a broken
-Legendre recurrence; that also set the wrong `Rscale` (the asinh scale of
-the spline coordinates, 7.05 instead of 1.98 kpc for m12i), so it reached
-every point on the grid. Two Agama behaviours are reproduced on purpose:
+**Agreement with Agama** (float64; m12i `none_8` and `axi_4`, pointwise, on
+the grid): potential ~1e-15, force 1e-14 typical / ≤ 2e-11, Hessian 1e-13
+typical / ≤ 4e-9, at nodes, between nodes and in the disk plane. Until
+2026-11-15 the force was 1e-4 to 2e-3 off (0.5% in the inner disk, up to 9%
+off the grid) because the outer-asymptote fit used a broken Legendre
+recurrence; that also set the wrong `Rscale` (the asinh scale of the spline
+coordinates: 7.05 instead of 1.98 kpc for m12i), so it reached every point.
 
-* `Rscale = -Mtot/Phi0` takes `Mtot` from the full asymptote on the z axis
-  at `R_max` (`asymptOuter->value(PosSph(R_max, 0, 0))`), not the monopole.
-* Off the grid Agama fits every (l, m) but evaluates only the m = 0,
-  even-l terms: `PowerLawMultipole` takes its (l, m) set from the `U` array,
-  which `determineAsympt` passes as zeros. The GPU keeps the same terms.
+**Off the grid the GPU deliberately differs from Agama.** Both fit the same
+PowerLaw multipole (l ≤ 8, all m) to the grid boundary, but Agama then
+evaluates only its m = 0, even-l terms: `PowerLawMultipole` takes its (l, m)
+set from the `U` array, which CylSpline's `determineAsympt` passes as zeros,
+so the asymptote gets full symmetry (agama 1.0.160 and current GitHub).
+That drops the non-axisymmetric and z-asymmetric part of the potential
+beyond the grid. The GPU keeps all terms: the potential jump across the grid
+edge drops from 5.6e-3 to 4.3e-4 (median; max 4.1e-2 → 7.5e-3) for m12i,
+and the GPU minus those extra terms equals Agama to 1e-15. Beyond the grid
+the two then differ by ~1% (up to 10% for m12i `none_8`; identical for
+axisymmetric, z-symmetric files). `Rscale` still uses Agama's terms
+(`Mtot` from its asymptote on the z axis at `R_max`), because the spline
+interpolation, and so agreement on the grid, depends on it.
 
-Exactly on the z axis the Hessian assumes axisymmetry (`Hxx = Hyy`,
-`Hxy = 0`), which is wrong there for m = 2 harmonics; Agama's own axis
-value is wrong too (it returns `Hxx = Hyy = Hxy`). Off the axis both agree.
+On the z axis every quantity is the limit approached along +x (the azimuth
+that `atan2(0, 0)` gives): on the grid the m ≠ 0 harmonics vanish with zero
+slope at R = 0 and contribute `f''` terms to Hxx, Hyy, Hxy (exact for
+m = 2); off the grid the expansion is smooth and is averaged at x = ±1e-6 r.
+Agama's own axis Hessian is wrong (it returns `Hxx = Hyy = Hxy`).
 
 The CylSpline module is compiled with `-Xptxas -O0` only on compute
 capability ≥ 9.0, the workaround for a Hopper ptxas miscompile; earlier
@@ -1072,7 +1081,7 @@ read back. Rebuild from the same array or file you gave Agama.
 | Multipole l=0 (monopole) | ~1e-12 | ~1e-12 |
 | Multipole l>0 harmonics | ~1e-7 | ~1e-5 |
 | Disk composite (DiskAnsatz + Multipole lmax=32) | ~1e-6 | ~2e-6 |
-| CylSpline (pointwise, incl. off the grid) | ~1e-15 | ~1e-14 (max 3e-11) |
+| CylSpline (pointwise, on the grid; off it see CylSpline section) | ~1e-15 | ~1e-14 (max 2e-11) |
 | Analytic (NFW, Hernquist, etc.) | ~1e-15 | ~1e-15 (float32: ~1e-7) |
 | `UniformAcceleration` (constant and time-dependent) | ~1e-14 | ~1e-15 |
 
