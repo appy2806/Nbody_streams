@@ -30,8 +30,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/_cylspl_potential_kernel.cu": {
-    "mtime": 1794732494.9436872,
-    "ast_hash": "00da91917dcdba18e00f92c80b1525bc",
+    "mtime": 1794733376.7096424,
+    "ast_hash": "a5d046ba89ee4e3091faa3b4d3c7a145",
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/_fire.py": {
@@ -60,8 +60,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/_potential.py": {
-    "mtime": 1794732494.9436872,
-    "ast_hash": "61825908daeda93fbaef59ed3cef95de",
+    "mtime": 1794733376.7136414,
+    "ast_hash": "e3405757515541d5e9ef95bccc816841",
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/tests/test_load_paths.py": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794732671.1573653,
-    "ast_hash": "64db04af8c758bcb0595d5f604ec8005",
+    "mtime": 1794733376.6976452,
+    "ast_hash": "c513377d611836158c64f76907b6cbf2",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
@@ -380,8 +380,8 @@
     "semantic_hash": ""
   },
   "docs/agama_helper.md": {
-    "mtime": 1794732671.157152,
-    "ast_hash": "46e3fbc006c5d7cba9a7ef051032f979",
+    "mtime": 1794733376.6976452,
+    "ast_hash": "34d1984fb104d99802872783b68ff0ed",
     "semantic_hash": ""
   },
   "docs/coords.md": {
@@ -565,8 +565,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/tests/test_cylspline_agama.py": {
-    "mtime": 1794732483.5288632,
-    "ast_hash": "a4c6898fc79f7fb268ca99b9fc909e47",
+    "mtime": 1794733376.7136414,
+    "ast_hash": "89191e0c2120bedf7fd3ea7b29552f88",
     "semantic_hash": ""
   }
 }
