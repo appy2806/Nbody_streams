@@ -165,7 +165,7 @@ def test_gpu_paths_raise_clear_import_error_without_cupy():
         # array plumbing and kernel launches
         expect("_prep_xyz", lambda: ap._prep_xyz(np.zeros(3)))
         expect("kernel call",
-               lambda: ap._nfw_phi_kernel(1.0, 1.0, 1.0, 1.0, 1.0))
+               lambda: ap._NFW[0](1.0, 1.0, 1.0))
         expect("cp attribute", lambda: cp.asarray([1.0]))
         expect("require_cupy", lambda: require_cupy("thing"))
         print("OK")

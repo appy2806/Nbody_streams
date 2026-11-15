@@ -52,6 +52,17 @@ or a path.  Linear extrapolation outside the range, as in Agama.  Interpolation 
 a CPU-side O(log T) lookup per call; kernels see three floats.
 `from_agama()` is not supported — Agama does not export the table.
 
+All of them take `precision='float64'` (default) or `'float32'`. Kernels are
+built by `_make_kernels(name, params, phi, force, deriv, rho)`: signature
+`(raw float64 pos, raw T par) -> raw float64 out`, launched with `size=N`;
+positions are converted to `T` in registers and the kernels write the force
+and `-Hessian` directly (no negation pass). `par` holds the model constants in
+`T` and also lets CuPy resolve `T`. Series replace the closed forms where they
+cancel (NFW at r << rs, DiskAnsatz near z = 0); their coefficient tables exist
+in float and double, since converting double -> float runs on the FP64 units.
+float32: ~1e-7, ~0.12 ms per 1e6 forces. Details: `docs/agama_helper.md`,
+"Single precision".
+
 ### Time-dependent shape — `_spheroid.py`
 
 `SpheroidPotentialGPU`: Agama's Spheroid density (same keywords), but

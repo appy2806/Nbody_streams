@@ -2428,9 +2428,15 @@ def _build_dehnen_gpu(**kw):
     if is_spherical and abs(gamma - 2.0) > 1e-10:
         mass = float(kl.get('mass', 1.0))
         a    = float(kl.get('scaleradius', 1.0))
-        return _DehSph(mass=mass, scaleRadius=a, gamma=gamma)
+        return _DehSph(mass=mass, scaleRadius=a, gamma=gamma,
+                       precision=kl.get('precision', 'float64'))
 
     # Triaxial or gamma=2: route through Agama as Spheroid(alpha=1, beta=4).
+    prec = _pop_ci(kw, 'precision', 'float64')
+    if prec != 'float64':
+        raise ValueError(
+            f"precision={prec!r} is not available for a triaxial or gamma=2 Dehnen: "
+            "it is built as an Agama Multipole expansion, which runs in float64.")
     import agama
     return MultipolePotentialGPU.from_agama(
         agama.Potential(type='Spheroid', alpha=1, beta=4, **kw)
@@ -3134,6 +3140,15 @@ def PotentialGPU(*args,
             # Agama-routed factory (_build_spheroid_gpu, _build_disk_gpu, …):
             # pass kwargs through unchanged — agama.Potential is case-insensitive
             # and the factory handles its own internal normalization via _kl.
+            # These end up (at least partly) as Multipole expansions, which are
+            # double precision only; spherical Dehnen alone reads precision=.
+            prec = _pop_ci(kw, 'precision', 'float64')
+            if key in ('dehnen', 'dehnensph'):
+                kw['precision'] = prec
+            elif prec != 'float64':
+                raise ValueError(
+                    f"precision={prec!r} is not available for type={type!r}: it is "
+                    "built as an Agama Multipole expansion, which runs in float64.")
             pot = cls(**kw)
         return _apply_modifiers(pot, center, scale, ampl, orientation, rotation)
 

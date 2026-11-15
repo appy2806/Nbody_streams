@@ -503,44 +503,6 @@ class SpheroidPotentialGPU(_AnalyticBase):
         _spheroid_rho_kernel(arr, 1.0 / self._a, pr, ig, ibg, out, size=arr.shape[0])
         return out
 
-    # --- public API: identical to _AnalyticBase but threading *t* through ----
-
-    def potential(self, xyz, t: float = 0.0) -> cp.ndarray:
-        arr, single = _prep_xyz(xyz)
-        return _squeeze(self._phi(arr, t), single)
-
-    def force(self, xyz, t: float = 0.0) -> cp.ndarray:
-        arr, single = _prep_xyz(xyz)
-        return _squeeze(self._force(arr, t), single)
-
-    def density(self, xyz, t: float = 0.0) -> cp.ndarray:
-        arr, single = _prep_xyz(xyz)
-        return _squeeze(self._rho(arr, t), single)
-
-    def forceDeriv(self, xyz, t: float = 0.0):
-        arr, single = _prep_xyz(xyz)
-        f, d = self._force(arr, t), self._deriv(arr, t)
-        return (f[0], d[0]) if single else (f, d)
-
-    def evalDeriv(self, xyz, t: float = 0.0):
-        arr, single = _prep_xyz(xyz)
-        phi, f, d = self._phi(arr, t), self._force(arr, t), self._deriv(arr, t)
-        return (phi[0], f[0], d[0]) if single else (phi, f, d)
-
-    def eval(self, xyz, pot: bool = False, acc: bool = False,
-             der: bool = False, t: float = 0.0):
-        if not (pot or acc or der):
-            raise ValueError("eval(): at least one of pot, acc, der must be True.")
-        arr, single = _prep_xyz(xyz)
-        results = []
-        if pot:
-            results.append(_squeeze(self._phi(arr, t), single))
-        if acc:
-            results.append(_squeeze(self._force(arr, t), single))
-        if der:
-            results.append(_squeeze(self._deriv(arr, t), single))
-        return results[0] if len(results) == 1 else tuple(results)
-
     def __repr__(self) -> str:
         def fmt(v0, spl):
             if spl is not None and spl.times.size > 1:

@@ -688,6 +688,60 @@ from nbody_streams.agama_helper import PotentialGPU
 | Multi-component `.ini` / any text file with `[Potential]` | `CompositePotentialGPU` |
 | `EvolvingPotentialGPU` | Linear lerp of snapshot GPU potentials |
 
+### Single precision: `precision=`
+
+Every analytic class (`NFW`, `Plummer`, `Hernquist`, `Isochrone`,
+`MiyamotoNagai`, `LogHalo`, spherical `Dehnen`, `DiskAnsatz`,
+`UniformAcceleration`) and `SpheroidPotentialGPU` take
+`precision='float64'` (default) or `'float32'`, also through the factory:
+
+```python
+host = PotentialGPU(type='NFW', mass=1e12, scaleRadius=15, precision='float32')
+host.precision            # 'float32'
+```
+
+The kernels read the float64 `(N,3)` positions, convert to the chosen type in
+registers (like the tree code's `(float)(p - c)` recentring), and write
+float64 results, so the interface is the same in both modes. They also return
+the force and `-Hessian` directly: there is no separate cast or negation pass.
+
+| | float64 | float32 |
+|---|---|---|
+| error vs float64 (Φ, force, Hessian) | — | ~1e-7 typical, ≤ 2e-6 |
+| NFW force, 1e6 particles (RTX 3080 Laptop) | 0.79 ms | 0.13 ms |
+| Dehnen force (`pow`-bound) | 1.4 ms | 0.12 ms |
+| force + Hessian, any model | 0.4-3.3 ms | ~0.31 ms |
+
+float32 runs at the memory-bandwidth floor (~0.12 ms per 1e6 forces) for
+every model. FP64 runs at 1/64 of the FP32 rate on consumer and L40-class
+GPUs, and at 1/2 on H100/H200, where float64 costs little.
+
+**Accuracy.** In a host potential the float32 error is a noise floor of
+~1e-7 |F_host|. Differences of the host force over a separation d (the
+tidal field) carry ~1e-7 R/d relative error, but against a cluster's own
+gravity at its tidal radius this is ~1e-5 for 1e4-1e5 Msun at 20-100 kpc in
+m12i, far below the tree's force error. The formulas were rewritten where
+float32 (and to a lesser degree float64) loses digits to cancellation:
+
+* NFW force/Hessian at r << rs: a series in `w = s/(1+s)` below
+  `s = r/rs = 1` (float32) / 0.25 (float64); the old closed form lost
+  ~eps/s (2e-11 at r = 1 pc in float64).
+* Cusp Hessians (NFW, Hernquist, Dehnen) as `D2 n n + B (1 - n n)`, so the
+  radial component does not cancel at r << a.
+* `DiskAnsatz` `H(z) = (h/2)(e^-u - 1 + u)` as a series for `u < 1` (the old
+  form was 1e-2 off in float64 at |z| < 1e-3 h).
+* Dehnen Φ as `expm1(-(2-γ) log1p(a/r))` at r >> a; isochrone density
+  without the `r >> b` cancellation.
+
+Float32 `exp(-r/hr)` in `DiskAnsatz` still carries ~eps r/hr, i.e. ~1e-6 at
+r = 30 kpc, where that term is negligible.
+
+Types built as an Agama Multipole expansion (static `Spheroid`, `King`,
+`Disk`, triaxial or γ=2 `Dehnen`) and the Multipole/CylSpline classes are
+float64 only; `precision='float32'` raises for them.
+`run_simulation`'s `precision=` sets the self-gravity only: set the host's
+precision on the potential.
+
 ### Rotation modifiers: `orientation=` and `rotation=`
 
 GPU counterparts of Agama's `orientation=` (`TiltedPotentialGPU`) and `rotation=`
@@ -791,9 +845,7 @@ the positions, the analogue of the tree's recentring on the density peak.
 
 `precision='float32'` is the counterpart of the `float32` self-gravity
 kernels: errors ~1e-6 (potential, Hessian) and ~5e-7 (force), 35-70x
-faster on a consumer GPU. Nothing else in `agama_helper` has a float32
-mode; `run_simulation`'s `precision=` does not reach external potentials, so
-set it on the potential itself.
+faster on a consumer GPU (see [Single precision](#single-precision-precision)).
 
 Force derivatives reach ~1e-7 at 32 nodes; `nodes=64` gives ~1e-12 for
 both at twice the cost. Validated against Agama's exact triaxial `Dehnen`,
@@ -945,7 +997,7 @@ read back. Rebuild from the same array or file you gave Agama.
 | Multipole l=0 (monopole) | ~1e-12 | ~1e-12 |
 | Multipole l>0 harmonics | ~1e-7 | ~1e-5 |
 | Disk composite (DiskAnsatz + Multipole lmax=32) | ~1e-6 | ~2e-6 |
-| Analytic (NFW, Hernquist, etc.) | ~1e-15 | ~1e-15 |
+| Analytic (NFW, Hernquist, etc.) | ~1e-15 | ~1e-15 (float32: ~1e-7) |
 | `UniformAcceleration` (constant and time-dependent) | ~1e-14 | ~1e-15 |
 
 l>0 errors are a numerical floor from log-scaling derivative cancellation —
