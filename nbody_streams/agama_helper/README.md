@@ -64,7 +64,8 @@ the Agama route below. `mass=` holds the mass inside every ellipsoid fixed.
 Force ~1e-14 (integer-slope profiles) to ~3e-9 (general), Hessian ~1e-7, out
 to 40 r_s; 14-28 ms per 1e6 particles on an RTX 3080 Laptop.
 `precision='float32'` runs the kernels in single precision: ~5e-7 force,
-0.9 ms per 1e6 particles; inputs/outputs stay float64. Details:
+0.4 ms per 1e6 particles; kernels read float64 positions and write float64
+forces directly (no cast passes, as the tree code's recentring). Details:
 `docs/agama_helper.md`, "Time-dependent shapes".
 
 Via Agama CPU export (in _potential.py ):

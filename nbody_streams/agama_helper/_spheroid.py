@@ -72,6 +72,12 @@ except ImportError:
 #
 # Every kernel is templated on T (float32 or float64).  Literals are wrapped as
 # T(...) so float32 never silently promotes to double arithmetic.
+#
+# Positions are read straight from the C-contiguous float64 (N,3) array and
+# outputs written as float64; only the arithmetic runs in T.  As in the tree
+# code (_recentre.py: ``r = (float)(p - c)``) the float64 -> T conversion
+# happens in registers, after the float64 scaling, with no separate cast pass.
+# All kernels are all-raw and launched with ``size=N``.
 _PREAMBLE = r"""
 template <typename T> __device__ T tiny_() { return sizeof(T) == 4 ? T(1e-30) : T(1e-300); }
 
@@ -114,26 +120,33 @@ __device__ T sph_rho(T u2, int ig, int ibg, T alpha, T beta, T gamma, T cut, T x
 """
 
 _PROFILE_ARGS = 'int32 ig, int32 ibg, T alpha, T beta, T gamma, T cut, T xi'
+_POS_ARGS = 'raw float64 pos, float64 inv_a'
+_LOAD_XYZ = ('T X = (T)(pos[3*i] * inv_a), Y = (T)(pos[3*i + 1] * inv_a), '
+             'Z = (T)(pos[3*i + 2] * inv_a);')
 
 _spheroid_rho_kernel = cp.ElementwiseKernel(
-    f'T x, T y, T z, T inv_a, T p2, T q2, {_PROFILE_ARGS}, T rho0', 'T out',
+    # pr = [p^2, q^2, rho0, alpha, beta, gamma, cut, xi]: an array (not scalars)
+    # so that CuPy can resolve T for this kernel, which has no other T array
+    f'{_POS_ARGS}, raw T pr, int32 ig, int32 ibg', 'raw float64 out',
     """
-    T X = x * inv_a, Y = y * inv_a, Z = z * inv_a;
+    _LOAD_XYZ
     T dln;
-    out = rho0 * sph_rho(X*X + Y*Y/p2 + Z*Z/q2, ig, ibg, alpha, beta, gamma, cut, xi, &dln);
-    """, 'spheroid_rho', preamble=_PREAMBLE
+    out[i] = (double)(pr[2] * sph_rho(X*X + Y*Y/pr[0] + Z*Z/pr[1], ig, ibg,
+                                      pr[3], pr[4], pr[5], pr[6], pr[7], &dln));
+    """.replace('_LOAD_XYZ', _LOAD_XYZ), 'spheroid_rho', preamble=_PREAMBLE
 )
 
 # Per-node tables (depend on the node and on p, q only, so they are built once
 # per call on the host): nd[k] = s^2, nd[nq+k] = 1/D_y, nd[2nq+k] = 1/D_z,
 # nd[3nq+k] = W = GL weight * ds/dv / sqrt(D_y D_z).
-_NODE_ARGS = 'raw T nd, int32 nq, T inv_a'
+_NODE_ARGS = 'raw T nd, int32 nq'
 
-_spheroid_grad_kernel = cp.ElementwiseKernel(
-    f'T x, T y, T z, {_NODE_ARGS}, {_PROFILE_ARGS}, T amp',
-    'raw T out',
+# amp = -4 pi G rho0 p q a, so the kernel writes the force -dPhi/dx_i.
+_spheroid_force_kernel = cp.ElementwiseKernel(
+    f'{_POS_ARGS}, {_NODE_ARGS}, {_PROFILE_ARGS}, T amp',
+    'raw float64 out',
     """
-    T X = x * inv_a, Y = y * inv_a, Z = z * inv_a;
+    _LOAD_XYZ
     T X2 = X*X, Y2 = Y*Y, Z2 = Z*Z;
     T J0 = T(0), J1 = T(0), J2 = T(0), dln;
     for (int k = 0; k < nq; ++k) {
@@ -142,19 +155,20 @@ _spheroid_grad_kernel = cp.ElementwiseKernel(
              * sph_rho(s2 * (X2 + Y2*iDy + Z2*iDz), ig, ibg, alpha, beta, gamma, cut, xi, &dln);
         J0 += f;  J1 += f * iDy;  J2 += f * iDz;
     }
-    out[i*3 + 0] = amp * X * J0;   // dPhi/dx
-    out[i*3 + 1] = amp * Y * J1;   // dPhi/dy
-    out[i*3 + 2] = amp * Z * J2;   // dPhi/dz
-    """, 'spheroid_grad', preamble=_PREAMBLE
+    out[i*3 + 0] = (double)(amp * X * J0);
+    out[i*3 + 1] = (double)(amp * Y * J1);
+    out[i*3 + 2] = (double)(amp * Z * J2);
+    """.replace('_LOAD_XYZ', _LOAD_XYZ), 'spheroid_force', preamble=_PREAMBLE
 )
 
-# H_ij = amp [delta_ij J_i + 2 X_i X_j K_ij],
+# H_ij = 4 pi G rho0 p q [delta_ij J_i + 2 X_i X_j K_ij],
 # K_ij = int drho/d(u^2) s^4 / (D_i D_j sqrt(D_y D_z)) ds.
-_spheroid_hess_kernel = cp.ElementwiseKernel(
-    f'T x, T y, T z, {_NODE_ARGS}, {_PROFILE_ARGS}, T amp',
-    'raw T out',
+# amp = -4 pi G rho0 p q, so the kernel writes the force derivatives -H_ij.
+_spheroid_deriv_kernel = cp.ElementwiseKernel(
+    f'{_POS_ARGS}, {_NODE_ARGS}, {_PROFILE_ARGS}, T amp',
+    'raw float64 out',
     """
-    T X = x * inv_a, Y = y * inv_a, Z = z * inv_a;
+    _LOAD_XYZ
     T X2 = X*X, Y2 = Y*Y, Z2 = Z*Z;
     T J0 = T(0), J1 = T(0), J2 = T(0);
     T K00 = T(0), K11 = T(0), K22 = T(0), K01 = T(0), K12 = T(0), K02 = T(0);
@@ -170,22 +184,22 @@ _spheroid_hess_kernel = cp.ElementwiseKernel(
         K00 += g;              K11 += g * iDy * iDy;  K22 += g * iDz * iDz;
         K01 += g * iDy;        K12 += g * iDy * iDz;  K02 += g * iDz;
     }
-    out[i*6 + 0] = amp * (J0 + T(2) * X2 * K00);   // Hxx
-    out[i*6 + 1] = amp * (J1 + T(2) * Y2 * K11);   // Hyy
-    out[i*6 + 2] = amp * (J2 + T(2) * Z2 * K22);   // Hzz
-    out[i*6 + 3] = amp * T(2) * X * Y * K01;       // Hxy
-    out[i*6 + 4] = amp * T(2) * Y * Z * K12;       // Hyz
-    out[i*6 + 5] = amp * T(2) * X * Z * K02;       // Hxz
-    """, 'spheroid_hess', preamble=_PREAMBLE
+    out[i*6 + 0] = (double)(amp * (J0 + T(2) * X2 * K00));   // xx
+    out[i*6 + 1] = (double)(amp * (J1 + T(2) * Y2 * K11));   // yy
+    out[i*6 + 2] = (double)(amp * (J2 + T(2) * Z2 * K22));   // zz
+    out[i*6 + 3] = (double)(amp * T(2) * X * Y * K01);       // xy
+    out[i*6 + 4] = (double)(amp * T(2) * Y * Z * K12);       // yz
+    out[i*6 + 5] = (double)(amp * T(2) * X * Z * K02);       // xz
+    """.replace('_LOAD_XYZ', _LOAD_XYZ), 'spheroid_deriv', preamble=_PREAMBLE
 )
 
 # dpsi(u) from a uniform ln(u) table: cubic Hermite in (ln u, ln dpsi) with
 # exact slopes; power-law (log-log linear) extrapolation off either end.
 _spheroid_phi_kernel = cp.ElementwiseKernel(
-    f'T x, T y, T z, {_NODE_ARGS}, raw T tl, raw T ts, int32 nt, T lu0, T h, T amp',
-    'T out',
+    f'{_POS_ARGS}, {_NODE_ARGS}, raw T tl, raw T ts, int32 nt, T lu0, T h, T amp',
+    'raw float64 out',
     """
-    T X = x * inv_a, Y = y * inv_a, Z = z * inv_a;
+    _LOAD_XYZ
     T X2 = X*X, Y2 = Y*Y, Z2 = Z*Z;
     T acc = T(0);
     for (int k = 0; k < nq; ++k) {
@@ -206,8 +220,8 @@ _spheroid_phi_kernel = cp.ElementwiseKernel(
         }
         acc += nd[3*nq + k] * exp(lp);
     }
-    out = -amp * acc;
-    """, 'spheroid_phi', preamble=_PREAMBLE
+    out[i] = (double)(-amp * acc);
+    """.replace('_LOAD_XYZ', _LOAD_XYZ), 'spheroid_phi', preamble=_PREAMBLE
 )
 
 
@@ -343,7 +357,7 @@ class SpheroidPotentialGPU(_AnalyticBase):
         Quadrature nodes (default 32).
     precision : {'float64', 'float32'}
         Arithmetic inside the kernels (default ``'float64'``).  ``'float32'``
-        is ~10x faster on consumer GPUs (FP64 runs at 1/64 rate there) and
+        is 35-70x faster on consumer GPUs (FP64 runs at 1/64 rate there) and
         good to ~1e-6 relative, comparable to the float32 self-gravity
         kernels.  Inputs and outputs stay float64 either way.
 
@@ -455,70 +469,62 @@ class SpheroidPotentialGPU(_AnalyticBase):
         return self._nd, p, q, 4.0 * math.pi * _G * self.rho0(t) * p * q
 
     # --- kernel hooks -------------------------------------------------------
-    # Kernels run in self._dt; inputs arrive and outputs leave as float64.
+    # ``arr`` is the C-contiguous float64 (N,3) array from _prep_xyz.  Kernels
+    # read it directly, compute in self._dt and write float64: no cast passes.
 
-    def _cast(self, x, y, z):
-        dt = self._dt
-        return x.astype(dt, copy=False), y.astype(dt, copy=False), z.astype(dt, copy=False)
-
-    def _phi(self, x, y, z, t: float = 0.0):
+    def _phi(self, arr, t: float = 0.0):
         nd, _, _, amp = self._state(t)
         dt = self._dt
-        out = _spheroid_phi_kernel(
-            *self._cast(x, y, z), nd, self._nq, dt(1.0 / self._a),
-            self._tl, self._ts, self._nt, self._lu0, self._h, dt(0.5 * amp * self._a ** 2))
-        return out.astype(cp.float64, copy=False)
+        out = cp.empty(arr.shape[0], dtype=cp.float64)
+        _spheroid_phi_kernel(arr, 1.0 / self._a, nd, self._nq, self._tl, self._ts,
+                             self._nt, self._lu0, self._h, dt(0.5 * amp * self._a ** 2),
+                             out, size=arr.shape[0])
+        return out
 
-    def _grad(self, x, y, z, t: float = 0.0):
+    def _force(self, arr, t: float = 0.0):
         nd, _, _, amp = self._state(t)
-        dt = self._dt
-        out = cp.empty((x.size, 3), dtype=dt)
-        _spheroid_grad_kernel(*self._cast(x, y, z), nd, self._nq, dt(1.0 / self._a),
-                              *self._prof, dt(amp * self._a), out)
-        return out.astype(cp.float64, copy=False)
+        out = cp.empty((arr.shape[0], 3), dtype=cp.float64)
+        _spheroid_force_kernel(arr, 1.0 / self._a, nd, self._nq, *self._prof,
+                               self._dt(-amp * self._a), out, size=arr.shape[0])
+        return out
 
-    def _hess(self, x, y, z, t: float = 0.0):
+    def _deriv(self, arr, t: float = 0.0):
         nd, _, _, amp = self._state(t)
-        dt = self._dt
-        out = cp.empty((x.size, 6), dtype=dt)
-        _spheroid_hess_kernel(*self._cast(x, y, z), nd, self._nq, dt(1.0 / self._a),
-                              *self._prof, dt(amp), out)
-        return out.astype(cp.float64, copy=False)
+        out = cp.empty((arr.shape[0], 6), dtype=cp.float64)
+        _spheroid_deriv_kernel(arr, 1.0 / self._a, nd, self._nq, *self._prof,
+                               self._dt(-amp), out, size=arr.shape[0])
+        return out
 
-    def _rho(self, x, y, z, t: float = 0.0):
+    def _rho(self, arr, t: float = 0.0):
         p, q = self.shape(t)
-        dt = self._dt
-        out = _spheroid_rho_kernel(*self._cast(x, y, z), dt(1.0 / self._a), dt(p * p),
-                                   dt(q * q), *self._prof, dt(self.rho0(t)))
-        return out.astype(cp.float64, copy=False)
+        ig, ibg = self._prof[:2]
+        pr = cp.asarray([p * p, q * q, self.rho0(t), *self._prof[2:]], dtype=self._dt)
+        out = cp.empty(arr.shape[0], dtype=cp.float64)
+        _spheroid_rho_kernel(arr, 1.0 / self._a, pr, ig, ibg, out, size=arr.shape[0])
+        return out
 
     # --- public API: identical to _AnalyticBase but threading *t* through ----
 
     def potential(self, xyz, t: float = 0.0) -> cp.ndarray:
         arr, single = _prep_xyz(xyz)
-        return _squeeze(self._phi(arr[:, 0], arr[:, 1], arr[:, 2], t), single)
+        return _squeeze(self._phi(arr, t), single)
 
     def force(self, xyz, t: float = 0.0) -> cp.ndarray:
         arr, single = _prep_xyz(xyz)
-        return _squeeze(-self._grad(arr[:, 0], arr[:, 1], arr[:, 2], t), single)
+        return _squeeze(self._force(arr, t), single)
 
     def density(self, xyz, t: float = 0.0) -> cp.ndarray:
         arr, single = _prep_xyz(xyz)
-        return _squeeze(self._rho(arr[:, 0], arr[:, 1], arr[:, 2], t), single)
+        return _squeeze(self._rho(arr, t), single)
 
     def forceDeriv(self, xyz, t: float = 0.0):
         arr, single = _prep_xyz(xyz)
-        x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
-        f = -self._grad(x, y, z, t)
-        d = -self._hess(x, y, z, t)
+        f, d = self._force(arr, t), self._deriv(arr, t)
         return (f[0], d[0]) if single else (f, d)
 
     def evalDeriv(self, xyz, t: float = 0.0):
         arr, single = _prep_xyz(xyz)
-        x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
-        phi = self._phi(x, y, z, t)
-        f   = -self._grad(x, y, z, t)
-        d   = -self._hess(x, y, z, t)
+        phi, f, d = self._phi(arr, t), self._force(arr, t), self._deriv(arr, t)
         return (phi[0], f[0], d[0]) if single else (phi, f, d)
 
     def eval(self, xyz, pot: bool = False, acc: bool = False,
@@ -526,14 +532,13 @@ class SpheroidPotentialGPU(_AnalyticBase):
         if not (pot or acc or der):
             raise ValueError("eval(): at least one of pot, acc, der must be True.")
         arr, single = _prep_xyz(xyz)
-        x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
         results = []
         if pot:
-            results.append(_squeeze(self._phi(x, y, z, t), single))
+            results.append(_squeeze(self._phi(arr, t), single))
         if acc:
-            results.append(_squeeze(-self._grad(x, y, z, t), single))
+            results.append(_squeeze(self._force(arr, t), single))
         if der:
-            results.append(_squeeze(-self._hess(x, y, z, t), single))
+            results.append(_squeeze(self._deriv(arr, t), single))
         return results[0] if len(results) == 1 else tuple(results)
 
     def __repr__(self) -> str:

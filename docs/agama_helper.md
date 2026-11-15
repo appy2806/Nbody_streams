@@ -778,12 +778,19 @@ for a gamma = 1.5 cusp at 30-100 r_s).
 |---|---|---|---|
 | NFW + cutoff, Hernquist, Jaffe (alpha=1, integer slopes: fast path) | float64 | ~1e-14 | 14 |
 | general (e.g. alpha=2, beta=3.5, gamma=0.7) | float64 | ~3e-9 | 28 |
-| either | **float32** | ~5e-7 | **0.9** |
+| either | **float32** | ~5e-7 | **0.4** |
 | Agama Spheroid → Multipole, lmax=6 (static only) | float64 | ~1e-3 vs exact | 51 |
 | spherical `NFWPotentialGPU` (reference) | float64 | — | 0.8 |
 
+Kernels read the float64 `(N,3)` positions directly, scale by `1/a` in
+float64 and convert to `T` in registers, then write float64 results: the same
+pattern as the tree code's `(float)(p - c)` recentring, with no separate cast
+or negation passes, so `force()` costs exactly the kernel time. Any `center=`
+shift is subtracted in float64 (`ShiftedPotentialGPU`) before the kernel sees
+the positions, the analogue of the tree's recentring on the density peak.
+
 `precision='float32'` is the counterpart of the `float32` self-gravity
-kernels: errors ~1e-6 (potential, Hessian) and ~5e-7 (force), 15-30x
+kernels: errors ~1e-6 (potential, Hessian) and ~5e-7 (force), 35-70x
 faster on a consumer GPU. Nothing else in `agama_helper` has a float32
 mode; `run_simulation`'s `precision=` does not reach external potentials, so
 set it on the potential itself.

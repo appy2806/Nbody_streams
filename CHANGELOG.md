@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   holds the mass inside every ellipsoid fixed as the shape changes. Force
   ~1e-14 to ~3e-9, 14-28 ms per 1e6 particles (RTX 3080 Laptop, FP64), versus
   51 ms for the lmax=6 Multipole route. `precision='float32'` runs the
-  kernels in single precision (~5e-7 force, 0.9 ms per 1e6 particles);
+  kernels in single precision (~5e-7 force, 0.4 ms per 1e6 particles);
   inputs and outputs stay float64. Composes with `rotation=`,
   `orientation=`, `center=`, `scale=`.
 
