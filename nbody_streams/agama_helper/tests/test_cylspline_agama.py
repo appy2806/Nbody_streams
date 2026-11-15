@@ -114,8 +114,11 @@ def test_pointwise_vs_agama(pots, region):
 def test_grid_nodes_and_midpoints(pots):
     ref, gpu = pots
     c = read_coefs(FILE)
-    R = np.asarray(c.R_grid)[1:]
-    z = np.asarray(c.z_grid)
+    # Interior nodes only: exactly on the outer edge (R = R_max, |z| = z_max)
+    # agama 1.0.156 already switches to its asymptote while 1.0.160 stays on
+    # the spline, and the two asymptotes differ by design (all (l, m) here).
+    R = np.asarray(c.R_grid)[1:-1]
+    z = np.asarray(c.z_grid)[1:-1]
     Rm = np.sqrt(R[:-1] * R[1:])
     zm = 0.5 * (z[:-1] + z[1:])
     for RRg, ZZg in ((R, z), (Rm, zm)):
