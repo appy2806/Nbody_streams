@@ -1055,17 +1055,17 @@ def _sph_harm_agama(lmax: int, m: int, ct: float, st: float) -> np.ndarray:
     prefact = _CS_PREFACT[m]
     Plm1 = result[0] / prefact        # un-normalized P_m^m
     Plm  = ct * (2*m + 1) * Plm1     # un-normalized P_{m+1}^m
-    Plm2 = 0.0
 
     # l = m+1: N_{m+1,m} = N_{m,m} * sqrt((2m+3)/(2m+1) / (2m+1))
     prefact *= math.sqrt((2*m + 3) / (2*m + 1) / (2.0*m + 1.0))
     result[1] = Plm * prefact
 
     for l in range(m + 2, lmax + 1):
-        Plm_new = (ct * (2*l - 1) * Plm - (l + m - 1) * Plm2) / (l - m)
+        # P_l = ((2l-1) ct P_{l-1} - (l+m-1) P_{l-2}) / (l-m), with Plm = P_{l-1}
+        # and Plm1 = P_{l-2} (this used the stale P_{l-3} before)
+        Plm_new = (ct * (2*l - 1) * Plm - (l + m - 1) * Plm1) / (l - m)
         prefact *= math.sqrt((2*l + 1) / (2*l - 1) * (l - m) / (l + m))
         result[l - m] = Plm_new * prefact
-        Plm2 = Plm1
         Plm1 = Plm
         Plm  = Plm_new
 
@@ -1098,16 +1098,16 @@ def _sph_harm_agama_vect(lmax: int, m: int,
     prefact = _CS_PREFACT[m]
     Plm1 = result[:, 0] / prefact        # (npoints,)
     Plm  = ct * (2*m + 1) * Plm1
-    Plm2 = np.zeros(npoints)
 
     prefact *= math.sqrt((2*m + 3) / (2*m + 1) / (2.0*m + 1.0))
     result[:, 1] = Plm * prefact
 
     for l in range(m + 2, lmax + 1):
-        Plm_new = (ct * (2*l - 1) * Plm - (l + m - 1) * Plm2) / (l - m)
+        # P_l = ((2l-1) ct P_{l-1} - (l+m-1) P_{l-2}) / (l-m), with Plm = P_{l-1}
+        # and Plm1 = P_{l-2} (this used the stale P_{l-3} before)
+        Plm_new = (ct * (2*l - 1) * Plm - (l + m - 1) * Plm1) / (l - m)
         prefact *= math.sqrt((2*l + 1) / (2*l - 1) * (l - m) / (l + m))
         result[:, l - m] = Plm_new * prefact
-        Plm2 = Plm1
         Plm1 = Plm
         Plm  = Plm_new
 
@@ -1212,6 +1212,16 @@ def _determine_asympt_cylspline(
         sol, _, _, _ = _lstsq(M, rhs)
         for l_idx in range(ncols):
             W[(absm + l_idx) * (absm + l_idx + 1) + m] = float(sol[l_idx])
+
+    # Agama fits every (l, m) above, but PowerLawMultipole takes its set of
+    # evaluated terms from the U array, which CylSpline passes as all zeros:
+    # the asymptote is then evaluated with full symmetry, i.e. only the m = 0,
+    # even-l coefficients (checked against agama 1.0.160 off the grid).  Keep
+    # exactly those, so that Phi off the grid and Mtot (hence Rscale) match.
+    for l in range(lmax_fit + 1):
+        for m in range(-l, l + 1):
+            if m != 0 or l % 2:
+                W[l * (l + 1) + m] = 0.0
 
     # Safeguard: if W[0] is not finite, fall back to average monopole amplitude
     if not np.isfinite(W[0]):
@@ -1529,10 +1539,15 @@ def _build_cylspline_data(coefs) -> dict:
     lmax_outer  = 8
     mmax_outer  = min(lmax_outer, mmax)
 
-    # Mtot ~ -(asymptOuter at R_max, z=0) * R_max
-    # PowerLaw monopole at r = R_max: Phi_mono = W[0] * (R_max/r0)^{-1} * MUL0
-    # Mtot = -Phi_mono * R_max = -W_outer[0] * r0 * MUL0
-    Mtot = -W_outer[0] * r0_outer * _CS_MUL0
+    # Mtot = -(asymptOuter at r = R_max) * R_max, as Agama's CylSpline
+    # constructor: asymptOuter->value(PosSph(gridR.back(), 0, 0)), i.e. the full
+    # expansion on the z axis (theta = 0), where only m = 0 terms survive:
+    #   Phi = MUL0 * sum_l W[l(l+1)] (r0/R_max)^(l+1) P_l^0(1)
+    R_max = float(R_grid[-1])
+    Pl0 = _sph_harm_agama_vect(lmax_outer, 0, np.ones(1), np.zeros(1))[0]
+    Phi_pole = _CS_MUL0 * sum(W_outer[l * (l + 1)] * (r0_outer / R_max) ** (l + 1) * Pl0[l]
+                              for l in range(lmax_outer + 1))
+    Mtot = -Phi_pole * R_max
 
     if Phi0 < 0.0 and Mtot > 0.0:
         Rscale = -Mtot / Phi0

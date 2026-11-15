@@ -38,6 +38,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CylSpline now matches Agama to machine precision** (force 1e-14 typical,
+  was 1e-4 to 2e-3 with 0.5% in the inner disk and up to 9% off the grid).
+  The associated-Legendre recurrence used for the outer asymptote
+  (`_sph_harm_agama[_vect]`, `sphHarm_device`) took P_{l-3} for P_{l-2}, so
+  the asymptote fit was wrong from l = 2 up; through `Mtot` that set the
+  wrong `Rscale` for the whole spline. `Mtot` now uses the full asymptote on
+  the z axis, as Agama does, and only the m = 0, even-l asymptote terms are
+  kept, which is what Agama evaluates. The off-grid force now includes
+  dPhi/dtheta (it was dropped, and its Jacobian had the wrong sign), the
+  off-grid Hessian is exact instead of monopole-only, and the in-grid
+  Hessian has the dPhi/dphi terms that non-axisymmetric harmonics need
+  (Hxx, Hyy, Hxy were up to 18% off). New pointwise tests against Agama
+  (`test_cylspline_agama.py`) fail on the old code.
+
 - Multipole force exactly on the -z axis had the wrong sign in its x/y
   component from m = 1 terms (the pole limit of Y_l1/sin(theta) is
   -dY/dtheta there); also in the Hessian kernel.
