@@ -302,5 +302,7 @@
   "300": "Empirical radial profiles",
   "301": "TestSigmaLocalCircular",
   "302": "Density-profile fitting",
-  "303": "[1.0.0] - 2025-XX-XX"
+  "303": "[1.0.0] - 2025-XX-XX",
+  "304": "AnalyticPotentialGPU",
+  "305": "xyz"
 }
