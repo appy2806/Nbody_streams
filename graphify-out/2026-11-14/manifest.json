@@ -60,8 +60,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/_potential.py": {
-    "mtime": 1794708572.4073584,
-    "ast_hash": "dfe8520c62e5b518b40cba694553d3c5",
+    "mtime": 1794708574.6824603,
+    "ast_hash": "ebffff105011b354f03eb1645839ce1e",
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/tests/test_load_paths.py": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794708572.3983002,
-    "ast_hash": "6f071ce6b1f14616e93b21b4cef9865b",
+    "mtime": 1794709109.7086625,
+    "ast_hash": "458d08c896985d9d550a87fe213e78b1",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
@@ -380,8 +380,8 @@
     "semantic_hash": ""
   },
   "docs/agama_helper.md": {
-    "mtime": 1794708572.3983002,
-    "ast_hash": "72ce15b6e6c5f4ad28dfb73325bb968b",
+    "mtime": 1794709109.7086625,
+    "ast_hash": "d06b8c58fa856bb2ea9f85ac1ee4c72a",
     "semantic_hash": ""
   },
   "docs/coords.md": {
@@ -445,8 +445,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/README.md": {
-    "mtime": 1794708572.4073584,
-    "ast_hash": "a2afa1549ed27e57d9e20597f8ec2abc",
+    "mtime": 1794709109.7214773,
+    "ast_hash": "c9ee2554be41c0e6c9688eba495289a7",
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/tech_err.md": {
@@ -537,6 +537,16 @@
   "tests/test_recentre.py": {
     "mtime": 1794204944.3039112,
     "ast_hash": "1826b45408c8cd6aa8b9bcb960699353",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/_spheroid.py": {
+    "mtime": 1794709109.7214773,
+    "ast_hash": "2c964e9fbc7c1bbbbf8a3fe4479c7285",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/tests/test_spheroid_shape.py": {
+    "mtime": 1794708574.6824603,
+    "ast_hash": "af94f4267116fac9135a5cb839f53cbb",
     "semantic_hash": ""
   }
 }
