@@ -30,8 +30,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/_cylspl_potential_kernel.cu": {
-    "mtime": 1777526379.5901608,
-    "ast_hash": "411908b3e7094a08216dbc0c960e15e1",
+    "mtime": 1794731835.3688364,
+    "ast_hash": "d9ccbd61086475e872858f850de92b88",
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/_fire.py": {
@@ -50,18 +50,18 @@
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/_load.py": {
-    "mtime": 1794730006.9207227,
+    "mtime": 1794731835.3688364,
     "ast_hash": "5bfb94df756e47019c8a8c7e85bb0352",
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/_multipole_potential_kernel.cu": {
-    "mtime": 1794729820.388039,
+    "mtime": 1794731835.3688364,
     "ast_hash": "c63ec538db3947a65321ec0aa39a4cad",
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/_potential.py": {
-    "mtime": 1794729996.560792,
-    "ast_hash": "353a6439edc1e86c5cce66e6d40353e6",
+    "mtime": 1794731835.3728366,
+    "ast_hash": "573e6266795ad25ec3782116daeb87d3",
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/tests/test_load_paths.py": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794730079.5461082,
-    "ast_hash": "121c7ad97e22cb8a99b2634933824609",
+    "mtime": 1794731835.3558517,
+    "ast_hash": "acbf3bc7bafe91291310e9698aa54f97",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
@@ -380,8 +380,8 @@
     "semantic_hash": ""
   },
   "docs/agama_helper.md": {
-    "mtime": 1794730079.545326,
-    "ast_hash": "c628f5e81da2ee7ac171da2294133b71",
+    "mtime": 1794731835.3558517,
+    "ast_hash": "fb8223c08daf844f1fc7499019d8ca52",
     "semantic_hash": ""
   },
   "docs/coords.md": {
@@ -550,12 +550,17 @@
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/tests/test_analytic_precision.py": {
-    "mtime": 1794729894.3006682,
+    "mtime": 1794731835.3728366,
     "ast_hash": "d217ffa8773e68cef2b381fea85001b8",
     "semantic_hash": ""
   },
+  "nbody_streams/agama_helper/tests/test_cylspline_precision.py": {
+    "mtime": 1794731835.3728366,
+    "ast_hash": "7bdaa2b16d1dc105d517f3d33aabe387",
+    "semantic_hash": ""
+  },
   "nbody_streams/agama_helper/tests/test_multipole_precision.py": {
-    "mtime": 1794730057.4549682,
+    "mtime": 1794731835.3728366,
     "ast_hash": "131cc5eeba700fc5085adf7d2f82f3f4",
     "semantic_hash": ""
   }
