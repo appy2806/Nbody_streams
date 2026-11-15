@@ -40,7 +40,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_chandrasekhar",
-      "community": 73,
+      "community": 62,
       "norm_label": "_chandrasekhar.py"
     },
     {
@@ -50,7 +50,7 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "nbody_streams_chandrasekhar_to_numpy",
-      "community": 73,
+      "community": 62,
       "norm_label": "_to_numpy()"
     },
     {
@@ -90,7 +90,7 @@
       "source_location": "L148",
       "_origin": "ast",
       "id": "nbody_streams_chandrasekhar_sigma_local_circular",
-      "community": 73,
+      "community": 62,
       "norm_label": "_sigma_local_circular()"
     },
     {
@@ -150,7 +150,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_chandrasekhar_rationale_1",
-      "community": 73,
+      "community": 62,
       "norm_label": "nbody_streams._chandrasekhar ============================ chandrasekhar dynamica"
     },
     {
@@ -160,7 +160,7 @@
       "source_location": "L49",
       "_origin": "ast",
       "id": "nbody_streams_chandrasekhar_rationale_49",
-      "community": 73,
+      "community": 62,
       "norm_label": "convert a cupy or numpy array to a plain numpy array (zero-copy when     possibl"
     },
     {
@@ -190,7 +190,7 @@
       "source_location": "L149",
       "_origin": "ast",
       "id": "nbody_streams_chandrasekhar_rationale_149",
-      "community": 73,
+      "community": 62,
       "norm_label": "local circular-speed approximation to the 1-d velocity dispersion.      uses the"
     },
     {
@@ -260,7 +260,7 @@
       "source_location": "L87",
       "_origin": "ast",
       "id": "nbody_streams_recentre_gpu_sub_cast",
-      "community": 78,
+      "community": 44,
       "norm_label": "_gpu_sub_cast()"
     },
     {
@@ -280,7 +280,7 @@
       "source_location": "L116",
       "_origin": "ast",
       "id": "nbody_streams_recentre_gpu_centre",
-      "community": 78,
+      "community": 44,
       "norm_label": "_gpu_centre()"
     },
     {
@@ -290,7 +290,7 @@
       "source_location": "L141",
       "_origin": "ast",
       "id": "nbody_streams_recentre_estimate_centre",
-      "community": 78,
+      "community": 44,
       "norm_label": "estimate_centre()"
     },
     {
@@ -300,7 +300,7 @@
       "source_location": "L164",
       "_origin": "ast",
       "id": "nbody_streams_recentre_to_float32_relative",
-      "community": 78,
+      "community": 6,
       "norm_label": "to_float32_relative()"
     },
     {
@@ -330,7 +330,7 @@
       "source_location": "L88",
       "_origin": "ast",
       "id": "nbody_streams_recentre_rationale_88",
-      "community": 78,
+      "community": 44,
       "norm_label": "fused (pos - centre).astype(float32) for a c-contiguous (n, 3) float64 array."
     },
     {
@@ -350,7 +350,7 @@
       "source_location": "L117",
       "_origin": "ast",
       "id": "nbody_streams_recentre_rationale_117",
-      "community": 78,
+      "community": 44,
       "norm_label": "single-launch subsample centre for a c-contiguous (n, 3) float64 cupy array."
     },
     {
@@ -360,7 +360,7 @@
       "source_location": "L142",
       "_origin": "ast",
       "id": "nbody_streams_recentre_rationale_142",
-      "community": 78,
+      "community": 44,
       "norm_label": "mass-weighted mean of a strided subsample of ``pos`` (float64, shape (3,))."
     },
     {
@@ -370,7 +370,7 @@
       "source_location": "L165",
       "_origin": "ast",
       "id": "nbody_streams_recentre_rationale_165",
-      "community": 78,
+      "community": 6,
       "norm_label": "return float32 positions relative to a centre, and that centre.      parameters"
     },
     {
@@ -450,7 +450,7 @@
       "source_location": "L84",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_precision_dtype",
-      "community": 54,
+      "community": 296,
       "norm_label": "_precision_dtype()"
     },
     {
@@ -490,7 +490,7 @@
       "source_location": "L192",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_analyticbase_set_params",
-      "community": 54,
+      "community": 296,
       "norm_label": "._set_params()"
     },
     {
@@ -610,7 +610,7 @@
       "source_location": "L350",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_nfwpotentialgpu_init",
-      "community": 54,
+      "community": 296,
       "norm_label": ".__init__()"
     },
     {
@@ -630,7 +630,7 @@
       "source_location": "L381",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_plummerpotentialgpu",
-      "community": 54,
+      "community": 296,
       "norm_label": "plummerpotentialgpu"
     },
     {
@@ -640,7 +640,7 @@
       "source_location": "L390",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_plummerpotentialgpu_init",
-      "community": 54,
+      "community": 296,
       "norm_label": ".__init__()"
     },
     {
@@ -650,7 +650,7 @@
       "source_location": "L398",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_plummerpotentialgpu_from_agama",
-      "community": 54,
+      "community": 296,
       "norm_label": ".from_agama()"
     },
     {
@@ -690,7 +690,7 @@
       "source_location": "L476",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_dehnensphericalpotentialgpu",
-      "community": 46,
+      "community": 296,
       "norm_label": "dehnensphericalpotentialgpu"
     },
     {
@@ -700,7 +700,7 @@
       "source_location": "L487",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_dehnensphericalpotentialgpu_init",
-      "community": 54,
+      "community": 296,
       "norm_label": ".__init__()"
     },
     {
@@ -710,7 +710,7 @@
       "source_location": "L504",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_dehnensphericalpotentialgpu_from_agama",
-      "community": 46,
+      "community": 296,
       "norm_label": ".from_agama()"
     },
     {
@@ -720,7 +720,7 @@
       "source_location": "L533",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_isochronepotentialgpu",
-      "community": 46,
+      "community": 296,
       "norm_label": "isochronepotentialgpu"
     },
     {
@@ -730,7 +730,7 @@
       "source_location": "L542",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_isochronepotentialgpu_init",
-      "community": 46,
+      "community": 296,
       "norm_label": ".__init__()"
     },
     {
@@ -740,7 +740,7 @@
       "source_location": "L550",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_isochronepotentialgpu_from_agama",
-      "community": 46,
+      "community": 296,
       "norm_label": ".from_agama()"
     },
     {
@@ -760,7 +760,7 @@
       "source_location": "L599",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_miyamotonagaipotentialgpu_init",
-      "community": 54,
+      "community": 296,
       "norm_label": ".__init__()"
     },
     {
@@ -790,7 +790,7 @@
       "source_location": "L659",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_loghalopotentialgpu_init",
-      "community": 54,
+      "community": 296,
       "norm_label": ".__init__()"
     },
     {
@@ -820,7 +820,7 @@
       "source_location": "L789",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_diskansatzpotentialgpu_init",
-      "community": 54,
+      "community": 296,
       "norm_label": ".__init__()"
     },
     {
@@ -1030,7 +1030,7 @@
       "source_location": "L382",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_rationale_382",
-      "community": 54,
+      "community": 296,
       "norm_label": "plummer sphere: phi(r) = -gm / sqrt(r^2 + b^2)      constructor: plummerpotentia"
     },
     {
@@ -1050,7 +1050,7 @@
       "source_location": "L477",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_rationale_477",
-      "community": 46,
+      "community": 296,
       "norm_label": "dehnen spherical: phi(r) = -(gm/a) * (1 - (r/(r+a))^(2-gamma)) / (2-gamma)     s"
     },
     {
@@ -1060,7 +1060,7 @@
       "source_location": "L534",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_rationale_534",
-      "community": 46,
+      "community": 296,
       "norm_label": "isochrone: phi(r) = -gm / (b + sqrt(r^2 + b^2))      constructor: isochronepoten"
     },
     {
@@ -2370,7 +2370,7 @@
       "source_location": "L110",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_require_cupy",
-      "community": 10,
+      "community": 46,
       "norm_label": "require_cupy()"
     },
     {
@@ -2410,7 +2410,7 @@
       "source_location": "L111",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_rationale_111",
-      "community": 10,
+      "community": 46,
       "norm_label": "raise a descriptive :class:`importerror` if cupy is unavailable.      parameters"
     },
     {
@@ -3660,7 +3660,7 @@
       "source_location": "L118",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_get_module",
-      "community": 10,
+      "community": 46,
       "norm_label": "_get_module()"
     },
     {
@@ -3670,7 +3670,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "rawmodule",
-      "community": 10,
+      "community": 46,
       "norm_label": "rawmodule"
     },
     {
@@ -3690,7 +3690,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "rawkernel",
-      "community": 10,
+      "community": 46,
       "norm_label": "rawkernel"
     },
     {
@@ -3700,7 +3700,7 @@
       "source_location": "L139",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_get_cylspl_module",
-      "community": 10,
+      "community": 46,
       "norm_label": "_get_cylspl_module()"
     },
     {
@@ -3710,7 +3710,7 @@
       "source_location": "L169",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_get_cylspl_kernel",
-      "community": 10,
+      "community": 46,
       "norm_label": "_get_cylspl_kernel()"
     },
     {
@@ -4840,7 +4840,7 @@
       "source_location": "L2353",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_tiltedpotentialgpu",
-      "community": 46,
+      "community": 296,
       "norm_label": "tiltedpotentialgpu"
     },
     {
@@ -4850,7 +4850,7 @@
       "source_location": "L2367",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_tiltedpotentialgpu_init",
-      "community": 46,
+      "community": 296,
       "norm_label": ".__init__()"
     },
     {
@@ -4860,7 +4860,7 @@
       "source_location": "L2377",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_tiltedpotentialgpu_own_matrix",
-      "community": 46,
+      "community": 296,
       "norm_label": "._own_matrix()"
     },
     {
@@ -4870,7 +4870,7 @@
       "source_location": "L2381",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rotatingpotentialgpu",
-      "community": 46,
+      "community": 296,
       "norm_label": "rotatingpotentialgpu"
     },
     {
@@ -4880,7 +4880,7 @@
       "source_location": "L2402",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rotatingpotentialgpu_init",
-      "community": 46,
+      "community": 296,
       "norm_label": ".__init__()"
     },
     {
@@ -4890,7 +4890,7 @@
       "source_location": "L2419",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rotatingpotentialgpu_angle",
-      "community": 46,
+      "community": 296,
       "norm_label": ".angle()"
     },
     {
@@ -4990,7 +4990,7 @@
       "source_location": "L2663",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_apply_modifiers",
-      "community": 46,
+      "community": 296,
       "norm_label": "_apply_modifiers()"
     },
     {
@@ -5600,7 +5600,7 @@
       "source_location": "L2354",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rationale_2354",
-      "community": 46,
+      "community": 296,
       "norm_label": "static rotation: agama's ``orientation=`` modifier.      ``phi(x) = phi_inner(r^"
     },
     {
@@ -5610,7 +5610,7 @@
       "source_location": "L2382",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rationale_2382",
-      "community": 46,
+      "community": 296,
       "norm_label": "rotation about the z-axis: agama's ``rotation=`` modifier.      ``phi(x, t) = ph"
     },
     {
@@ -5620,7 +5620,7 @@
       "source_location": "L2420",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rationale_2420",
-      "community": 46,
+      "community": 296,
       "norm_label": "rotation angle [rad] at time *t*."
     },
     {
@@ -5700,7 +5700,7 @@
       "source_location": "L2664",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rationale_2664",
-      "community": 46,
+      "community": 296,
       "norm_label": "wrap *pot* with scaled/rotating/tilted/shifted modifiers if requested.      orde"
     },
     {
@@ -6210,7 +6210,7 @@
       "source_location": "L156",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_analytic_precision_test_dehnen_and_isochrone_large_radius",
-      "community": 46,
+      "community": 296,
       "norm_label": "test_dehnen_and_isochrone_large_radius()"
     },
     {
@@ -6917,7 +6917,7 @@
       "label": "_extra_terms()",
       "file_type": "code",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L131",
+      "source_location": "L134",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_cylspline_agama_extra_terms",
       "community": 69,
@@ -6927,7 +6927,7 @@
       "label": "test_off_grid_is_agama_plus_kept_terms()",
       "file_type": "code",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L152",
+      "source_location": "L155",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_off_grid_is_agama_plus_kept_terms",
       "community": 69,
@@ -6937,7 +6937,7 @@
       "label": "test_off_grid_derivatives_consistent()",
       "file_type": "code",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L160",
+      "source_location": "L163",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_off_grid_derivatives_consistent",
       "community": 69,
@@ -6947,7 +6947,7 @@
       "label": "test_potential_closer_to_continuous_at_grid_edge()",
       "file_type": "code",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L176",
+      "source_location": "L179",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_potential_closer_to_continuous_at_grid_edge",
       "community": 69,
@@ -6957,7 +6957,7 @@
       "label": "test_axis_is_limit_along_x()",
       "file_type": "code",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L195",
+      "source_location": "L198",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_axis_is_limit_along_x",
       "community": 69,
@@ -6987,9 +6987,9 @@
       "label": "The asymptote terms Agama does not evaluate (odd l, or m != 0).",
       "file_type": "rationale",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L132",
+      "source_location": "L135",
       "_origin": "ast",
-      "id": "nbody_streams_agama_helper_tests_test_cylspline_agama_rationale_132",
+      "id": "nbody_streams_agama_helper_tests_test_cylspline_agama_rationale_135",
       "community": 69,
       "norm_label": "the asymptote terms agama does not evaluate (odd l, or m != 0)."
     },
@@ -8600,7 +8600,7 @@
       "source_location": "L164",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_rotation_modifiers_test_bad_inputs",
-      "community": 46,
+      "community": 296,
       "norm_label": "test_bad_inputs()"
     },
     {
@@ -13350,7 +13350,7 @@
       "source_location": "L76",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_groupdata",
-      "community": 52,
+      "community": 301,
       "norm_label": "groupdata"
     },
     {
@@ -13360,7 +13360,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_h_int2",
-      "community": 52,
+      "community": 301,
       "norm_label": "int2"
     },
     {
@@ -13370,7 +13370,7 @@
       "source_location": "L79",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_groupdata_packed_data",
-      "community": 52,
+      "community": 301,
       "norm_label": "packed_data"
     },
     {
@@ -13380,7 +13380,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_h_host",
-      "community": 52,
+      "community": 301,
       "norm_label": "__host__"
     },
     {
@@ -13390,7 +13390,7 @@
       "source_location": "L81",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_groupdata_device",
-      "community": 52,
+      "community": 301,
       "norm_label": "__device__"
     },
     {
@@ -13400,7 +13400,7 @@
       "source_location": "L81",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_groupdata_groupdata",
-      "community": 52,
+      "community": 301,
       "norm_label": ".groupdata()"
     },
     {
@@ -15170,7 +15170,7 @@
       "source_location": "L266",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_computeforces_treewalk_warp",
-      "community": 60,
+      "community": 52,
       "norm_label": "treewalk_warp()"
     },
     {
@@ -15790,7 +15790,7 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_makegroups_emit",
-      "community": 31,
+      "community": 301,
       "norm_label": "emit()"
     },
     {
@@ -15800,7 +15800,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_makegroups_cu_device",
-      "community": 31,
+      "community": 301,
       "norm_label": "__device__"
     },
     {
@@ -18830,7 +18830,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "tests_test_chandrasekhar",
-      "community": 73,
+      "community": 62,
       "norm_label": "test_chandrasekhar.py"
     },
     {
@@ -18870,7 +18870,7 @@
       "source_location": "L59",
       "_origin": "ast",
       "id": "tests_test_chandrasekhar_testtonumpy",
-      "community": 73,
+      "community": 62,
       "norm_label": "testtonumpy"
     },
     {
@@ -18880,7 +18880,7 @@
       "source_location": "L60",
       "_origin": "ast",
       "id": "tests_test_chandrasekhar_testtonumpy_test_numpy_passthrough",
-      "community": 73,
+      "community": 62,
       "norm_label": ".test_numpy_passthrough()"
     },
     {
@@ -18890,7 +18890,7 @@
       "source_location": "L66",
       "_origin": "ast",
       "id": "tests_test_chandrasekhar_testtonumpy_test_cupy_conversion",
-      "community": 73,
+      "community": 62,
       "norm_label": ".test_cupy_conversion()"
     },
     {
@@ -19270,7 +19270,7 @@
       "source_location": "L503",
       "_origin": "ast",
       "id": "tests_test_chandrasekhar_testorbitdecay",
-      "community": 73,
+      "community": 302,
       "norm_label": "testorbitdecay"
     },
     {
@@ -19280,7 +19280,7 @@
       "source_location": "L512",
       "_origin": "ast",
       "id": "tests_test_chandrasekhar_testorbitdecay_test_circular_orbit_decays",
-      "community": 73,
+      "community": 302,
       "norm_label": ".test_circular_orbit_decays()"
     },
     {
@@ -19460,7 +19460,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "tests_test_chandrasekhar_rationale_1",
-      "community": 73,
+      "community": 62,
       "norm_label": "tests for nbody_streams._chandrasekhar  coverage -------- 1. compute_sigma_r --"
     },
     {
@@ -19710,7 +19710,7 @@
       "source_location": "L504",
       "_origin": "ast",
       "id": "tests_test_chandrasekhar_rationale_504",
-      "community": 73,
+      "community": 302,
       "norm_label": "approximate physics test.      a satellite on a circular orbit in an isothermal"
     },
     {
@@ -19720,7 +19720,7 @@
       "source_location": "L513",
       "_origin": "ast",
       "id": "tests_test_chandrasekhar_rationale_513",
-      "community": 73,
+      "community": 302,
       "norm_label": "satellite on circular orbit in sis should lose angular momentum."
     },
     {
@@ -38938,7 +38938,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L133",
+      "source_location": "L136",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama_extra_terms",
       "target": "nbody_streams_agama_helper_coefs_read_coefs",
@@ -46177,7 +46177,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L140",
+      "source_location": "L143",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama_extra_terms",
       "target": "nbody_streams_agama_helper_potential_sph_harm_agama_vect",
@@ -46506,7 +46506,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L133",
+      "source_location": "L136",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama_extra_terms",
       "target": "nbody_streams_agama_helper_potential_build_cylspline_data",
@@ -51823,7 +51823,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L131",
+      "source_location": "L134",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama",
       "target": "nbody_streams_agama_helper_tests_test_cylspline_agama_extra_terms",
@@ -51863,7 +51863,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L195",
+      "source_location": "L198",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama",
       "target": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_axis_is_limit_along_x",
@@ -51883,7 +51883,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L160",
+      "source_location": "L163",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama",
       "target": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_off_grid_derivatives_consistent",
@@ -51893,7 +51893,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L152",
+      "source_location": "L155",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama",
       "target": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_off_grid_is_agama_plus_kept_terms",
@@ -51913,7 +51913,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L176",
+      "source_location": "L179",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama",
       "target": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_potential_closer_to_continuous_at_grid_edge",
@@ -51954,7 +51954,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L124",
+      "source_location": "L127",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_grid_nodes_and_midpoints",
       "target": "nbody_streams_agama_helper_tests_test_cylspline_agama_rel",
@@ -51965,7 +51965,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L172",
+      "source_location": "L175",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_off_grid_derivatives_consistent",
       "target": "nbody_streams_agama_helper_tests_test_cylspline_agama_rel",
@@ -51976,7 +51976,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L156",
+      "source_location": "L159",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_off_grid_is_agama_plus_kept_terms",
       "target": "nbody_streams_agama_helper_tests_test_cylspline_agama_rel",
@@ -51998,7 +51998,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L185",
+      "source_location": "L188",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_potential_closer_to_continuous_at_grid_edge",
       "target": "nbody_streams_agama_helper_tests_test_cylspline_agama_rel",
@@ -52030,7 +52030,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L162",
+      "source_location": "L165",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_off_grid_derivatives_consistent",
       "target": "nbody_streams_agama_helper_tests_test_cylspline_agama_region",
@@ -52041,7 +52041,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L154",
+      "source_location": "L157",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_off_grid_is_agama_plus_kept_terms",
       "target": "nbody_streams_agama_helper_tests_test_cylspline_agama_region",
@@ -52062,9 +52062,9 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L132",
+      "source_location": "L135",
       "weight": 1.0,
-      "source": "nbody_streams_agama_helper_tests_test_cylspline_agama_rationale_132",
+      "source": "nbody_streams_agama_helper_tests_test_cylspline_agama_rationale_135",
       "target": "nbody_streams_agama_helper_tests_test_cylspline_agama_extra_terms",
       "confidence_score": 1.0
     },
@@ -52073,7 +52073,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "nbody_streams/agama_helper/tests/test_cylspline_agama.py",
-      "source_location": "L156",
+      "source_location": "L159",
       "weight": 1.0,
       "source": "nbody_streams_agama_helper_tests_test_cylspline_agama_test_off_grid_is_agama_plus_kept_terms",
       "target": "nbody_streams_agama_helper_tests_test_cylspline_agama_extra_terms",
@@ -89127,5 +89127,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "fb4efaf1b138c4631b30d1de7e3b2dd028b22e1e"
+  "built_at_commit": "dfd79af45937b668da7f011a9b0e5f256aa72ba1"
 }

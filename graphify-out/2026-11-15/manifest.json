@@ -130,8 +130,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/fields.py": {
-    "mtime": 1794204944.301188,
-    "ast_hash": "61c885b108019168a7fa1927d0452b58",
+    "mtime": 1794734042.71031,
+    "ast_hash": "0982942b0c470be9ca92e41e3574deca",
     "semantic_hash": ""
   },
   "nbody_streams/nbody_io.py": {
@@ -140,8 +140,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/run.py": {
-    "mtime": 1794204944.301472,
-    "ast_hash": "0f1bfeeb099530edae275ad513814f95",
+    "mtime": 1794734042.71031,
+    "ast_hash": "4cee0373da14de5b54be5aa6802a1473",
     "semantic_hash": ""
   },
   "nbody_streams/sim.py": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794733376.6976452,
-    "ast_hash": "c513377d611836158c64f76907b6cbf2",
+    "mtime": 1794734042.698583,
+    "ast_hash": "61cd59a438464fef843c8c02de027406",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
@@ -567,6 +567,11 @@
   "nbody_streams/agama_helper/tests/test_cylspline_agama.py": {
     "mtime": 1794733376.7136414,
     "ast_hash": "89191e0c2120bedf7fd3ea7b29552f88",
+    "semantic_hash": ""
+  },
+  "tests/test_direct_fused.py": {
+    "mtime": 1794734042.71031,
+    "ast_hash": "5b975b373810dc18ad5df2b58262b1a0",
     "semantic_hash": ""
   }
 }
