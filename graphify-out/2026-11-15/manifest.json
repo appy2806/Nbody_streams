@@ -50,18 +50,18 @@
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/_load.py": {
-    "mtime": 1786585358.4826357,
-    "ast_hash": "622a2c26b7806517a765702334adf203",
+    "mtime": 1794730006.9207227,
+    "ast_hash": "5bfb94df756e47019c8a8c7e85bb0352",
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/_multipole_potential_kernel.cu": {
-    "mtime": 1777526379.5901608,
-    "ast_hash": "32c4c68f4c93dd753cd5f269116ffcf6",
+    "mtime": 1794729820.388039,
+    "ast_hash": "c63ec538db3947a65321ec0aa39a4cad",
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/_potential.py": {
-    "mtime": 1794728519.7859833,
-    "ast_hash": "96ecb1e253e1bce6669cd4904727c4bf",
+    "mtime": 1794729996.560792,
+    "ast_hash": "353a6439edc1e86c5cce66e6d40353e6",
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/tests/test_load_paths.py": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794728519.7739835,
-    "ast_hash": "72ce14d438f9ece603f07e3b87436e35",
+    "mtime": 1794730079.5461082,
+    "ast_hash": "121c7ad97e22cb8a99b2634933824609",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
@@ -380,8 +380,8 @@
     "semantic_hash": ""
   },
   "docs/agama_helper.md": {
-    "mtime": 1794728519.7739835,
-    "ast_hash": "02f65fd08b931e81cd52a4705429f273",
+    "mtime": 1794730079.545326,
+    "ast_hash": "c628f5e81da2ee7ac171da2294133b71",
     "semantic_hash": ""
   },
   "docs/coords.md": {
@@ -550,8 +550,13 @@
     "semantic_hash": ""
   },
   "nbody_streams/agama_helper/tests/test_analytic_precision.py": {
-    "mtime": 1794728519.7859833,
-    "ast_hash": "155f2f1c26c59ddcad246b0b1fc2a951",
+    "mtime": 1794729894.3006682,
+    "ast_hash": "d217ffa8773e68cef2b381fea85001b8",
+    "semantic_hash": ""
+  },
+  "nbody_streams/agama_helper/tests/test_multipole_precision.py": {
+    "mtime": 1794730057.4549682,
+    "ast_hash": "131cc5eeba700fc5085adf7d2f82f3f4",
     "semantic_hash": ""
   }
 }

@@ -298,5 +298,9 @@
   "296": "vec<3,double>",
   "297": "vec<4,double>",
   "298": "vec<3,float>",
-  "299": "[2.0.0] - 2026-02-28"
+  "299": "[2.0.0] - 2026-02-28",
+  "300": "Empirical radial profiles",
+  "301": "TestSigmaLocalCircular",
+  "302": "Density-profile fitting",
+  "303": "[1.0.0] - 2025-XX-XX"
 }
