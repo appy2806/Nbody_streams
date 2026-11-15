@@ -71,6 +71,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Fewer passes in the GPU direct-sum integrator** (`run_nbody_gpu`). Mass
+  and softening are cast to the force precision once (a per-particle
+  softening array was re-uploaded every step), positions and masses are
+  packed into float4 in one kernel, the force kernel's x/y/z output feeds a
+  fused closing kick (self + external + kick, in place), and kick + drift is
+  one kernel. 2.7-2.9x faster per step at N = 1e3, ~25% at 3e3, ~8% at 1e4
+  (RTX 3080 Laptop); results agree with the old loop to rounding (1e-15
+  km/s after two steps). `compute_nbody_forces_gpu` packs float4 and
+  assembles its output in one kernel each (bitwise unchanged).
 - **Analytic GPU kernels return the force and `-Hessian` directly**, reading
   the float64 `(N,3)` positions in-kernel: the separate negation and
   per-axis slicing passes are gone, 1.2-3x faster in float64 too.

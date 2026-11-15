@@ -60,9 +60,9 @@ from typing import Literal, Union
 import warnings
 
 try:
-    from ._recentre import to_float32_relative
+    from ._recentre import to_float32_relative, estimate_centre
 except ImportError:  # imported as a top-level module
-    from _recentre import to_float32_relative
+    from _recentre import to_float32_relative, estimate_centre
 
 try :
     from .cuda_kernels import *  # Import kernel templates
@@ -677,6 +677,92 @@ def _prepare_cpu_arrays(validated):
 # PUBLIC API
 # ============================================================================
 
+# ----------------------------------------------------------------------------
+# Fused GPU array packing for the direct sum.  Each replaces several small
+# CuPy launches, which dominate the cost of a step at N <~ 1e4.
+# ----------------------------------------------------------------------------
+
+_fused_kernels: dict = {}
+
+
+def _fused(name: str):
+    """Build (once) and return one of the fused packing kernels."""
+    k = _fused_kernels.get(name)
+    if k is not None:
+        return k
+    if name == 'pack4':          # SoA x, y, z, m -> interleaved float4
+        k = cp.ElementwiseKernel(
+            'float32 x, float32 y, float32 z, float32 m', 'raw float32 pm',
+            'pm[4*i] = x; pm[4*i+1] = y; pm[4*i+2] = z; pm[4*i+3] = m;',
+            'nbody_pack4')
+    elif name == 'pack4_rel':    # float64 (N,3) - centre -> float4 with m
+        k = cp.ElementwiseKernel(
+            'raw float64 pos, raw float64 c, float32 m', 'raw float32 pm',
+            """
+            pm[4*i]     = (float)(pos[3*i]     - c[0]);
+            pm[4*i + 1] = (float)(pos[3*i + 1] - c[1]);
+            pm[4*i + 2] = (float)(pos[3*i + 2] - c[2]);
+            pm[4*i + 3] = m;
+            """, 'nbody_pack4_rel')
+    elif name == 'pack4_f32':    # float32 (N,3) -> float4 with m
+        k = cp.ElementwiseKernel(
+            'raw float32 pos, float32 m', 'raw float32 pm',
+            'pm[4*i] = pos[3*i]; pm[4*i+1] = pos[3*i+1]; pm[4*i+2] = pos[3*i+2]; pm[4*i+3] = m;',
+            'nbody_pack4_f32')
+    elif name == 'split3':       # float64 (N,3) -> x, y, z
+        k = cp.ElementwiseKernel(
+            'raw float64 pos', 'float64 x, float64 y, float64 z',
+            'x = pos[3*i]; y = pos[3*i+1]; z = pos[3*i+2];', 'nbody_split3')
+    elif name == 'assemble3':    # ax, ay, az -> (N,3)
+        k = cp.ElementwiseKernel(
+            'T ax, T ay, T az', 'raw T acc',
+            'acc[3*i] = ax; acc[3*i+1] = ay; acc[3*i+2] = az;', 'nbody_assemble3')
+    else:
+        raise KeyError(name)
+    _fused_kernels[name] = k
+    return k
+
+
+def _direct_forces_gpu_soa(pos, mass_gpu, h_gpu, G, precision, kernel_id):
+    """Direct-sum accelerations for an integrator's hot loop.
+
+    ``pos`` is a CuPy (N,3) array (float64, or float32 used as given);
+    ``mass_gpu`` and ``h_gpu`` are (N,) CuPy arrays already in the force
+    precision (prepared once by the caller).  Float32 precisions see ``pos``
+    relative to :func:`estimate_centre` (as ``compute_nbody_forces_gpu``),
+    packed into float4 in one kernel.  Returns ``(ax, ay, az)`` in the force
+    precision, with no (N,3) assembly pass.
+    """
+    prec = precision.lower()
+    dtype = _PRECISION_MAP[prec][0]
+    N = pos.shape[0]
+    ax = cp.empty(N, dtype=dtype)
+    ay = cp.empty(N, dtype=dtype)
+    az = cp.empty(N, dtype=dtype)
+    if N == 0:
+        return ax, ay, az
+    kern = _get_kernel('force', prec, use_kahan=(prec == 'float32_kahan'))
+    blocks = (N + 127) // 128
+    eps2 = dtype(1e-15)
+    pos = cp.ascontiguousarray(pos)
+    if prec in ('float32', 'float32_kahan'):
+        pm = cp.empty(4 * N, dtype=cp.float32)
+        if pos.dtype == cp.float32:
+            _fused('pack4_f32')(pos, mass_gpu, pm)
+        else:
+            centre = estimate_centre(pos, mass_gpu)
+            _fused('pack4_rel')(pos.astype(cp.float64, copy=False), centre, mass_gpu, pm)
+        kern((blocks,), (128,),
+             (pm, h_gpu, ax, ay, az, dtype(G), eps2, cp.int32(kernel_id), cp.int32(N)))
+    else:
+        x, y, z = (cp.empty(N, dtype=cp.float64) for _ in range(3))
+        _fused('split3')(pos.astype(cp.float64, copy=False), x, y, z)
+        kern((blocks,), (128,),
+             (x, y, z, mass_gpu, h_gpu, ax, ay, az, dtype(G), eps2,
+              cp.int32(kernel_id), cp.int32(N)))
+    return ax, ay, az
+
+
 def compute_nbody_forces_gpu(
     pos: ArrayLike,
     mass: ArrayLike | float,
@@ -849,15 +935,9 @@ def compute_nbody_forces_gpu(
         # For float4 optimization, we would need to prepare data differently and call a different kernel.
         # Interleave x,y,z,mass into float4 structure
         # Create float4 array - CuPy needs view casting, not structured dtype
-        pos_mass_gpu = cp.empty((N, 4), dtype=cp.float32)
-        pos_mass_gpu[:, 0] = x_gpu
-        pos_mass_gpu[:, 1] = y_gpu
-        pos_mass_gpu[:, 2] = z_gpu
-        pos_mass_gpu[:, 3] = mass_gpu
-        
-        # Reinterpret as float4* for kernel (view as contiguous memory)
-        pos_mass_gpu = pos_mass_gpu.ravel()
-        
+        pos_mass_gpu = cp.empty(4 * N, dtype=cp.float32)   # read as float4*
+        _fused('pack4')(x_gpu, y_gpu, z_gpu, mass_gpu, pos_mass_gpu)
+
         _nbody_force_kernel(
             (blocks_per_grid,), (threads_per_block,),
             (pos_mass_gpu, h_gpu, ax_gpu, ay_gpu, az_gpu,
@@ -873,9 +953,7 @@ def compute_nbody_forces_gpu(
     
     # Assemble result into (N, 3) array
     acc_gpu = cp.empty((N, 3), dtype=dtype)
-    acc_gpu[:, 0] = ax_gpu
-    acc_gpu[:, 1] = ay_gpu
-    acc_gpu[:, 2] = az_gpu
+    _fused('assemble3')(ax_gpu, ay_gpu, az_gpu, acc_gpu)
 
     # Convert back to Array of Structures layout
     if return_cupy:    
