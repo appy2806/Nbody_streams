@@ -684,6 +684,7 @@ from nbody_streams.agama_helper import PotentialGPU
 | Analytic: `UniformAcceleration` (constant or time-dependent) | Direct CuPy kernel |
 | `Disk` | `CompositePotentialGPU(DiskAnsatzGPU + MultipolePotentialGPU)` |
 | `Spheroid`, `King` | Agama CPU export → `MultipolePotentialGPU` |
+| `Spheroid`, `NFW`, `Dehnen` with a time table for `axisRatioY`/`axisRatioZ`/`mass`/`densityNorm` | `SpheroidPotentialGPU` (direct from the density) |
 | Multi-component `.ini` / any text file with `[Potential]` | `CompositePotentialGPU` |
 | `EvolvingPotentialGPU` | Linear lerp of snapshot GPU potentials |
 
@@ -712,6 +713,90 @@ halo  = PotentialGPU(PotentialGPU(inner, rotation=t_theta_table),
 
 Stacked rotation modifiers collapse into one 3x3 matrix (`.matrix(t)`), so the
 cost per call is two (N,3)x(3,3) products plus the inner evaluation.
+
+### Time-dependent shapes: `SpheroidPotentialGPU`
+
+A triaxial halo whose axis ratios change during the run. Agama has no such
+model, so a time table for the shape is evaluated directly from the density
+instead of through an Agama Multipole. **The static route is unchanged:**
+`PotentialGPU(type='Spheroid', axisRatioZ=0.6, ...)` still builds the Agama
+Multipole; only a *table* switches to the direct kernel.
+
+```python
+q_t = [[0.0, 0.5], [3.0, 0.7], [6.0, 0.9]]          # [t, z/x]: rounding up
+halo = PotentialGPU(type='NFW', mass=1e12, scaleRadius=15,
+                    axisRatioY=0.85, axisRatioZ=q_t)
+halo = PotentialGPU(type='Spheroid', densityNorm=1e7, scaleRadius=15, alpha=1, beta=3,
+                    gamma=1, outerCutoffRadius=300, axisRatioZ=q_t)
+halo = PotentialGPU(type='Dehnen', mass=1e12, scaleRadius=15, gamma=1.5,
+                    axisRatioZ=q_t, rotation=[[0, 0], [6, 1.2]])   # modifiers compose
+
+from nbody_streams.agama_helper._spheroid import SpheroidPotentialGPU
+halo = SpheroidPotentialGPU(mass=1e12, scaleRadius=15, beta=3, axisRatioZ=q_t, nodes=64)
+halo.shape(t)    # (p, q) at t
+halo.rho0(t)     # density normalisation at t
+```
+
+| keyword | meaning |
+|---|---|
+| `axisRatioY`, `axisRatioZ` | `p = y/x`, `q = z/x`: scalar, `(T,2)` `[t, value]` (regularized natural cubic spline, as `center=`), or `(T,3)` `[t, value, dvalue/dt]` (Hermite) |
+| `mass` | scalar or table. `rho0(t) = mass / (4 pi a^3 p q I)`, `I` = the profile's mass integral, so **the mass inside every ellipsoid stays fixed while the shape changes**. Finite-mass profiles match Agama's `mass=`; for infinite mass (`beta <= 3`, no cutoff, where Agama raises) `I = 1`, the NFW normalisation |
+| `densityNorm` | scalar or table: `rho0` itself; enclosed masses then change with `p q` |
+| `scaleRadius`, `alpha`, `beta`, `gamma`, `outerCutoffRadius`, `cutoffStrength` | static, as Agama. A time-dependent size comes from `scale=` |
+| `nodes` | quadrature nodes, default 32 |
+| `precision` | `'float64'` (default) or `'float32'`: arithmetic inside the kernels; inputs and outputs stay float64 |
+
+`type='NFW'` fixes `alpha, beta, gamma = 1, 3, 1`; `type='Dehnen'` fixes
+`alpha, beta = 1, 4`. Multipole-only keywords (`lmax`, `gridSizeR`) raise.
+
+**How it works.** For `rho(m)`, `m^2 = x^2 + y^2/p^2 + z^2/q^2`, the homoeoid
+theorem (Chandrasekhar 1969; BT08 eq. 2.140) gives the force as a 1D integral
+of the density itself. With `tau = 1/s^2 - 1`, `D_y = 1 + (p^2-1) s^2`,
+`D_z = 1 + (q^2-1) s^2`, `D_x = 1`:
+
+```
+dPhi/dx_i = 4 pi G p q x_i int_0^1 rho(m(s)) s^2 / (D_i sqrt(D_y D_z)) ds
+Phi       = -2 pi G p q    int_0^1 dpsi(m(s))    / sqrt(D_y D_z)      ds
+m(s)^2    = s^2 (x^2 + y^2/D_y + z^2/D_z),   dpsi(m) = 2 int_m^inf rho m' dm'
+```
+
+The force needs only `rho` (closed form), so a new shape costs nothing:
+`p(t), q(t)` are spline-evaluated on the CPU once per call and the per-node
+factors (`1/D_y`, `1/D_z`, weights) are rebuilt only when they change. `dpsi`
+depends on the radial profile alone, so it is tabulated once and only the
+potential reads it. The Hessian follows by differentiating under the integral
+(needs `dln rho / dln m`, also closed form). No Poisson solve, no expansion.
+
+Quadrature is Gauss-Legendre in `v` with `s = v^2`, which removes the cusp's
+`s^(2-gamma)` singularity and puts nodes where the far-field integrand lives
+(plain `s`, as Galax uses with 50 nodes, loses 1e-4 to 1e-3 in the force
+for a gamma = 1.5 cusp at 30-100 r_s).
+
+**Accuracy and cost** (RTX 3080 Laptop, p = 0.8, q = 0.5, r <= 40 r_s, 32 nodes):
+
+| profile | precision | force err | ms / 1e6 particles |
+|---|---|---|---|
+| NFW + cutoff, Hernquist, Jaffe (alpha=1, integer slopes: fast path) | float64 | ~1e-14 | 14 |
+| general (e.g. alpha=2, beta=3.5, gamma=0.7) | float64 | ~3e-9 | 28 |
+| either | **float32** | ~5e-7 | **0.9** |
+| Agama Spheroid → Multipole, lmax=6 (static only) | float64 | ~1e-3 vs exact | 51 |
+| spherical `NFWPotentialGPU` (reference) | float64 | — | 0.8 |
+
+`precision='float32'` is the counterpart of the `float32` self-gravity
+kernels: errors ~1e-6 (potential, Hessian) and ~5e-7 (force), 15-30x
+faster on a consumer GPU. Nothing else in `agama_helper` has a float32
+mode; `run_simulation`'s `precision=` does not reach external potentials, so
+set it on the potential itself.
+
+Force derivatives reach ~1e-7 at 32 nodes; `nodes=64` gives ~1e-12 for
+both at twice the cost. Validated against Agama's exact triaxial `Dehnen`,
+the closed-form spherical NFW, Agama's Multipole as lmax grows (it converges
+to this kernel), finite differences and Poisson's equation
+(`agama_helper/tests/test_spheroid_shape.py`).
+
+Consumer GPUs run FP64 at 1/64 of the FP32 rate, so the cost is the count of
+`pow`/`exp` per node; the fast path (alpha = 1 with integer `gamma` and
+`beta - gamma`, and `cutoffStrength = 2`) replaces them with multiplications.
 
 ### Factory: `PotentialGPU(...)`
 

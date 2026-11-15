@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Time-dependent halo shapes: `SpheroidPotentialGPU`.** Agama's Spheroid
+  density (same keywords; also NFW and Dehnen) with `axisRatioY`,
+  `axisRatioZ`, `mass` or `densityNorm` given as `[t, value]` tables. The
+  potential is evaluated directly from the density with the homoeoid-theorem
+  1D integral, so the shape can change every step without rebuilding
+  anything, and there is no lmax truncation. `PotentialGPU(type='Spheroid' |
+  'NFW' | 'Dehnen', ...)` routes here only when one of those keywords is a
+  table; static shapes keep the Agama Multipole route unchanged. `mass=`
+  holds the mass inside every ellipsoid fixed as the shape changes. Force
+  ~1e-14 to ~3e-9, 14-28 ms per 1e6 particles (RTX 3080 Laptop, FP64), versus
+  51 ms for the lmax=6 Multipole route. `precision='float32'` runs the
+  kernels in single precision (~5e-7 force, 0.9 ms per 1e6 particles);
+  inputs and outputs stay float64. Composes with `rotation=`,
+  `orientation=`, `center=`, `scale=`.
+
 - **GPU rotation modifiers.** `TiltedPotentialGPU` (`orientation=`) and
   `RotatingPotentialGPU` (`rotation=`, constant angle or `[t, angle]` table)
   mirror Agama's modifiers; `PotentialGPU(..., orientation=, rotation=)` and

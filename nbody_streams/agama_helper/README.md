@@ -52,6 +52,21 @@ or a path.  Linear extrapolation outside the range, as in Agama.  Interpolation 
 a CPU-side O(log T) lookup per call; kernels see three floats.
 `from_agama()` is not supported — Agama does not export the table.
 
+### Time-dependent shape — `_spheroid.py`
+
+`SpheroidPotentialGPU`: Agama's Spheroid density (same keywords), but
+`axisRatioY`, `axisRatioZ`, `mass`, `densityNorm` may be `(T,2)`/`(T,3)` time
+tables. Evaluated directly from the density with the homoeoid-theorem 1D
+integral (32-node Gauss-Legendre in `s = v^2`), so no Multipole and no rebuild
+when the shape changes. `PotentialGPU(type='Spheroid'|'NFW'|'Dehnen', ...)`
+routes here **only** when one of those keywords is a table; static shapes keep
+the Agama route below. `mass=` holds the mass inside every ellipsoid fixed.
+Force ~1e-14 (integer-slope profiles) to ~3e-9 (general), Hessian ~1e-7, out
+to 40 r_s; 14-28 ms per 1e6 particles on an RTX 3080 Laptop.
+`precision='float32'` runs the kernels in single precision: ~5e-7 force,
+0.9 ms per 1e6 particles; inputs/outputs stay float64. Details:
+`docs/agama_helper.md`, "Time-dependent shapes".
+
 Via Agama CPU export (in _potential.py ):
 `Disk`     →  _build_disk_gpu : DiskAnsatz (from input kwargs) + Multipole (from Agama export) →  CompositePotentialGPU
 `Spheroid` →  _build_spheroid_gpu : Agama export →  MultipolePotentialGPU
@@ -240,6 +255,7 @@ Units follow Agama convention: mass = Msol, length = kpc, velocity = km/s.
 | Multipole l>0 harmonics | ~1e-7 | ~1e-5 |
 | Disk composite (DiskAnsatz + Multipole) | ~5e-5 | ~3e-3 |
 | Analytic (NFW, Hernquist, etc.) | ~1e-12 | ~1e-12 |
+| `SpheroidPotentialGPU` (32 nodes, r <= 40 r_s) | ~1e-12 | ~1e-14 (integer slopes) to ~3e-9 |
 
 l>0 errors are a numerical floor from log-scaling derivative cancellation — both GPU and Agama CPU hit the same floor. BFE fitting error for N-body data is typically >1%, so this is not a practical issue.
 

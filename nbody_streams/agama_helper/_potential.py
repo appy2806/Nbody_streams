@@ -2507,6 +2507,51 @@ def _build_disk_gpu(**kw):
     return CompositePotentialGPU([disk_gpu, multipole_gpu])
 
 
+# Keyword names of SpheroidPotentialGPU, keyed by lowercase-no-underscore form.
+_SPHEROID_KW = {
+    "densitynorm": "densityNorm", "rho0": "densityNorm", "mass": "mass",
+    "scaleradius": "scaleRadius", "alpha": "alpha", "beta": "beta", "gamma": "gamma",
+    "outercutoffradius": "outerCutoffRadius", "cutoffstrength": "cutoffStrength",
+    "axisratioy": "axisRatioY", "p": "axisRatioY",
+    "axisratioz": "axisRatioZ", "q": "axisRatioZ", "nodes": "nodes",
+    "precision": "precision",
+}
+_SPHEROID_TIME_KW = ("axisratioy", "p", "axisratioz", "q", "mass", "densitynorm", "rho0")
+
+
+def _has_time_table(kw: dict) -> bool:
+    """True when a shape or normalisation keyword is a time table, not a scalar."""
+    return any(k.lower().replace('_', '') in _SPHEROID_TIME_KW and np.ndim(v) >= 1
+               and not isinstance(v, str) for k, v in kw.items())
+
+
+def _build_spheroid_direct(key: str, kw: dict):
+    """Spheroid/NFW/Dehnen with a time-dependent shape -> SpheroidPotentialGPU.
+
+    Agama cannot express a time-dependent shape, so these skip the Multipole
+    route and evaluate the density directly.  NFW and Dehnen fix the profile
+    slopes as Agama does (NFW: 1/3/1; Dehnen: alpha=1, beta=4).
+    """
+    try:
+        from nbody_streams.agama_helper._spheroid import SpheroidPotentialGPU
+    except ImportError:
+        from _spheroid import SpheroidPotentialGPU
+    fixed = {"nfw": dict(alpha=1.0, beta=3.0, gamma=1.0),
+             "dehnen": dict(alpha=1.0, beta=4.0)}.get(key, {})
+    args = dict(fixed)
+    for k, v in kw.items():
+        name = _SPHEROID_KW.get(k.lower().replace('_', ''))
+        if name is None:
+            raise TypeError(
+                f"Parameter {k!r} is not used by a {key} with a time-dependent shape "
+                "(SpheroidPotentialGPU evaluates the density directly; Multipole "
+                "settings such as lmax/gridSizeR do not apply).")
+        if name in fixed:
+            raise TypeError(f"{key} fixes {name}; use type='Spheroid' to set it.")
+        args[name] = v
+    return SpheroidPotentialGPU(**args)
+
+
 # Map Agama type strings (lowercase) -> analytic GPU class or factory callable.
 # Populated after _analytic_potentials is imported on first call.
 _ANALYTIC_TYPE_MAP: dict | None = None
@@ -2992,6 +3037,15 @@ def PotentialGPU(*args,
         'Disk' builds the full DiskAnsatz+Multipole composite via Agama CPU
         (supports innerCutoffRadius).  Remaining kwargs forwarded to the
         constructor or Agama CPU builder.
+
+        'Spheroid', 'NFW' and 'Dehnen' accept a ``(T,2)`` ``[t, value]`` (or
+        ``(T,3)`` with ``dvalue/dt``) table for ``axisRatioY``, ``axisRatioZ``,
+        ``mass`` or ``densityNorm``; the shape then evolves in time and the
+        potential is evaluated directly from the density
+        (``SpheroidPotentialGPU``) instead of through Agama::
+
+            PotentialGPU(type='NFW', mass=1e12, scaleRadius=15,
+                         axisRatioY=0.9, axisRatioZ=[[0, 0.5], [5, 0.8]])
     file : str or Path, optional
         Shorthand for ``PotentialGPU('path/to/file')``.  Accepts:
 
@@ -3057,6 +3111,12 @@ def PotentialGPU(*args,
         if key == 'uniformacceleration' and file is not None:
             amap = _get_analytic_map()
             pot  = amap[key](file=file, **_normalize_params(kw))
+            return _apply_modifiers(pot, center, scale, ampl, orientation, rotation)
+        # A time table for the shape or normalisation is something Agama cannot
+        # express: build the direct-density kernel instead.  Static shapes keep
+        # their usual routes (Spheroid/triaxial Dehnen via Agama Multipole).
+        if key in ("spheroid", "nfw", "dehnen") and _has_time_table(kw):
+            pot = _build_spheroid_direct(key, kw)
             return _apply_modifiers(pot, center, scale, ampl, orientation, rotation)
         amap = _get_analytic_map()
         cls  = amap.get(key)
