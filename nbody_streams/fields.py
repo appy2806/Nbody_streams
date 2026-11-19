@@ -64,10 +64,10 @@ try:
 except ImportError:  # imported as a top-level module
     from _recentre import to_float32_relative, estimate_centre
 
-try :
-    from .cuda_kernels import *  # Import kernel templates
+try:
+    from .cuda_kernels import direct_source
 except ImportError:
-    from cuda_kernels import *  # Fallback for direct script execution
+    from cuda_kernels import direct_source  # direct script execution
 
 try:
     import cupy as cp
@@ -377,115 +377,70 @@ if NUMBA_AVAILABLE:
 # CUDA KERNEL MANAGEMENT - UNIFIED
 # ============================================================================
 
-# Type specifications for float vs double
-_TYPE_SPECS = {
-    'float32': {
-        'T': 'float', 
-        'RSQRT': 'rsqrtf', 
-        'SQRT': 'sqrtf', 
-        'FMA': 'fmaf', 
-        'FMAX': 'fmaxf',
-        'USE_FLOAT4': True,  # >>>>>>> NEW: Flag for future float4 optimization
-    },
-    'float64': {
-        'T': 'double', 
-        'RSQRT': 'rsqrt', 
-        'SQRT': 'sqrt', 
-        'FMA': 'fma', 
-        'FMAX': 'fmax',
-        'USE_FLOAT4': False,  # >>>>>>> NEW: No float4 optimization for double precision
-    },
-}
+# Compiled direct-sum modules, keyed by (precision, kernel_id)
+_NBODY_MODULE_CACHE = {}
 
-# Kernel cache - stores compiled kernels
-_NBODY_KERNEL_CACHE = {}
-
-# Template and kernel name mapping
-_NBODY_KERNEL_CONFIG = {
-    # Forces kernels
-    ('force', 'float32', False): (_NBODY_KERNEL_TEMPLATE_FLOAT4, 'nbody_forces_kernel_float4'),
-    ('force', 'float64', False): (_NBODY_KERNEL_TEMPLATE, 'nbody_forces_kernel'),
-    ('force', 'float32', True):  (_KAHAN_KERNEL_TEMPLATE_FLOAT4, 'nbody_forces_kahan_kernel_float4'),
-    ('force', 'float64', True):  (_KAHAN_KERNEL_TEMPLATE, 'nbody_forces_kahan_kernel'),
-    
-    # Potential kernels
-    ('potential', 'float32', False): (_POTENTIAL_KERNEL_TEMPLATE_FLOAT4, 'nbody_potential_kernel_float4'),
-    ('potential', 'float64', False): (_POTENTIAL_KERNEL_TEMPLATE, 'nbody_potential_kernel'),
-    ('potential', 'float32', True):  (_POTENTIAL_KAHAN_KERNEL_TEMPLATE_FLOAT4, 'nbody_potential_kahan_kernel_float4'),
-    ('potential', 'float64', True):  (_POTENTIAL_KAHAN_KERNEL_TEMPLATE, 'nbody_potential_kahan_kernel'),
+# Entry-point names in cuda/direct.cu
+_NBODY_KERNEL_NAMES = {
+    ('force', 'float32', False): 'nbody_forces_kernel_float4',
+    ('force', 'float64', False): 'nbody_forces_kernel',
+    ('force', 'float32', True): 'nbody_forces_kahan_kernel_float4',
+    ('force', 'float64', True): 'nbody_forces_kahan_kernel',
+    ('potential', 'float32', False): 'nbody_potential_kernel_float4',
+    ('potential', 'float64', False): 'nbody_potential_kernel',
+    ('potential', 'float32', True): 'nbody_potential_kahan_kernel_float4',
+    ('potential', 'float64', True): 'nbody_potential_kahan_kernel',
 }
 
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
 
-def _get_kernel(kernel_type='force', precision='float64', use_kahan=False):
+def _get_kernel(kernel_type, precision, use_kahan, kernel_id):
     """
-    Get compiled CUDA kernel for forces or potential.
-    
+    Return the compiled CUDA kernel for forces or potential.
+
     Parameters
     ----------
-    kernel_type : str
-        Either 'force' or 'potential'
-    precision : str
-        Either 'float32' or 'float64' (or 'float32_kahan' for backwards compat)
+    kernel_type : {'force', 'potential'}
+    precision : {'float32', 'float64', 'float32_kahan'}
+        'float32_kahan' implies ``use_kahan=True``.
     use_kahan : bool
-        Whether to use Kahan summation. Ignored if precision='float32_kahan'
-    
+        Kahan summation.
+    kernel_id : int
+        Softening kernel (see ``KERNEL_MAP``), fixed at compile time.
+
     Returns
     -------
-    kernel : cp.RawKernel
-        Compiled CUDA kernel
+    cupy.RawKernel-like callable
     """
-    # Handle legacy 'float32_kahan' precision string
     if precision == 'float32_kahan':
         precision = 'float32'
         use_kahan = True
-    
-    # Validate inputs
-    if kernel_type not in ['force', 'potential']:
+    if kernel_type not in ('force', 'potential'):
         raise ValueError(f"kernel_type must be 'force' or 'potential', got {kernel_type}")
-    if precision not in ['float32', 'float64']:
+    if precision not in ('float32', 'float64'):
         raise ValueError(f"precision must be 'float32' or 'float64', got {precision}")
-    
-    # Create cache key
-    cache_key = f"{kernel_type}_{precision}{'_kahan' if use_kahan else ''}"
-    
-    # Check cache
-    if cache_key in _NBODY_KERNEL_CACHE:
-        return _NBODY_KERNEL_CACHE[cache_key]
-    
-    # Get template and kernel name
-    config_key = (kernel_type, precision, use_kahan)
-    if config_key not in _NBODY_KERNEL_CONFIG:
+    kernel_id = int(kernel_id)
+    if kernel_id not in KERNEL_MAP.values():
+        raise ValueError(f"unknown kernel_id {kernel_id}")
 
-        raise ValueError(f"No kernel configuration for {config_key}")
-    
-    template, kernel_name = _NBODY_KERNEL_CONFIG[config_key]
-    
-    # Get type specs
-    type_specs = _TYPE_SPECS[precision]
-    
-    # Format template with type specs
-    source = template.format(**type_specs)
-
-    #  Find architecture available across NVIDIA GPUs automatically
-    cc = cp.cuda.Device().compute_capability
-    arch_flag = f'-arch=sm_{cc}'
-
-    options = (
-        '-O3', # Maximum optimization
-        '--use_fast_math', # secret sauce for performance boost, but can reduce accuracy in some cases.
-        arch_flag,  # Target GPU determined automatically!
-        '--ptxas-options=-v' # Optional: Shows register usage in console
-    )
-    
-    # Compile kernel
-    kernel = cp.RawKernel(source, kernel_name, options=options, backend='nvcc')
-    
-    # Cache and return
-    _NBODY_KERNEL_CACHE[cache_key] = kernel
-    return kernel
+    key = (precision, kernel_id)
+    module = _NBODY_MODULE_CACHE.get(key)
+    if module is None:
+        cc = cp.cuda.Device().compute_capability
+        real = 'float' if precision == 'float32' else 'double'
+        options = (
+            '-std=c++17',
+            '-O3',
+            '--use_fast_math',
+            f'-arch=sm_{cc}',
+            f'-DKERNEL_ID={kernel_id}',
+            f'-DREAL={real}',
+        )
+        module = cp.RawModule(code=direct_source(), options=options, backend='nvcc')
+        _NBODY_MODULE_CACHE[key] = module
+    return module.get_function(_NBODY_KERNEL_NAMES[(kernel_type, precision, use_kahan)])
 
 def _validate_inputs(pos, mass, softening, precision, kernel):
     """
@@ -741,7 +696,7 @@ def _direct_forces_gpu_soa(pos, mass_gpu, h_gpu, G, precision, kernel_id):
     az = cp.empty(N, dtype=dtype)
     if N == 0:
         return ax, ay, az
-    kern = _get_kernel('force', prec, use_kahan=(prec == 'float32_kahan'))
+    kern = _get_kernel('force', prec, prec == 'float32_kahan', kernel_id)
     blocks = (N + 127) // 128
     eps2 = dtype(1e-15)
     pos = cp.ascontiguousarray(pos)
@@ -923,10 +878,10 @@ def compute_nbody_forces_gpu(
     az_gpu = cp.empty(N, dtype=dtype)
 
     # 2. Get the right kernel (it compiles only once per precision type)
-    _nbody_force_kernel = _get_kernel('force', precision, use_kahan=(precision=='float32_kahan'))
+    _nbody_force_kernel = _get_kernel('force', precision, precision == 'float32_kahan', kernel_id)
 
     # Launch kernel
-    threads_per_block = 128  # Use the TILE_SIZE defined in cuda_kernels.py
+    threads_per_block = 128  # TILE_SIZE in cuda/direct.cu
     blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
     eps2 = dtype(1e-15)  # Regularization parameter
     
@@ -1081,7 +1036,7 @@ def compute_nbody_potential_gpu(
     eps2 = dtype(1e-15)  # No regularization for potential (i.e., no softening)
 
      # 2. Get the right kernel (it compiles only once per precision type)
-    _nbody_potential_kernel = _get_kernel('potential', precision, use_kahan=(precision=='float32_kahan'))
+    _nbody_potential_kernel = _get_kernel('potential', precision, precision == 'float32_kahan', kernel_id)
 
     # >>>>>>> NEW: Different launch for float4 vs regular
     if use_float4:
