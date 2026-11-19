@@ -133,9 +133,9 @@ if NUMBA_AVAILABLE:
         kernel_id:
         0 = Newtonian (regularized)
         1 = Plummer
-        2 = Spline (Monaghan 1992)
-        3 = Dehnen k=1 (falcON default)
-        4 = Dehnen k=2
+        2 = Dehnen k=1 (falcON default)
+        3 = Dehnen k=2
+        4 = Spline (Monaghan 1992)
         """
         # --- 0: Newtonian (with tiny regularization for safety) ---
         if kernel_id == 0:
@@ -158,15 +158,15 @@ if NUMBA_AVAILABLE:
             return term1 + term2
     
         # --- 3: Dehnen k=2 (C4 correction) ---
-        # Pot1 = [(x^2 + h^2)^(-1/2) + (1/2)*h^2*(x^2 + h^2)^(-3/2) + (3/4)*h^4*(x^2 + h^2)^(-5/2)] 
-        # kernel_force = -dPot/dx = x * [(x^2 + h^2)^(-3/2) + (3/2)*h^2*(x^2 + h^2)^(-5/2) + (15/4)*h^4*(x^2 + h^2)^(-7/2)].
+        # Pot1 = [(x^2 + h^2)^(-1/2) + (1/2)*h^2*(x^2 + h^2)^(-3/2) + (3/8)*h^4*(x^2 + h^2)^(-5/2)] 
+        # kernel_force = -dPot/dx = x * [(x^2 + h^2)^(-3/2) + (3/2)*h^2*(x^2 + h^2)^(-5/2) + (15/8)*h^4*(x^2 + h^2)^(-7/2)].
         if kernel_id == 3:  # P2
             denom = r2 + h * h
             sqrt_denom = np.sqrt(denom)
             hh = h * h
             term1 = 1.0 / (denom * sqrt_denom)                    # base term
             term2 = 1.5 * hh / (denom * denom * sqrt_denom)       # h² correction
-            term3 = 3.75 * hh * hh / (denom * denom * denom * sqrt_denom)  # h⁴ correction
+            term3 = 1.875 * hh * hh / (denom * denom * denom * sqrt_denom)  # h⁴ correction
             return term1 + term2 + term3
         
         r = np.sqrt(r2)    
@@ -289,7 +289,7 @@ if NUMBA_AVAILABLE:
             sqrt_denom = np.sqrt(denom)
             inv_sqrt = 1.0 / sqrt_denom
             inv_d32 = inv_sqrt / denom
-            inv_d52 = inv_d32 / sqrt_denom
+            inv_d52 = inv_d32 / denom
             return -inv_sqrt - 0.5 * h2 * inv_d32 - 0.375 * h4 * inv_d52
         
         if kernel_id == 4:  # Spline
@@ -305,7 +305,7 @@ if NUMBA_AVAILABLE:
             q2 = q * q
             
             if q <= 0.5:
-                return (-2.8 + q2 * (5.33333333333333333 + q2 * q2 * (6.4 * q - 9.6))) * hinv
+                return (-2.8 + q2 * (5.33333333333333333 + q2 * (6.4 * q - 9.6))) * hinv
             
             if q <= 1.0:
                 return (

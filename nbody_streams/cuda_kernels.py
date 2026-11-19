@@ -54,7 +54,7 @@ float compute_dehnen_k2(float r2, float h) {{
     float inv_d32 = inv_d * inv_sqrt_d;
     float inv_d52 = inv_d32 * inv_d;
     float inv_d72 = inv_d52 * inv_d;
-    return inv_d32 + 1.5f * h2 * inv_d52 + 3.75f * h4 * inv_d72;
+    return inv_d32 + 1.5f * h2 * inv_d52 + 1.875f * h4 * inv_d72;
 }}
 
 extern "C" __device__ __forceinline__ 
@@ -218,7 +218,7 @@ float compute_dehnen_k2(float r2, float h) {{
     float inv_d32 = inv_d * inv_sqrt_d;
     float inv_d52 = inv_d32 * inv_d;
     float inv_d72 = inv_d52 * inv_d;
-    return inv_d32 + 1.5f * h2 * inv_d52 + 3.75f * h4 * inv_d72;
+    return inv_d32 + 1.5f * h2 * inv_d52 + 1.875f * h4 * inv_d72;
 }}
 
 extern "C" __device__ __forceinline__ 
@@ -419,7 +419,7 @@ float compute_spline_potential(float r2, float h) {{
     if (q <= 0.5f) {{
         float q2 = q * q;
         float q4 = q2 * q2;
-        return (-2.8f + q2 * (5.33333333333333333f + q4 * (6.4f * q - 9.6f))) * hinv;
+        return (-2.8f + q2 * (5.33333333333333333f + q2 * (6.4f * q - 9.6f))) * hinv;
     }}
     
     if (q <= 1.0f) {{
@@ -571,7 +571,7 @@ float compute_spline_potential(float r2, float h) {{
     if (q <= 0.5f) {{
         float q2 = q * q;
         float q4 = q2 * q2;
-        return (-2.8f + q2 * (5.33333333333333333f + q4 * (6.4f * q - 9.6f))) * hinv;
+        return (-2.8f + q2 * (5.33333333333333333f + q2 * (6.4f * q - 9.6f))) * hinv;
     }}
     
     if (q <= 1.0f) {{
@@ -719,7 +719,7 @@ extern "C" __device__ __forceinline__
     {T} inv_d32 = inv_d * inv_sqrt_d;
     {T} inv_d52 = inv_d32 * inv_d;
     {T} inv_d72 = inv_d52 * inv_d;
-    return inv_d32 + 1.5 * h2 * inv_d52 + 3.75 * h4 * inv_d72;
+    return inv_d32 + 1.5 * h2 * inv_d52 + 1.875 * h4 * inv_d72;
 }}
 
 extern "C" __device__ __forceinline__ 
@@ -902,7 +902,7 @@ extern "C" __device__ __forceinline__
         {T} inv_d32 = 1.0 / (denom * sqrt_d);
         {T} inv_d52 = inv_d32 / denom;
         {T} inv_d72 = inv_d52 / denom;
-        return inv_d32 + 1.5 * h2 * inv_d52 + 3.75 * h2 * h2 * inv_d72;
+        return inv_d32 + 1.5 * h2 * inv_d52 + 1.875 * h2 * h2 * inv_d72;
     }}
     
     if (kernel_id == 4) {{  // Spline kernel (Monaghan 1992, compact support)
@@ -1070,7 +1070,7 @@ extern "C" __device__ __forceinline__
         {T} inv_d32 = 1.0 / (denom * sqrt_d);
         {T} inv_d52 = inv_d32 / denom;
         {T} inv_d72 = inv_d52 / denom;
-        return inv_d32 + 1.5 * h2 * inv_d52 + 3.75 * h2 * h2 * inv_d72;
+        return inv_d32 + 1.5 * h2 * inv_d52 + 1.875 * h2 * h2 * inv_d72;
     }}
     
     if (kernel_id == 4) {{  // Spline kernel (Monaghan 1992, compact support)
@@ -1275,7 +1275,7 @@ extern "C" __device__ __forceinline__
             // Inner region: q ≤ 0.5
             {T} q2 = q * q;
             {T} q4 = q2 * q2;
-            return (-2.8 + q2 * (5.33333333333333333 + q4 * (6.4 * q - 9.6))) * hinv;
+            return (-2.8 + q2 * (5.33333333333333333 + q2 * (6.4 * q - 9.6))) * hinv;
         }}
         
         if (q <= 1.0) {{
@@ -1442,7 +1442,7 @@ extern "C" __device__ __forceinline__
         if (q <= 0.5) {{
             {T} q2 = q * q;
             {T} q4 = q2 * q2;
-            return (-2.8 + q2 * (5.33333333333333333 + q4 * (6.4 * q - 9.6))) * hinv;
+            return (-2.8 + q2 * (5.33333333333333333 + q2 * (6.4 * q - 9.6))) * hinv;
         }}
         
         if (q <= 1.0) {{
