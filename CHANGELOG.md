@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Direct-sum CUDA kernels moved to `nbody_streams/cuda/` (`.cu` + shared
+  `softening.cuh`); softening is a compile-time choice and the self pair is
+  masked only on the diagonal tile. Float32 Plummer forces 2.1x faster at
+  N >= 65k (3.2x at 16k), spline 1.4-1.6x (RTX 3080 Laptop). Same results.
 - CylSpline potential/force kernels compute the cell geometry once per
   particle and cos/sin(m phi) by recurrence (no atan2 / cos / sin per
   harmonic), read the (N,3) array and write the force directly.
@@ -38,6 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Dehnen K2 force** used `3.75 h^4` instead of `1.875 h^4` (CUDA and CPU),
+  inconsistent with its potential. K2 accelerations change by up to ~10% of
+  max |a| inside the softening length.
+- **Spline potential** for q <= 0.5 used `q^4` for `q^2` (discontinuous at
+  q = 0.5); potentials change by up to 0.23%. Forces unchanged.
+- CPU Dehnen K2 potential used `d^-2` instead of `d^-5/2` (up to 0.9%).
 - **CylSpline now matches Agama to machine precision on the grid** (force
   1e-14 typical, was 1e-4 to 2e-3 with 0.5% in the inner disk). The
   associated-Legendre recurrence used for the outer asymptote
