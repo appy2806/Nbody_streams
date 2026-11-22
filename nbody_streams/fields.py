@@ -442,6 +442,90 @@ def _get_kernel(kernel_type, precision, use_kahan, kernel_id):
         _NBODY_MODULE_CACHE[key] = module
     return module.get_function(_NBODY_KERNEL_NAMES[(kernel_type, precision, use_kahan)])
 
+
+# ----------------------------------------------------------------------------
+# Source split for small N
+# ----------------------------------------------------------------------------
+# One block holds 128 targets, so at small N the grid cannot fill the GPU.
+# The *_split kernels add a second grid dimension S: slice y sums source tiles
+# y, y+S, ...; a reduction kernel adds the S partial sums in a fixed order
+# (deterministic, no atomics). S = 1 launches the plain kernel unchanged.
+
+# Private override for tests/benchmarks: None = automatic, int = force S.
+_DIRECT_SPLIT = None
+# Auto rule: split while the grid has fewer than _SPLIT_FILL x (resident
+# blocks on the device) blocks; S is capped at _SPLIT_MAX and the tile count.
+_SPLIT_FILL = 1.0
+_SPLIT_MAX = 16
+_SPLIT_REDUCE_THREADS = 256
+
+# (device, kernel_type, precision, use_kahan, kernel_id) ->
+#     (plain kernel, split kernel, reduce kernel, resident blocks on the device)
+_SPLIT_LAUNCH_CACHE = {}
+
+
+def _split_launch_info(kernel_type, precision, use_kahan, kernel_id):
+    """Kernels and device fill for one direct-sum launch configuration (cached)."""
+    key = (cp.cuda.runtime.getDevice(), kernel_type, precision, use_kahan, kernel_id)
+    info = _SPLIT_LAUNCH_CACHE.get(key)
+    if info is None:
+        plain = _get_kernel(kernel_type, precision, use_kahan, kernel_id)
+        prec = 'float32' if precision == 'float32_kahan' else precision
+        kahan = use_kahan or precision == 'float32_kahan'
+        module = _NBODY_MODULE_CACHE[(prec, int(kernel_id))]
+        name = _NBODY_KERNEL_NAMES[(kernel_type, prec, kahan)]
+        split = module.get_function(name + '_split')
+        reduce = module.get_function(
+            ('nbody_reduce_forces' if kernel_type == 'force' else 'nbody_reduce_potential')
+            + ('_kahan' if kahan else ''))
+        per_sm = cp.cuda.driver.occupancyMaxActiveBlocksPerMultiprocessor(
+            plain.kernel.ptr, 128, 0)
+        n_sm = cp.cuda.Device().attributes['MultiProcessorCount']
+        info = (plain, split, reduce, max(1, per_sm) * n_sm)
+        _SPLIT_LAUNCH_CACHE[key] = info
+    return info
+
+
+def _choose_split(N, resident_blocks, split=None):
+    """Number of source slices S for N targets (see ``_SPLIT_FILL``)."""
+    if split is None:
+        split = _DIRECT_SPLIT
+    if split is not None:
+        return max(1, int(split))
+    blocks = (N + 127) // 128
+    target = _SPLIT_FILL * resident_blocks
+    if blocks >= target:
+        return 1
+    return max(1, min(-(-int(target) // blocks), blocks, _SPLIT_MAX))
+
+
+def _launch_direct(kernel_type, precision, kernel_id, src, out, G, N, split=None):
+    """Launch a direct-sum kernel, splitting the source loop when N is small.
+
+    ``src`` is ``(pos_mass_float4, h)`` (float32 precisions) or
+    ``(x, y, z, m, h)`` (float64); ``out`` is ``(ax, ay, az)`` or ``(pot,)``.
+    ``split`` forces S (default: ``_DIRECT_SPLIT``, then automatic).
+    """
+    dtype = _PRECISION_MAP[precision][0]
+    use_kahan = precision == 'float32_kahan'
+    plain, ksplit, kreduce, resident = _split_launch_info(
+        kernel_type, precision, use_kahan, kernel_id)
+    if N == 0:
+        return
+    blocks = (N + 127) // 128
+    eps2 = dtype(1e-15)
+    S = _choose_split(N, resident, split)
+    if S == 1:
+        plain((blocks,), (128,),
+              src + out + (dtype(G), eps2, cp.int32(kernel_id), cp.int32(N)))
+        return
+    nc = (3 if kernel_type == 'force' else 1) * (2 if use_kahan else 1)
+    part = cp.empty(S * nc * N, dtype=dtype)
+    ksplit((blocks, S), (128,), src + (part, eps2, cp.int32(N)))
+    nt = _SPLIT_REDUCE_THREADS
+    kreduce(((N + nt - 1) // nt,), (nt,),
+            (part,) + out + (dtype(G), cp.int32(S), cp.int32(N)))
+
 def _validate_inputs(pos, mass, softening, precision, kernel):
     """
     Validate inputs and prepare CPU arrays.
@@ -678,7 +762,7 @@ def _fused(name: str):
     return k
 
 
-def _direct_forces_gpu_soa(pos, mass_gpu, h_gpu, G, precision, kernel_id):
+def _direct_forces_gpu_soa(pos, mass_gpu, h_gpu, G, precision, kernel_id, _split=None):
     """Direct-sum accelerations for an integrator's hot loop.
 
     ``pos`` is a CuPy (N,3) array (float64, or float32 used as given);
@@ -686,7 +770,8 @@ def _direct_forces_gpu_soa(pos, mass_gpu, h_gpu, G, precision, kernel_id):
     precision (prepared once by the caller).  Float32 precisions see ``pos``
     relative to :func:`estimate_centre` (as ``compute_nbody_forces_gpu``),
     packed into float4 in one kernel.  Returns ``(ax, ay, az)`` in the force
-    precision, with no (N,3) assembly pass.
+    precision, with no (N,3) assembly pass.  ``_split`` forces the number of
+    source slices (tests/benchmarks; default automatic, see ``_choose_split``).
     """
     prec = precision.lower()
     dtype = _PRECISION_MAP[prec][0]
@@ -696,9 +781,6 @@ def _direct_forces_gpu_soa(pos, mass_gpu, h_gpu, G, precision, kernel_id):
     az = cp.empty(N, dtype=dtype)
     if N == 0:
         return ax, ay, az
-    kern = _get_kernel('force', prec, prec == 'float32_kahan', kernel_id)
-    blocks = (N + 127) // 128
-    eps2 = dtype(1e-15)
     pos = cp.ascontiguousarray(pos)
     if prec in ('float32', 'float32_kahan'):
         pm = cp.empty(4 * N, dtype=cp.float32)
@@ -707,14 +789,12 @@ def _direct_forces_gpu_soa(pos, mass_gpu, h_gpu, G, precision, kernel_id):
         else:
             centre = estimate_centre(pos, mass_gpu)
             _fused('pack4_rel')(pos.astype(cp.float64, copy=False), centre, mass_gpu, pm)
-        kern((blocks,), (128,),
-             (pm, h_gpu, ax, ay, az, dtype(G), eps2, cp.int32(kernel_id), cp.int32(N)))
+        _launch_direct('force', prec, kernel_id, (pm, h_gpu), (ax, ay, az), G, N, _split)
     else:
         x, y, z = (cp.empty(N, dtype=cp.float64) for _ in range(3))
         _fused('split3')(pos.astype(cp.float64, copy=False), x, y, z)
-        kern((blocks,), (128,),
-             (x, y, z, mass_gpu, h_gpu, ax, ay, az, dtype(G), eps2,
-              cp.int32(kernel_id), cp.int32(N)))
+        _launch_direct('force', prec, kernel_id, (x, y, z, mass_gpu, h_gpu), (ax, ay, az),
+                       G, N, _split)
     return ax, ay, az
 
 
@@ -877,14 +957,7 @@ def compute_nbody_forces_gpu(
     ay_gpu = cp.empty(N, dtype=dtype)
     az_gpu = cp.empty(N, dtype=dtype)
 
-    # 2. Get the right kernel (it compiles only once per precision type)
-    _nbody_force_kernel = _get_kernel('force', precision, precision == 'float32_kahan', kernel_id)
-
-    # Launch kernel
-    threads_per_block = 128  # TILE_SIZE in cuda/direct.cu
-    blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
-    eps2 = dtype(1e-15)  # Regularization parameter
-    
+    # 2. Launch (kernels compile once per precision and softening kernel)
     # >>>>>>> NEW: Different launch for float4 vs regular
     if use_float4:
         # For float4 optimization, we would need to prepare data differently and call a different kernel.
@@ -893,18 +966,12 @@ def compute_nbody_forces_gpu(
         pos_mass_gpu = cp.empty(4 * N, dtype=cp.float32)   # read as float4*
         _fused('pack4')(x_gpu, y_gpu, z_gpu, mass_gpu, pos_mass_gpu)
 
-        _nbody_force_kernel(
-            (blocks_per_grid,), (threads_per_block,),
-            (pos_mass_gpu, h_gpu, ax_gpu, ay_gpu, az_gpu,
-            dtype(G), eps2, cp.int32(kernel_id), cp.int32(N))
-        )
+        _launch_direct('force', precision.lower(), kernel_id, (pos_mass_gpu, h_gpu),
+                       (ax_gpu, ay_gpu, az_gpu), G, N)
 
     else:
-        _nbody_force_kernel(
-            (blocks_per_grid,), (threads_per_block,),
-            (x_gpu, y_gpu, z_gpu, mass_gpu, h_gpu, ax_gpu, ay_gpu, az_gpu,
-            dtype(G), eps2, cp.int32(kernel_id), cp.int32(N))
-        )
+        _launch_direct('force', precision.lower(), kernel_id,
+                       (x_gpu, y_gpu, z_gpu, mass_gpu, h_gpu), (ax_gpu, ay_gpu, az_gpu), G, N)
     
     # Assemble result into (N, 3) array
     acc_gpu = cp.empty((N, 3), dtype=dtype)
@@ -1029,15 +1096,6 @@ def compute_nbody_potential_gpu(
     # Allocate output arrays on GPU
     pot_gpu = cp.empty(N, dtype=dtype)
     
-    # Launch kernel
-    threads_per_block = 128
-    blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
-    
-    eps2 = dtype(1e-15)  # No regularization for potential (i.e., no softening)
-
-     # 2. Get the right kernel (it compiles only once per precision type)
-    _nbody_potential_kernel = _get_kernel('potential', precision, precision == 'float32_kahan', kernel_id)
-
     # >>>>>>> NEW: Different launch for float4 vs regular
     if use_float4:
         # For float4 optimization, we would need to prepare data differently and call a different kernel.
@@ -1052,18 +1110,12 @@ def compute_nbody_potential_gpu(
         # Reinterpret as float4* for kernel (view as contiguous memory)
         pos_mass_gpu = pos_mass_gpu.ravel()
         
-        _nbody_potential_kernel(
-            (blocks_per_grid,), (threads_per_block,),
-            (pos_mass_gpu, h_gpu, pot_gpu,
-            dtype(G), eps2, cp.int32(kernel_id), cp.int32(N))
-        )
+        _launch_direct('potential', precision.lower(), kernel_id, (pos_mass_gpu, h_gpu),
+                       (pot_gpu,), G, N)
 
     else:
-        _nbody_potential_kernel(
-            (blocks_per_grid,), (threads_per_block,),
-            (x_gpu, y_gpu, z_gpu, mass_gpu, h_gpu, pot_gpu,
-            dtype(G), eps2, cp.int32(kernel_id), cp.int32(N))
-        )
+        _launch_direct('potential', precision.lower(), kernel_id,
+                       (x_gpu, y_gpu, z_gpu, mass_gpu, h_gpu), (pot_gpu,), G, N)
 
     if return_cupy:
         return pot_gpu.astype(dtype)  # Ensure correct dtype on GPU
