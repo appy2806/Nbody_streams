@@ -292,10 +292,21 @@
   "290": "Reading API",
   "291": "[2.3.0] - 2026-05-12",
   "292": "Upgrade Notes",
+  "293": "timing_sweep.py",
+  "294": "Claude Design prompts for the nbody_streams logo (2026-11-21)",
+  "295": "logo2.py",
   "296": "_AgamaTimeSpline",
   "297": "BuildCounters",
+  "298": "run_simulation",
+  "299": "ndarray",
+  "300": "_build_multipole_data",
   "301": "GroupData",
+  "302": "__init__.py",
+  "303": "_validate_species",
+  "304": "computeMultipoles.cu",
+  "305": "TestParticleReaderBackwardCompat",
   "306": "README.md",
+  "307": "._init_from_data",
   "308": "Species dataclass",
-  "311": ".test_circular_orbit_decays"
+  "309": "compute_nbody_forces_gpu"
 }
