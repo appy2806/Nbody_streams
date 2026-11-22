@@ -441,7 +441,7 @@ namespace treeBuild
       {
         shmem[16+8] = atomicAdd(&nnodes,nSubNodes.y);
 #if 1   /* temp solution, a better one is to use RingBuffer */
-        assert(shmem[16+8] < d_node_max);
+        assert(shmem[16+8] + nSubNodes.y <= d_node_max);
 #endif
       }
 
@@ -451,7 +451,7 @@ namespace treeBuild
       {
         const int cellFirstChildIndex = atomicAdd(&ncells, nChildrenCell);
 #if 1
-        assert(cellFirstChildIndex + nChildrenCell < d_cell_max);
+        assert(cellFirstChildIndex + nChildrenCell <= d_cell_max);
 #endif
         /*** keep in mind, the 0-level will be overwritten ***/
         assert(nChildrenCell > 0);

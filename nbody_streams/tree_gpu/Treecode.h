@@ -286,8 +286,20 @@ struct Treecode
     CUDA_SAFE_CALL(cudaMemset(d_stack_memory_pool, 0, stack_size*sizeof(int)));
     last_nodes_used = 0;
 
-    /* allocate celldata memory */
-    cell_max = nPtcl;
+    /* allocate celldata memory.
+     * nCells = all cells below the root (the root is overwritten).  Leaves
+     * hold >= 1 particle, so nLeaves <= nPtcl, but nodes come on top: the
+     * root's first split alone needs up to min(8, nPtcl) cells, and a clump
+     * of > nLeaf (nearly) coincident particles adds a chain of single-child
+     * nodes down to the depth cap.  A rigorous bound is
+     *   nPtcl + (TREE_MAX_LEVEL-1)*floor(nPtcl/(nLeaf+1)) + 9,
+     * up to ~2.7 nPtcl; real trees need ~nPtcl/5 (leaves average several
+     * particles).  The 65536-cell floor (2.6 MB) makes the bound hold for
+     * nPtcl <~ 24000 at any nLeaf, covering tiny N; above that nPtcl + 9 is
+     * ample unless thousands of > nLeaf-particle clumps are exactly
+     * coincident (~25 chain cells each; the node pool, node_max, overflows
+     * first).  buildOctant asserts on overflow. */
+    cell_max = std::max(nPtcl + 9, 65536);
     if (verbose) fprintf(stderr, "celldata= %g MB \n", cell_max*sizeof(CellData)/1024.0/1024.0);
     d_cellDataList.alloc(cell_max);
     d_cellDataList_tmp.alloc(cell_max);
@@ -296,7 +308,7 @@ struct Treecode
     d_origIdx.alloc(nPtcl);
 
     /* Pre-allocate d_leafList so d_leafList.realloc(nLeaves) in buildTree is a no-op.
-     * nLeaves <= nCells <= nPtcl always holds, so nPtcl is a safe upper bound. */
+     * Every leaf holds >= 1 particle, so nLeaves <= nPtcl. */
     d_leafList.alloc(nPtcl);
 
     /* Pre-allocate buildOctreeHost scratch (eliminates per-step GPU malloc/free churn). */

@@ -180,7 +180,8 @@ class TreeGPU:
     Parameters
     ----------
     n : int
-        Number of particles.  Must not exceed available VRAM.
+        Number of particles (>= 0; 0 gives empty results).  Must not exceed
+        available VRAM.
     eps : float
         Default (fallback) softening length.  Used only when
         ``tree_set_pos_mass_device`` is called; ignored when
@@ -201,6 +202,9 @@ class TreeGPU:
     def __init__(self, n: int, eps: float = 0.0, theta: float = 0.6,
                  verbose: bool = False):
         self._ptr = None   # so close()/__del__ are safe if the checks below fail
+        if int(n) != n or n < 0:
+            raise ValueError(f"n must be a non-negative integer, got {n}")
+        n = int(n)
         if not 0.0 < theta < 1.15:
             raise ValueError(f"theta must be in (0, 1.15), got {theta}")
         cap = _max_n()
@@ -210,7 +214,8 @@ class TreeGPU:
         )
         self._ptr = _lib.tree_new(_flt(eps), _flt(theta))
         _lib.tree_set_verbose(self._ptr, int(verbose))
-        _lib.tree_alloc(self._ptr, n)
+        if n > 0:   # n = 0: no buffers; tree_gravity_gpu returns empty arrays
+            _lib.tree_alloc(self._ptr, n)
         self.n = n
         self.eps = eps
         self._theta = float(theta)
@@ -340,6 +345,10 @@ def tree_gravity_gpu(
         pos = np.asarray(pos)
         pos = cp.asarray(pos, dtype=cp.float32 if pos.dtype == np.float32 else cp.float64)
     assert pos.ndim == 2 and pos.shape[1] == 3, f"pos must be (N,3), got {pos.shape}"
+    if pos.shape[0] == 0:
+        if tree is not None:
+            assert tree.n == 0, f"pos has 0 particles but tree was allocated for {tree.n}"
+        return cp.empty((0, 3), dtype=cp.float32), cp.empty(0, dtype=cp.float32)
     pos_soa, _ = to_float32_relative_soa(pos, mass, center)
 
     n = pos_soa.shape[1]

@@ -565,7 +565,7 @@ grow (never shrink) with the number of cells.  The main allocations:
 | `d_ptclPos`, `d_ptclAcc` | N × 16 bytes (float4) | Particle positions, accelerations |
 | `d_ptclEpsTree` | N × 4 bytes | Per-particle softening (tree order) |
 | `d_stack_memory_pool` | `max(N/5, 65536) × 96 × 4` bytes | Build-tree stack (≈ 24 MB for N=1M) |
-| `d_cellDataList` | N × 16 bytes | Cell metadata |
+| `d_cellDataList` (+ `_tmp`, `d_key`, `d_value`) | `max(N + 9, 65536)` × (16+16+4+4) bytes | Cell metadata and level-sort scratch |
 | `d_cellMonopole`, `d_cellQuad0/1` | N × 16 + 8 bytes | Monopole + quadrupole moments |
 | `d_cellEpsMax` | N × 4 bytes | Per-cell max softening |
 | `d_cellComD`, `d_cellBoxMin/Max` | nCells × 64 bytes | Bottom-up multipole scratch |
