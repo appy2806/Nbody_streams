@@ -57,12 +57,12 @@ except ImportError:
     _TQDM_OK = False
 
 try:
-    from ..nbody_io import _save_snapshot, _save_restart, _load_restart
+    from ..nbody_io import _save_snapshot, _save_restart, _load_restart, _IOClock
 except ImportError:
     try:
-        from nbody_streams.nbody_io import _save_snapshot, _save_restart, _load_restart
+        from nbody_streams.nbody_io import _save_snapshot, _save_restart, _load_restart, _IOClock
     except ImportError:
-        _save_snapshot = _save_restart = _load_restart = None  # type: ignore[assignment]
+        _save_snapshot = _save_restart = _load_restart = _IOClock = None  # type: ignore[assignment]
 
 try:
     from ..species import Species, _build_particle_arrays
@@ -197,7 +197,7 @@ def run_nbody_gpu_tree(
     save_snapshots: bool = True,
     snapshots: int = 100,
     num_files_to_write: int = 1,
-    restart_interval: int = 1000,
+    restart_interval: int | None = 1000,
     continue_run: bool = False,
     overwrite: bool = False,
     verbose: bool = True,
@@ -268,8 +268,10 @@ def run_nbody_gpu_tree(
         ``time_end``, even when ``snapshots`` does not divide the step count.
     num_files_to_write : int, optional
         Distribute snapshots across this many HDF5 files.  Default 1.
-    restart_interval : int, optional
-        Save a restart checkpoint every N steps.  Default 1000.
+    restart_interval : int or None, optional
+        Save a restart checkpoint every N steps and at the end.  Default 1000.
+        ``None`` or 0: no restart files at all (at N ~ 1e8 each is several
+        GB).
     continue_run : bool, optional
         Resume from an existing restart file.  Default False.
     overwrite : bool, optional
@@ -419,7 +421,7 @@ def run_nbody_gpu_tree(
             print(f"  Update interval: every {external_update_interval} steps")
         print(f"Snapshots: {len(snapshot_steps)}  "
               f"(steps {snapshot_steps[0]:,}..{snapshot_steps[-1]:,})")
-        print(f"Restart files: every {restart_interval} steps")
+        print(f"Restart files: every {restart_interval} steps" if restart_interval else "Restart files: off")
         print(f"Watchdog timeout: {step_timeout_s:.0f} s/step")
         print(f"debug_energy: {debug_energy}")
         print("=" * 80)
@@ -474,29 +476,33 @@ def run_nbody_gpu_tree(
         )
         return acc_, phi_, pos_[cp.argmin(phi_)]
 
+    io_clock = _IOClock(sync=cp.cuda.Device().synchronize)   # output wall time
+
     def _save_snap_now(t_: float):
         if not save_snapshots or _save_snapshot is None:
             return
-        pv_np = cp.asnumpy(cp.concatenate([pos, vel], axis=1))
-        _save_snapshot(
-            pv_np, snap_idx, t_, output_dir,
-            species=species,
-            time_step=dt,
-            num_files_to_write=num_files_to_write if num_files_to_write > 1 else None,
-            total_expected_snapshots=snapshots,
-        )
+        with io_clock:
+            pv_np = cp.asnumpy(cp.concatenate([pos, vel], axis=1))
+            _save_snapshot(
+                pv_np, snap_idx, t_, output_dir,
+                species=species,
+                time_step=dt,
+                num_files_to_write=num_files_to_write if num_files_to_write > 1 else None,
+                total_expected_snapshots=snapshots,
+            )
 
     def _save_restart_now(step: int, t_: float):
-        if _save_restart is None:
+        if _save_restart is None or not restart_interval:
             return
-        pv_np  = cp.asnumpy(cp.concatenate([pos, vel], axis=1))
-        m_np   = cp.asnumpy(mass_f32).astype(np.float64)
-        s_np   = cp.asnumpy(eps_gpu).astype(np.float64)
-        snames = [s.name for s in species] if species else None
-        sN     = [s.N    for s in species] if species else None
-        _save_restart(pv_np, float(t_), step, output_dir, snap_idx,
-                      mass_arr=m_np, softening_arr=s_np,
-                      species_names=snames, species_N=sN)
+        with io_clock:
+            pv_np  = cp.asnumpy(cp.concatenate([pos, vel], axis=1))
+            m_np   = cp.asnumpy(mass_f32).astype(np.float64)
+            s_np   = cp.asnumpy(eps_gpu).astype(np.float64)
+            snames = [s.name for s in species] if species else None
+            sN     = [s.N    for s in species] if species else None
+            _save_restart(pv_np, float(t_), step, output_dir, snap_idx,
+                          mass_arr=m_np, softening_arr=s_np,
+                          species_names=snames, species_N=sN)
 
     def _nan_gate(step: int, label: str) -> bool:
         if not cp.any(cp.isnan(acc[:, 0])):
@@ -555,6 +561,7 @@ def run_nbody_gpu_tree(
 
     # ── KDK loop ───────────────────────────────────────────────────────────────
     t_wall0  = pytime.perf_counter()
+    io_clock.total = 0.0      # count output from here on (the initial snapshot is setup)
     aborted  = False
     step     = start_step   # ensure defined for KeyboardInterrupt handler
 
@@ -597,7 +604,7 @@ def run_nbody_gpu_tree(
             if verbose and current_step % progress_every == 0:
                 _emit_manual = (not _TQDM_OK) or debug_energy
                 if _emit_manual:
-                    elapsed    = pytime.perf_counter() - t_wall0
+                    elapsed    = pytime.perf_counter() - t_wall0 - io_clock.total
                     done_steps = current_step - start_step
                     left_steps = n_steps - current_step
                     rate       = done_steps / elapsed if elapsed > 0 else 0.0
@@ -634,7 +641,7 @@ def run_nbody_gpu_tree(
                 break
 
             # ── Restart checkpoint ────────────────────────────────────────────
-            if current_step % restart_interval == 0:
+            if restart_interval and current_step % restart_interval == 0:
                 if _nan_gate(step, "restart"):
                     aborted = True;  break
                 _save_restart_now(step, t_now)
@@ -652,14 +659,18 @@ def run_nbody_gpu_tree(
     watchdog.close()
     tree.close()
 
+    cp.cuda.Device().synchronize()
     elapsed_total = pytime.perf_counter() - t_wall0
+    t_io          = io_clock.total
+    t_steps       = max(elapsed_total - t_io, 1e-12)   # integration only
     steps_done    = (step + 1 - start_step) if not aborted else max(step - start_step, 1)
-    avg_ms        = elapsed_total / max(steps_done, 1) * 1e3
+    avg_ms        = t_steps / max(steps_done, 1) * 1e3
     status        = "ABORTED" if aborted else "Done"
 
     if verbose:
         print(f"\n{status}. Wall time: {elapsed_total:.1f} s  "
-              f"({avg_ms:.1f} ms/step  |  {steps_done / elapsed_total:.1f} steps/s)")
+              f"(integration {t_steps:.1f} s: {avg_ms:.1f} ms/step, "
+              f"{steps_done / t_steps:.1f} steps/s  |  output {t_io:.1f} s)")
 
     pv = cp.concatenate([pos, vel], axis=1)
     return cp.asnumpy(pv)

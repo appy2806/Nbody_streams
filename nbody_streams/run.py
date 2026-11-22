@@ -34,7 +34,7 @@ try:
         compute_nbody_potential_gpu, compute_nbody_potential_cpu,
         _direct_forces_gpu_soa, KERNEL_MAP,
     )
-    from .nbody_io import _save_snapshot, _save_restart, _load_restart, _update_snapshot_times
+    from .nbody_io import _save_snapshot, _save_restart, _load_restart, _update_snapshot_times, _IOClock
     from .species import Species
 except ImportError as e:
     print(e)
@@ -43,7 +43,7 @@ except ImportError as e:
         compute_nbody_potential_gpu, compute_nbody_potential_cpu,
         _direct_forces_gpu_soa, KERNEL_MAP,
     )
-    from nbody_io import _save_snapshot, _save_restart, _load_restart, _update_snapshot_times
+    from nbody_io import _save_snapshot, _save_restart, _load_restart, _update_snapshot_times, _IOClock
     from species import Species
 
 try:
@@ -281,7 +281,7 @@ def run_nbody_gpu(
     save_snapshots: bool = True,
     snapshots: int = 10,
     num_files_to_write: int = 1,
-    restart_interval: int = 1000,
+    restart_interval: int | None = 1000,
     continue_run: bool = False,
     overwrite: bool = False,
     verbose: bool = True,
@@ -357,8 +357,9 @@ def run_nbody_gpu(
         Number of snapshots to save (evenly spaced). Default: 10.
     num_files_to_write : int, optional
         Number of snapshot files to write (for load balancing). Default: 1.
-    restart_interval : int, optional
-        Save restart file every N steps. Default: 1000.
+    restart_interval : int or None, optional
+        Save restart file every N steps and at the end. Default: 1000.
+        ``None`` or 0: no restart files.
     continue_run : bool, optional
         Resume from restart file if exists. Default: False.
     verbose : bool, optional
@@ -532,7 +533,7 @@ def run_nbody_gpu(
         if external_potential is not None:
             print(f"  Update interval: every {external_update_interval} steps")
         print(f"Snapshots: {snapshots} (every ~{total_steps//snapshots:,} steps)")
-        print(f"Restart files: every {restart_interval} steps")
+        print(f"Restart files: every {restart_interval} steps" if restart_interval else "Restart files: off")
         print("="*80)
 
     # Transfer to GPU
@@ -626,6 +627,7 @@ def run_nbody_gpu(
     # Main integration loop: iterate over the remaining steps (1..remaining_steps)
     # ============================================================================
     t_start = pytime.perf_counter()
+    io_clock = _IOClock(sync=cp.cuda.Device().synchronize)   # output wall time
     _report_every = max(1, remaining_steps // 20)
 
     if _TQDM_OK and verbose:
@@ -663,10 +665,11 @@ def run_nbody_gpu(
         # === I/O Operations ===
         while snapshot_counter < len(snapshot_steps) and current_step >= snapshot_steps[snapshot_counter]:
             if save_snapshots:
-                xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
-                _save_snapshot(xv_cpu, snapshot_counter, time, output_path,
-                               **_snap_kwargs)
-                _update_snapshot_times(output_path, snapshot_counter, time)
+                with io_clock:
+                    xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
+                    _save_snapshot(xv_cpu, snapshot_counter, time, output_path,
+                                   **_snap_kwargs)
+                    _update_snapshot_times(output_path, snapshot_counter, time)
                 if verbose:
                     _vprint(f"Saved snapshot id={snapshot_counter:03d} at step "
                             f"{current_step}, time {time:.6e}...")
@@ -675,7 +678,7 @@ def run_nbody_gpu(
         # Progress update — suppress manual line when tqdm bar is active
         _is_report_step = step_i % _report_every == 0
         if verbose and (not _TQDM_OK or debug_energy) and _is_report_step:
-            elapsed = pytime.perf_counter() - t_start
+            elapsed = pytime.perf_counter() - t_start - io_clock.total
             rate = step_i / elapsed if elapsed > 0 else 0
             eta = (remaining_steps - step_i) / rate if rate > 0 else 0
             avg_step_time = elapsed / step_i if step_i > 0 else 0
@@ -697,10 +700,11 @@ def run_nbody_gpu(
                 _vprint(line)
 
         # Save restart file
-        if current_step > 0 and (current_step % restart_interval) == 0:
-            xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
-            _save_restart(xv_cpu, time, current_step, output_path, snapshot_counter,
-                          **_restart_kwargs)
+        if restart_interval and current_step > 0 and (current_step % restart_interval) == 0:
+            with io_clock:
+                xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
+                _save_restart(xv_cpu, time, current_step, output_path, snapshot_counter,
+                              **_restart_kwargs)
     # =============================================================================
     # End of integration loop
     # =============================================================================
@@ -708,32 +712,37 @@ def run_nbody_gpu(
     # Ensure final snapshot saved
     if snapshot_counter < len(snapshot_steps) and snapshot_steps[-1] == total_steps:
         if save_snapshots:
-            xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
             if verbose:
                 print(f"<=Saving final snapshot snap.{snapshot_counter:03d} at "
                       f"step {total_steps}, time {time:.6e}=>")
-            _save_snapshot(xv_cpu, snapshot_counter, time, output_path,
-                           **_snap_kwargs)
-            _update_snapshot_times(output_path, snapshot_counter, time)
+            with io_clock:
+                xv_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
+                _save_snapshot(xv_cpu, snapshot_counter, time, output_path,
+                               **_snap_kwargs)
+                _update_snapshot_times(output_path, snapshot_counter, time)
         snapshot_counter += 1
 
     # Save final restart
-    xv_final_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
-    _save_restart(xv_final_cpu, time, total_steps, output_path, snapshot_counter,
-                  **_restart_kwargs)
+    with io_clock:
+        xv_final_cpu = np.hstack([cp.asnumpy(pos_gpu), cp.asnumpy(vel_gpu)])
+        if restart_interval:
+            _save_restart(xv_final_cpu, time, total_steps, output_path, snapshot_counter,
+                          **_restart_kwargs)
 
     if verbose:
         t_end = pytime.perf_counter()
         total_time = t_end - t_start
-        avg_step_time = total_time / remaining_steps if remaining_steps > 0 else 0
-        
+        step_time = max(total_time - io_clock.total, 1e-12)   # integration only
+        avg_step_time = step_time / remaining_steps if remaining_steps > 0 else 0
+
         print("\n" + "="*80)
         print("Integration Complete")
         print("="*80)
         print(f"Final time: {time:.6e}")
-        print(f"Total wall time: {total_time:.2f} s")
-        print(f"Steps per second: {remaining_steps / total_time:.1f}")
-        print(f"Average step time: {avg_step_time*1000:.1f} ms")
+        print(f"Total wall time: {total_time:.2f} s "
+              f"(integration {step_time:.2f} s, output {io_clock.total:.2f} s)")
+        print(f"Steps per second: {remaining_steps / step_time:.1f}")
+        print(f"Average step time: {avg_step_time*1000:.1f} ms (excluding output)")
         print(f"Snapshots saved: {snapshot_counter}")
         print("="*80)
     
@@ -750,7 +759,7 @@ def run_nbody_cpu(
     G: float = 4.302e-6,
     method: str = "direct",
     theta: float = 0.6,
-    kernel: int | str = 1,
+    kernel: int | str | None = None,
     nthreads: int | None = None,
     external_potential: agama.Potential | None = None,
     force_extra: 'Callable | None' = None,
@@ -758,7 +767,7 @@ def run_nbody_cpu(
     save_snapshots: bool = True,
     snapshots: int = 1,
     num_files_to_write: int = 1,
-    restart_interval: int = 1000,
+    restart_interval: int | None = 1000,
     continue_run: bool = False,
     overwrite: bool = False,
     verbose: bool = True,
@@ -790,8 +799,8 @@ def run_nbody_cpu(
         - 'direct': Direct O(N^2) pairwise summation (faster for <20K particles)
     theta : float, optional
         Opening angle for tree algorithm (only for method='tree', default: 0.6).
-    kernel : int | str, optional
-        Softening kernel:
+    kernel : int | str | None, optional
+        Softening kernel (default ``None``: chosen from ``method``):
         - For method='tree': integer kernel type for pyfalcon (default: 1)
         - For method='direct': string kernel type (default: 'spline')
           Options: 'newtonian', 'plummer', 'spline', 'dehnen_k1', 'dehnen_k2'
@@ -826,8 +835,9 @@ def run_nbody_cpu(
         Number of snapshots to save. If 1, only saves final state (default: 1).
     num_files_to_write : int, optional
         Number of snapshot files to write (for load balancing). Default: 1.
-    restart_interval : int, optional
-        Save restart file every N steps (default: 1000).
+    restart_interval : int or None, optional
+        Save restart file every N steps and at the end (default: 1000).
+        ``None`` or 0: no restart files.
     continue_run : bool, optional
         Continue from restart file if it exists (default: False).
     verbose : bool, optional
@@ -902,6 +912,9 @@ def run_nbody_cpu(
     # Validate and normalise kernel for each method path
     _DIRECT_KERNELS = {'newtonian', 'plummer', 'dehnen_k1', 'dehnen_k2', 'spline'}
     _TREE_KERNEL_MAP = {'plummer': 0, 'dehnen_k1': 1, 'dehnen_k2': 2}
+
+    if kernel is None:
+        kernel = 'spline' if method == 'direct' else 1
 
     if method == 'direct':
         if isinstance(kernel, int):
@@ -1011,7 +1024,7 @@ def run_nbody_cpu(
         print(f"Kernel: {kernel}, Softening: {softening if np.isscalar(softening) else 'variable'}")
         print(f"External potential: {'Yes' if external_potential is not None else 'No'}")
         print(f"Snapshots: {snapshots} (every ~{total_steps//snapshots:,} steps)")
-        print(f"Restart files: every {restart_interval} steps")
+        print(f"Restart files: every {restart_interval} steps" if restart_interval else "Restart files: off")
         print("="*80)
     
     # Initial acceleration (with warmup)
@@ -1063,6 +1076,7 @@ def run_nbody_cpu(
     # Main integration loop: iterate over the remaining steps (1..remaining_steps)
     # ============================================================================
     t_start = pytime.perf_counter()
+    io_clock = _IOClock()   # output wall time
     _report_every = max(1, remaining_steps // 50)
 
     if _TQDM_OK and verbose:
@@ -1115,8 +1129,9 @@ def run_nbody_cpu(
         # === I/O Operations ===
         while snapshot_counter < len(snapshot_steps) and current_step >= snapshot_steps[snapshot_counter]:
             if save_snapshots:
-                _save_snapshot(xv, snapshot_counter, time, output_path, **_snap_kwargs)
-                _update_snapshot_times(output_path, snapshot_counter, time)
+                with io_clock:
+                    _save_snapshot(xv, snapshot_counter, time, output_path, **_snap_kwargs)
+                    _update_snapshot_times(output_path, snapshot_counter, time)
                 if verbose:
                     _vprint(f"Saved snapshot id={snapshot_counter:03d} at step "
                             f"{current_step}, time {time:.6e}...")
@@ -1125,7 +1140,7 @@ def run_nbody_cpu(
         # Progress update — suppress manual line when tqdm bar is active
         _is_report_step = step_i % _report_every == 0
         if verbose and (not _TQDM_OK or debug_energy) and _is_report_step:
-            elapsed = pytime.perf_counter() - t_start
+            elapsed = pytime.perf_counter() - t_start - io_clock.total
             rate = step_i / elapsed if elapsed > 0 else 0
             eta = (remaining_steps - step_i) / rate if rate > 0 else 0
             avg_step_time = elapsed / step_i if step_i > 0 else 0
@@ -1144,9 +1159,10 @@ def run_nbody_cpu(
                 _vprint(line)
 
         # Save restart file
-        if current_step > 0 and (current_step % restart_interval) == 0:
-            _save_restart(xv, time, current_step, output_path, snapshot_counter,
-                          **_restart_kwargs)
+        if restart_interval and current_step > 0 and (current_step % restart_interval) == 0:
+            with io_clock:
+                _save_restart(xv, time, current_step, output_path, snapshot_counter,
+                              **_restart_kwargs)
 
     # =============================================================================
     # End of integration loop
@@ -1158,26 +1174,31 @@ def run_nbody_cpu(
             if verbose:
                 print(f"<=Saving final snapshot snap.{snapshot_counter:03d} at "
                       f"step {total_steps}, time {time:.6e}=>")
-            _save_snapshot(xv, snapshot_counter, time, output_path, **_snap_kwargs)
-            _update_snapshot_times(output_path, snapshot_counter, time)
+            with io_clock:
+                _save_snapshot(xv, snapshot_counter, time, output_path, **_snap_kwargs)
+                _update_snapshot_times(output_path, snapshot_counter, time)
         snapshot_counter += 1
 
     # Save final restart
-    _save_restart(xv, time, total_steps, output_path, snapshot_counter,
-                  **_restart_kwargs)
+    if restart_interval:
+        with io_clock:
+            _save_restart(xv, time, total_steps, output_path, snapshot_counter,
+                          **_restart_kwargs)
 
     if verbose:
         t_end = pytime.perf_counter()
         total_time = t_end - t_start
-        avg_step_time = total_time / remaining_steps if remaining_steps > 0 else 0
-        
+        step_time = max(total_time - io_clock.total, 1e-12)   # integration only
+        avg_step_time = step_time / remaining_steps if remaining_steps > 0 else 0
+
         print("\n" + "="*80)
         print("Integration Complete")
         print("="*80)
         print(f"Final time: {time:.6e}")
-        print(f"Total wall time: {total_time:.2f} s")
-        print(f"Steps per second: {remaining_steps / total_time:.1f}")
-        print(f"Average step time: {avg_step_time*1000:.1f} ms")
+        print(f"Total wall time: {total_time:.2f} s "
+              f"(integration {step_time:.2f} s, output {io_clock.total:.2f} s)")
+        print(f"Steps per second: {remaining_steps / step_time:.1f}")
+        print(f"Average step time: {avg_step_time*1000:.1f} ms (excluding output)")
         print(f"Snapshots saved: {snapshot_counter}")
         print("="*80)
     

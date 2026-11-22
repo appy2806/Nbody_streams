@@ -95,7 +95,7 @@ def child(mode, n, steps, mem_fraction=None):
         for k in (1, 2, 2 + steps):               # k = 1: warm-up (compile, allocate)
             t0 = time.perf_counter()
             run_nbody_gpu_tree(ps, m, 0.0, k * dt, dt, 0.01, G=1.0, theta=0.6,
-                               save_snapshots=False, restart_interval=10 ** 9, verbose=False,
+                               save_snapshots=False, restart_interval=None, verbose=False,
                                output_dir=os.path.join(os.environ.get("TMPDIR", "/tmp"), "maxn_out"),
                                overwrite=True)
             walls[k] = time.perf_counter() - t0

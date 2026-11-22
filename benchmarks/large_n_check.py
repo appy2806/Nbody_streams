@@ -81,6 +81,6 @@ ps = np.concatenate([x, np.zeros_like(x)], 1); del x
 with tempfile.TemporaryDirectory(dir=OUTDIR) as d:    # the final restart file is ~13 GB
     t0 = time.perf_counter()
     out = run_nbody_gpu_tree(ps, np.full(N2, 1.0 / N2), 0.0, 3e-4, 1e-4, 1e-3, G=1.0, theta=0.6, nleaf=64,
-                             output_dir=d, save_snapshots=False, snapshots=2, verbose=True, restart_interval=10**9)
+                             output_dir=d, save_snapshots=False, snapshots=2, verbose=True, restart_interval=None)
 print(f"run N2={N2:,}: {time.perf_counter()-t0:.1f}s, finite={bool(np.isfinite(out).all())}")
 print("H200_DONE")
