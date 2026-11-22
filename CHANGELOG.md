@@ -77,6 +77,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CPU surface-density rendering lost mass** (`render_surface_density(...,
+  arch='cpu')`): `grid[i, j] += ...` inside Numba `prange` is a data race,
+  not the per-thread reduction the code assumed, so overlapping particles
+  dropped deposits (up to 2x per pixel in dense regions; intermittent test
+  failure).  Each thread now splats into a private grid, summed by rows;
+  deterministic, ~1.5x slower.
 - `run_nbody_cpu` with its defaults raised (`kernel=1` with `method='direct'`);
   the kernel now defaults from the method (`'spline'` direct, 1 tree), as
   documented.

@@ -220,6 +220,28 @@ class TestRenderSurfaceDensity:
         expected = float(mass[0]) * inside
         assert mass_in_grid == pytest.approx(expected, rel=0.05)
 
+    def test_cpu_splat_no_race(self):
+        """Dense splat (many particles per pixel): the threaded CPU result equals
+        a single-thread run and repeats exactly (a racy += loses mass)."""
+        import numba
+        rng = np.random.default_rng(5)
+        N = 200_000
+        x = rng.normal(0, 1.0, N).astype(np.float32)
+        y = rng.normal(0, 1.0, N).astype(np.float32)
+        mass = np.ones(N, dtype=np.float32)
+        h = np.full(N, 0.5, dtype=np.float32)
+        kw = dict(resolution=32, gridsize=8.0, arch='cpu', h=h)
+        g1, _ = render_surface_density(x, y, mass, **kw)
+        g2, _ = render_surface_density(x, y, mass, **kw)
+        np.testing.assert_array_equal(g1, g2)
+        old = numba.get_num_threads()
+        numba.set_num_threads(1)
+        try:
+            g_serial, _ = render_surface_density(x, y, mass, **kw)
+        finally:
+            numba.set_num_threads(old)
+        np.testing.assert_allclose(g1, g_serial, rtol=1e-4, atol=1e-3 * g_serial.max())
+
     def test_bad_arch_raises(self):
         x = y = np.ones(10, dtype=np.float32)
         mass = np.ones(10, dtype=np.float32)
