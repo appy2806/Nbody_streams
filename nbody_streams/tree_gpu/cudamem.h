@@ -18,6 +18,20 @@ struct cuda_mem
     n = size;
     CUDA_SAFE_CALL(cudaMalloc(&ptr, n * sizeof(T)));
   }
+  /* alloc that reports an out-of-memory failure instead of exiting */
+  bool try_alloc(const size_t size)
+  {
+    assert(ptr == NULL);
+    if (cudaMalloc(&ptr, size * sizeof(T)) != cudaSuccess)
+    {
+      (void)cudaGetLastError();   /* clear the (non-sticky) error */
+      ptr = NULL;
+      n = 0;
+      return false;
+    }
+    n = size;
+    return true;
+  }
   void free()
   {
     if (ptr == NULL) return;

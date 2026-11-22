@@ -126,7 +126,9 @@ extern "C" {
     }
 
     /* Pipeline stages */
-    void tree_build(Tree* tree, int nL) { tree->buildTree(nL); }
+    /* 0 on success; -1 if the build overflowed and the buffers could not
+     * grow (message on stderr) */
+    int  tree_build(Tree* tree, int nL) { return tree->buildTree(nL); }
     void tree_compute_multipoles(Tree* tree) { tree->computeMultipoles(); }
     void tree_make_groups(Tree* tree, int levelSplit, int nGroup) {
         tree->makeGroups(levelSplit, nGroup);

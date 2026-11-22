@@ -131,6 +131,7 @@ _lib.tree_set_pos_mass_device.argtypes = [_ptr, _int, _ptr, _ptr, _ptr, _ptr]
 
 # Pipeline
 _lib.tree_build.argtypes              = [_ptr, _int]
+_lib.tree_build.restype               = _int
 _lib.tree_compute_multipoles.argtypes = [_ptr]
 _lib.tree_make_groups.argtypes        = [_ptr, _int, _int]
 _lib.tree_compute_forces.restype      = _ResInteractions
@@ -393,7 +394,10 @@ def tree_gravity_gpu(
             _gpu_ptr(mass), _gpu_ptr(eps_arr),
         )
 
-        _lib.tree_build(_tree, nleaf)
+        if _lib.tree_build(_tree, nleaf) != 0:
+            raise RuntimeError(
+                "GPU tree build overflowed and its buffers could not grow "
+                "(see stderr); too many (nearly) coincident particles?")
         _lib.tree_compute_multipoles(_tree)
         _lib.tree_make_groups(_tree, level_split, ncrit)
         _lib.tree_compute_forces(_tree)

@@ -193,7 +193,7 @@ struct Treecode
   cuda_mem<Position<real_t> > d_minmax;
   cuda_mem<int2> d_level_begIdx;
 
-  int node_max, cell_max;
+  int node_max, cell_max;      /* build capacities, grown on overflow (see alloc) */
   size_t stack_size;            /* ints; 96 per node, exceeds INT_MAX above ~110M particles */
   int last_nodes_used = 0;      /* nodes whose memPool slots the last build dirtied */
   cuda_mem<int>  d_stack_memory_pool;
@@ -227,10 +227,7 @@ struct Treecode
   cuda_mem<float4>  d_cellBoxMin, d_cellBoxMax;
 
   /* Pre-allocated scratch for buildOctreeHost — eliminates 4× cudaMalloc/cudaFree per step.
-   * build_max_work : work-queue depth = max nodes split at any single level.
-   *                  Nodes of one level are disjoint and each holds > nleaf >= 16
-   *                  particles, so N/16 always suffices (was a fixed 262144,
-   *                  which overflowed near ~20M particles).
+   * build_max_work : work-queue depth (see alloc).
    * BUILD_PENDING_WORK_BYTES : must be >= sizeof(PendingWork<real_t>) in buildTree.cu.
    *                  Verified at compile time via static_assert in buildOctreeHost. */
   int build_max_work = 0;
@@ -276,9 +273,32 @@ struct Treecode
     /* per-particle softening (float, 4N bytes each) */
     d_ptclEpsTree.alloc(nPtcl);
 
-    /* allocate stack memory */
-    node_max = nPtcl/5;
-    if (node_max < 65536) node_max = 65536;
+    /* Build capacities.  None is a rigorous bound (that would need ~2.7
+     * nPtcl cells and ~1.7 nPtcl nodes, ~65 GB of node pool at 1e8): the
+     * build detects an overflow, writes nothing out of bounds, and
+     * buildTree grows the buffers and rebuilds (growBuildBuffers); they
+     * then stay grown on this handle.
+     *
+     * node_max : node pool slots (96 ints each) for cells being split.
+     *            Real trees need ~nPtcl/40; a clump of > nLeaf (nearly)
+     *            coincident particles adds a chain of ~25 single-child nodes.
+     * cell_max : all cells below the root (the root is overwritten).  Leaves
+     *            hold >= 1 particle, so nLeaves <= nPtcl, but nodes come on
+     *            top: the root's first split alone needs up to min(8, nPtcl)
+     *            cells.  Real trees need ~nPtcl/5 (leaves average several
+     *            particles); the 65536 floor (2.6 MB) covers tiny N.
+     * build_max_work : work-queue depth = cells split at any single level.
+     *            Nodes of one level are disjoint and each holds > nleaf >= 16
+     *            particles, so N/16 always suffices (was a fixed 262144,
+     *            which overflowed near ~20M particles).
+     * TREEGPU_DEBUG_BUILD_CAPACITY=k (testing only) starts all three at k. */
+    node_max       = std::max(nPtcl/5, 65536);
+    cell_max       = std::max(nPtcl + 9, 65536);
+    build_max_work = std::max(262144, nPtcl/16 + 1);
+    if (const char *cap = std::getenv("TREEGPU_DEBUG_BUILD_CAPACITY"))
+      if (std::atoi(cap) > 0)
+        node_max = cell_max = build_max_work = std::atoi(cap);
+
     stack_size = (size_t)(8+8+8+64+8)*node_max;
     if (verbose) fprintf(stderr, "stack_size= %g MB \n", sizeof(int)*stack_size/1024.0/1024.0);
     d_stack_memory_pool.alloc(stack_size);
@@ -286,20 +306,6 @@ struct Treecode
     CUDA_SAFE_CALL(cudaMemset(d_stack_memory_pool, 0, stack_size*sizeof(int)));
     last_nodes_used = 0;
 
-    /* allocate celldata memory.
-     * nCells = all cells below the root (the root is overwritten).  Leaves
-     * hold >= 1 particle, so nLeaves <= nPtcl, but nodes come on top: the
-     * root's first split alone needs up to min(8, nPtcl) cells, and a clump
-     * of > nLeaf (nearly) coincident particles adds a chain of single-child
-     * nodes down to the depth cap.  A rigorous bound is
-     *   nPtcl + (TREE_MAX_LEVEL-1)*floor(nPtcl/(nLeaf+1)) + 9,
-     * up to ~2.7 nPtcl; real trees need ~nPtcl/5 (leaves average several
-     * particles).  The 65536-cell floor (2.6 MB) makes the bound hold for
-     * nPtcl <~ 24000 at any nLeaf, covering tiny N; above that nPtcl + 9 is
-     * ample unless thousands of > nLeaf-particle clumps are exactly
-     * coincident (~25 chain cells each; the node pool, node_max, overflows
-     * first).  buildOctant asserts on overflow. */
-    cell_max = std::max(nPtcl + 9, 65536);
     if (verbose) fprintf(stderr, "celldata= %g MB \n", cell_max*sizeof(CellData)/1024.0/1024.0);
     d_cellDataList.alloc(cell_max);
     d_cellDataList_tmp.alloc(cell_max);
@@ -314,13 +320,14 @@ struct Treecode
     /* Pre-allocate buildOctreeHost scratch (eliminates per-step GPU malloc/free churn). */
     d_build_octCounter .alloc(16);
     d_build_octCounterN.alloc(96);
-    build_max_work = std::max(262144, nPtcl/16 + 1);
     d_build_workQueue  .alloc(static_cast<size_t>(build_max_work) * BUILD_PENDING_WORK_BYTES);
     d_build_workQueueIn.alloc(static_cast<size_t>(build_max_work) * BUILD_PENDING_WORK_BYTES);
     d_build_workCount  .alloc(1);
   };
 
-  void buildTree(const int nLeaf = 16);
+  /* returns 0, or -1 if the build overflowed and the buffers could not grow */
+  int buildTree(const int nLeaf = 16);
+  bool growBuildBuffers(long long nodes_seen, long long cells_seen, long long work_seen, int attempt);
   void computeMultipoles();
   void makeGroups(int levelSplit = 1, const int nCrit = 64);
   double4 computeForces(const bool INTCOUNT = true);
