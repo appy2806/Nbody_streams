@@ -225,7 +225,7 @@ evaluations through `tree_gravity_gpu`.
 | `save_snapshots` | bool | Write HDF5 snapshots. Default True. |
 | `snapshots` | int | Number of snapshots to write. Exactly this many datasets are produced, ids `000`..`snapshots-1`, the last one at `time_end`. Default 100. |
 | `num_files_to_write` | int | Distribute snapshots across this many HDF5 files. Default 1. |
-| `restart_interval` | int | Save restart checkpoint every N steps. Default 1000. |
+| `restart_interval` | int or None | Save restart checkpoint every N steps and at the end. Default 1000; `None` or 0 writes no restart files. The closing summary reports integration and output time separately. |
 | `continue_run` | bool | Resume from an existing restart file. Default False. |
 | `overwrite` | bool | Delete existing snapshot files before starting. Default False. |
 | `verbose` | bool | Print header, progress (rate/ETA), and snapshot messages. Default True. |
