@@ -58,6 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (2.6 MB) and the off-by-one in the cell and node-pool overflow checks is
   fixed. N = 0 returns empty `(0, 3)` / `(0,)` float32 arrays (it hung);
   `TreeGPU(n)` with negative or non-integer `n` raises `ValueError`.
+- **GPU tree build overflow no longer kills the CUDA context.** Inputs with
+  thousands of > `nleaf` coincident clumps (e.g. 4000 x 17 identical positions,
+  N = 68k) overflowed the node pool / cell list and hit a device assert. The
+  build now flags the overflow without any out-of-bounds write
+  (compute-sanitizer clean), grows the buffers (>= 2x, kept on the handle) and
+  rebuilds; the result is bitwise equal to a large-enough handle. Normal-path
+  speed unchanged (L40, within 1%); an unrecoverable case raises `RuntimeError`.
 - `python_requires` was `<=3.13`, which rejects every 3.13 patch release
   (pip refused Python 3.13.9); now `<3.14`.
 - **Dehnen K2 force** used `3.75 h^4` instead of `1.875 h^4` (CUDA and CPU),
