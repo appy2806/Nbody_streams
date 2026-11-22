@@ -69,7 +69,17 @@ try:
 except ImportError:
     from nbody_streams.species import Species, _build_particle_arrays  # type: ignore[no-redef]
 
-from ._force import tree_gravity_gpu, TreeGPU, G_DEFAULT
+from ._force import tree_gravity_gpu, TreeGPU, G_DEFAULT, _max_n, _IDX_CAP
+
+# GPU memory the integrator allocates per particle after its TreeGPU handle
+# (the float64 pos/vel, float32/float64 masses and float32 softening, 64 B,
+# already exist then and are seen as used memory): the float64 total
+# acceleration (24), the (N, 6) float64 concatenation of pos and vel for each
+# snapshot / restart (48, kept by the CuPy pool) and the float64 external
+# acceleration (24, only with external_potential or force_extra; the
+# potential's own scratch is not counted).
+_RUN_BYTES_PER_PARTICLE     = 24 + 48
+_RUN_EXT_BYTES_PER_PARTICLE = 24
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -286,6 +296,10 @@ def run_nbody_gpu_tree(
         If snapshot files already exist and ``overwrite=False``.
     NotImplementedError
         If an external potential is requested but Agama is not installed.
+    ValueError
+        If N particles do not fit in 80% of the free GPU memory (tree plus
+        integrator arrays; see docs/tree_gpu.md, "GPU memory layout") or
+        exceed the tree's 2^29-particle index limit.
     """
     if not _CUPY_OK:
         raise ImportError("CuPy is required for run_nbody_gpu_tree.")
@@ -408,6 +422,14 @@ def run_nbody_gpu_tree(
         print("=" * 80)
 
     # ── Pre-allocate tree handle ───────────────────────────────────────────────
+    extra = _RUN_BYTES_PER_PARTICLE + (
+        _RUN_EXT_BYTES_PER_PARTICLE if (external_potential is not None or force_extra is not None) else 0)
+    cap = _max_n(extra)
+    if N > cap:
+        raise ValueError(
+            f"N={N:,} exceeds the GPU tree run limit ({cap:,}), set by "
+            + ("free GPU memory (tree plus integrator arrays)" if cap < _IDX_CAP
+               else "the 29-bit particle index (2^29 particles)") + ".")
     tree     = TreeGPU(N, eps=0.0, theta=theta, verbose=False)
     watchdog = _StepWatchdog(timeout_s=step_timeout_s)
 

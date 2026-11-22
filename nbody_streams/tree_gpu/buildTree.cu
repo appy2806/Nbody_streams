@@ -7,7 +7,7 @@
  * when they hold more than NLEAF particles: particles closer than the float
  * resolution of the box (e.g. exact duplicates) can never be separated, and
  * without the cap the split recursion ran past level 31, the limit of the
- * host level loop and of CellData's 5-bit level field, leaving cells unwritten
+ * host level loop and of d_level_begIdx (32 levels), leaving cells unwritten
  * and corrupting every force.  An oversized leaf is handled exactly by the
  * walk (direct sum over its particles in warp-sized chunks) and by
  * leafMultipoles.  Balanced trees are ~15-20 levels deep. */
@@ -61,6 +61,7 @@ namespace treeBuild
 
   __device__   int *memPool;
   __device__   CellData *cellDataList;
+  __device__   int      *cellLevelList;   /* level of each cell (d_key: the level-sort key) */
   __device__   void *ptclVel_tmp;
   __device__   int *origIdx_buf;
 
@@ -533,9 +534,10 @@ namespace treeBuild
           /* writing linking info, parent, child and particle's list */
           /*** keep in mind, the 0-level will be overwritten ***/
           assert(nChildrenCell <= 8);
-          const CellData cellData(level,cellParentIndex, nBeg, nEnd, shmem[16+9], nChildrenCell-1);
+          const CellData cellData(cellParentIndex, nBeg, nEnd, shmem[16+9], nChildrenCell-1);
           assert(cellData.isNode());
-          cellDataList[cellIndexBase + blockIdx.y] = cellData;
+          cellDataList [cellIndexBase + blockIdx.y] = cellData;
+          cellLevelList[cellIndexBase + blockIdx.y] = level;
         }
       }
 
@@ -631,9 +633,10 @@ namespace treeBuild
         {
           atomicAdd(&buildCounters.nleaves,1);
           atomicAdd(&buildCounters.nbodies_leaf, nEnd1-nBeg1);
-          const CellData leafData(level+1, cellIndexBase+blockIdx.y, nBeg1, nEnd1);
+          const CellData leafData(cellIndexBase+blockIdx.y, nBeg1, nEnd1);
           assert(!leafData.isNode());
-          cellDataList[cellFirstChildIndex + nSubNodes.y + leafOffset] = leafData;
+          cellDataList [cellFirstChildIndex + nSubNodes.y + leafOffset] = leafData;
+          cellLevelList[cellFirstChildIndex + nSubNodes.y + leafOffset] = level+1;
         }
         finalizeParticles<T>(nBeg1, nEnd1, laneIdx, level, ptcl, buff);
       }
@@ -795,6 +798,7 @@ namespace treeBuild
         const int n,
         const Box<T> *d_domain_ptr,
         CellData *d_cellDataList_ptr,
+        int *d_cellLevel_ptr,      /* per-cell level out (cell_max ints; d_key) */
         int *d_stack_memory_pool,
         Particle4<T> *ptcl,
         Particle4<T> *buff,
@@ -815,6 +819,10 @@ namespace treeBuild
       {
         CellData *tmp = d_cellDataList_ptr;
         CUDA_SAFE_CALL(cudaMemcpyToSymbol(cellDataList, &tmp, sizeof(CellData*)));
+      }
+      {
+        int *tmp = d_cellLevel_ptr;
+        CUDA_SAFE_CALL(cudaMemcpyToSymbol(cellLevelList, &tmp, sizeof(int*)));
       }
       {
         void *tmp = (void*)d_ptclVel;
@@ -974,16 +982,16 @@ namespace treeBuild
     }
 
 
+  /* The sort keys (cell levels) were written by the build into key[]
+   * (cellLevelList); this sets the values and copies the cells. */
   static __global__ void
-    get_cell_levels(const int n, const CellData cellList[], CellData cellListOut[], int key[], int value[])
+    get_cell_levels(const int n, const CellData cellList[], CellData cellListOut[], int value[])
     {
       const int idx = blockIdx.x*blockDim.x + threadIdx.x;
       if (idx >= n) return;
 
-      const CellData cell = cellList[idx];
-      key  [idx] = cell.level();
       value[idx] = idx;
-      cellListOut[idx] = cell;
+      cellListOut[idx] = cellList[idx];
     }
 
   static __global__ void
@@ -1109,9 +1117,11 @@ template<typename real_t>
 bool Treecode<real_t>::growBuildBuffers(const long long nodes_seen, const long long cells_seen,
                                         const long long work_seen, const int attempt)
 {
-  const int  NODE_CAP = 1 << 30;   /* PendingWork node index, int counters      */
-  const int  CELL_CAP = 1 << 27;   /* CellData parent index has 27 bits         */
-  const int  WORK_CAP = 1 << 30;
+  /* CellData's 29-bit `first` limits the cells; nodes (cells that split)
+   * and work items (nodes of one level) never outnumber the cells */
+  const int  CELL_CAP = CELLDATA_MAX_CELLS;
+  const int  NODE_CAP = CELL_CAP;
+  const int  WORK_CAP = CELL_CAP;
   const bool grow_nodes = nodes_seen > node_max;
   const bool grow_cells = cells_seen > cell_max;
   const bool grow_work  = work_seen  > build_max_work;
@@ -1257,27 +1267,27 @@ int Treecode<real_t>::buildTree(const int nLeaf)
     {
       case 16:
         treeBuild::buildOctreeHost<16,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_key, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       case 24:
         treeBuild::buildOctreeHost<24,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_key, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       case 32:
         treeBuild::buildOctreeHost<32,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_key, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       case 48:
         treeBuild::buildOctreeHost<48,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_key, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       case 64:
         treeBuild::buildOctreeHost<64,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_key, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       default:
@@ -1294,6 +1304,7 @@ int Treecode<real_t>::buildTree(const int nLeaf)
     nNodes  = cnt.nnodes;
     nLeaves = cnt.nleaves;
     last_nodes_used = nNodes;   /* clamped to the pool by the clearing memset */
+    last_work_seen  = max_work_seen;
     if (verbose){
       fprintf(stderr, " buildOctree done in %g sec : %g Mptcl/sec\n",  dt, nPtcl/1e6/dt);
     }
@@ -1321,7 +1332,7 @@ int Treecode<real_t>::buildTree(const int nLeaf)
     const double t0 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
     const int nthread = 256;
     const int nblock  = (nCells-1)/nthread  + 1;
-    treeBuild::get_cell_levels<<<nblock,nthread>>>(nCells, d_cellDataList, d_cellDataList_tmp, d_key, d_value);
+    treeBuild::get_cell_levels<<<nblock,nthread>>>(nCells, d_cellDataList, d_cellDataList_tmp, d_value);
 
     thrust::device_ptr<int> keys_beg(d_key.ptr);
     thrust::device_ptr<int> keys_end(d_key.ptr + nCells);
@@ -1459,8 +1470,6 @@ int Treecode<real_t>::buildTree(const int nLeaf)
     for (int i = 0; i < nCells; i++)
     {
       const CellData cell = cells[i];
-      assert(cell.level() >= 0);
-      assert(cell.level() < 32);
 
       if (cell.isNode())
         assert(cell.first() + cell.n() <= nCells);
@@ -1490,8 +1499,8 @@ int Treecode<real_t>::buildTree(const int nLeaf)
 #if 0
     for (int i = 0; i < nCells; i++)
     {
-      printf("cellIdx= %d  isNode= %s: lev= %d first= %d  n= %d  pbeg= %d  pend =%d\n",
-          i, cells[i].isNode() ? "true ":"false", cells[i].level(),
+      printf("cellIdx= %d  isNode= %s: first= %d  n= %d  pbeg= %d  pend =%d\n",
+          i, cells[i].isNode() ? "true ":"false",
           cells[i].first(), cells[i].n(), cells[i].pbeg(), cells[i].pend());
     }
     fflush(stdout);

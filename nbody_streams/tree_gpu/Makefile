@@ -133,6 +133,11 @@ $(LIB): $(CUOBJ)
 	$(NVCC) -shared $(NVCCFLAGS) -o $@ $^ $(NVCCLDFLAGS) \
 	  -Xlinker -rpath -Xlinker $(CUDA_TK)/lib64
 
+# Every object includes Treecode.h and the headers below it: rebuild all of
+# them when a header changes (e.g. the CellData / Particle4 packing).
+HEADERS = $(wildcard *.h)
+$(CUOBJ): $(HEADERS)
+
 # Per-file compile rules
 %.o: %.cu
 	@echo "Compiling $<"

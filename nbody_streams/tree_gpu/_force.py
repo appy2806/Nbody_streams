@@ -84,12 +84,39 @@ def cuda_alive() -> bool:
         return True           # can't check; assume healthy
     return _libcudart.cudaGetLastError() == 0   # 0 == cudaSuccess
 
-_BYTES_PER_PARTICLE = 52  # ~tests reveal roughly 52 floats per particle (pos+mass+eps) with tree overhead
-_IDX_CAP = 0x0FFFFFFF
+# GPU memory model of one TreeGPU handle, measured with cudaMemGetInfo (see
+# docs/tree_gpu.md, "GPU memory layout"):
+#   tree buffers after the first force call: 151 B/particle at allocation
+#   (particle arrays 76, node pool 48, cell list 24, work queues 4) plus the
+#   per-cell multipole arrays (124 B/cell), walk groups (8) and sort scratch;
+#   210 covers the worst realistic tree (nleaf=16, 0.36 N cells).
+_TREE_BYTES_PER_PARTICLE = 210
+#   per tree_gravity_gpu call (CuPy pool): float32 SoA positions (12), SoA
+#   acc + phi (16), the returned (N, 3) acc (12).
+_CALL_BYTES_PER_PARTICLE = 40
+#   N-independent: minimum buffer sizes, Thrust scratch, CuPy kernels ...
+_FIXED_BYTES = 64 << 20
+#   ... and the tree-walk pool, 2 MiB per persistent block x 6 blocks per SM
+#   (capped at 1/4 of the free memory when it is allocated).
+_WALK_POOL_BYTES_PER_SM = 12 << 20
+# Index-packing limit of the tree build: the particle index has 29 bits in
+# Particle4 (= _lib.tree_max_particles()).
+_IDX_CAP = 1 << 29
 
-def _max_n() -> int:
+_n_sm = None
+
+def _max_n(extra_bytes_per_particle: int = 0) -> int:
+    """Largest N whose tree (plus ``extra_bytes_per_particle`` that the caller
+    will allocate later) fits in 80% of the free GPU memory; the other 20%
+    absorbs allocator rounding, fragmentation and CuPy pool growth."""
+    global _n_sm
+    if _n_sm is None:
+        _n_sm = int(cp.cuda.Device().attributes["MultiProcessorCount"])
     free, _ = cp.cuda.runtime.memGetInfo()
-    return min(int(free * 0.80) // _BYTES_PER_PARTICLE, _IDX_CAP)
+    walk = min(free // 4, _WALK_POOL_BYTES_PER_SM * _n_sm)
+    usable = int(free * 0.80) - _FIXED_BYTES - walk
+    per = _TREE_BYTES_PER_PARTICLE + _CALL_BYTES_PER_PARTICLE + int(extra_bytes_per_particle)
+    return max(0, min(usable // per, _IDX_CAP))
 
 # ---------------------------------------------------------------------------
 # Load shared library
@@ -139,6 +166,12 @@ _lib.tree_compute_forces.argtypes     = [_ptr]
 
 # Output
 _lib.tree_get_acc_device.argtypes = [_ptr, _int, _ptr, _ptr, _ptr, _ptr]
+
+# Diagnostics: last build's usage / capacities, index limits, packing self-test
+_lib.tree_get_build_stats.argtypes = [_ptr, _ptr]
+_lib.tree_max_particles.restype    = _int
+_lib.tree_max_cells.restype        = _int
+_lib.tree_selftest_packing.restype = _int
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -209,10 +242,11 @@ class TreeGPU:
         if not 0.0 < theta < 1.15:
             raise ValueError(f"theta must be in (0, 1.15), got {theta}")
         cap = _max_n()
-        assert n <= cap, (
-            f"N={n:,} exceeds GPU cap ({cap:,}); "
-            f"limited by {'VRAM (80% free)' if cap < _IDX_CAP else '28-bit Particle4 index'}."
-        )
+        if n > cap:
+            raise ValueError(
+                f"N={n:,} exceeds the GPU tree limit ({cap:,}), set by "
+                + ("free GPU memory (see _max_n)" if cap < _IDX_CAP
+                   else "the 29-bit particle index (2^29 particles)") + ".")
         self._ptr = _lib.tree_new(_flt(eps), _flt(theta))
         _lib.tree_set_verbose(self._ptr, int(verbose))
         if n > 0:   # n = 0: no buffers; tree_gravity_gpu returns empty arrays
@@ -223,6 +257,21 @@ class TreeGPU:
         # Softening array validated by the last tree_gravity_gpu call; the
         # same array object is not re-checked (the check costs a host sync).
         self._eps_checked = None
+
+    def build_stats(self) -> dict:
+        """Usage of the last tree build and the current build capacities.
+
+        ``cells``, ``nodes`` (cells that were split), ``leaves``, ``levels``,
+        ``work_items`` (largest number of cells split at one level), and
+        ``cell_capacity``, ``node_capacity``, ``work_capacity``: the buffer
+        sizes, which grow (and stay grown) when a build overflows them.
+        """
+        out = (ctypes.c_longlong * 8)()
+        if self._ptr is not None and self.n > 0:
+            _lib.tree_get_build_stats(self._ptr, out)
+        keys = ("cells", "nodes", "leaves", "levels", "work_items",
+                "cell_capacity", "node_capacity", "work_capacity")
+        return dict(zip(keys, (int(v) for v in out)))
 
     @property
     def theta(self) -> float:

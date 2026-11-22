@@ -72,6 +72,78 @@ __global__ void k_extract_unsorted(
 }
 
 
+/* Packing self-test (tree_selftest_packing): one thread per case, counts
+ * failed round trips instead of asserting (a device assert would kill the
+ * context).
+ *   Particle4<float/double>: every octant 0..7 with indices near 0, 2^28 and
+ *     2^29 - 1, set in both orders over arbitrary prior bits of .w.
+ *   CellData: nodes with first near CELLDATA_MAX_CELLS and every child count
+ *     1..8, leaves, parents near 2^32, update_first/update_parent. */
+template<typename T>
+__device__ int check_particle4(const int idx, const int oct, const unsigned long long junk)
+{
+    typedef typename vec<4,T>::type T4;
+    int bad = 0;
+    T4 d;
+    d.x = T(1); d.y = T(2); d.z = T(3);
+    if (sizeof(T) == 4) { float w = __uint_as_float((unsigned int)junk); d.w = w; }
+    else                { double w = __longlong_as_double((long long)junk); d.w = w; }
+    Particle4<T> p(d), q(d);
+    p.set_idx(idx); p.set_oct(oct);           /* build order: index, then octant */
+    q.set_oct(oct); q.set_idx(idx);
+    bad += p.get_idx() != idx || p.get_oct() != oct;
+    bad += q.get_idx() != idx || q.get_oct() != oct;
+    p.set_oct(7 - oct);                       /* re-set keeps the index */
+    bad += p.get_idx() != idx || p.get_oct() != 7 - oct;
+    p.set_idx(idx ^ 1);
+    bad += p.get_idx() != (idx ^ 1) || p.get_oct() != 7 - oct;
+    bad += p.x() != T(1) || p.y() != T(2) || p.z() != T(3);
+    return bad;
+}
+
+__global__ void k_selftest_packing(const int ncase, unsigned int *nbad)
+{
+    const int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= ncase) return;
+    const int k = t / 64, oct = t % 8, sub = (t / 8) % 8;
+    /* indices: 0..63, 2^28-32..2^28+31, 2^29-64..2^29-1, ~2^29/3 */
+    const int bases[4] = {0, (1 << 28) - 32, PARTICLE4_MAX_N - 64, PARTICLE4_MAX_N / 3};
+    const int idx = bases[k % 4] + ((k / 4) * 8 + sub) % 64;      /* base .. base+63 */
+    unsigned long long junk = 0x9E3779B97F4A7C15ull * (unsigned long long)(t + 1);
+    int bad = 0;
+    if (idx >= 0 && idx < PARTICLE4_MAX_N)
+    {
+        bad += check_particle4<float >(idx, oct, junk);
+        bad += check_particle4<double>(idx, oct, junk);
+    }
+
+    /* CellData */
+    const int n = oct + 1;                                   /* 1..8 children */
+    const unsigned int firstBases[3] = {0u, (1u << 28), (unsigned int)CELLDATA_MAX_CELLS - 8u - 63u};
+    const unsigned int first = firstBases[k % 3] + (unsigned int)((t / 8) % 64);
+    if (first + n <= (unsigned int)CELLDATA_MAX_CELLS)
+    {
+        const unsigned int parent = 0xFFFFFFFFu - (unsigned int)t;        /* full 32 bits */
+        const unsigned int pbeg = (unsigned int)PARTICLE4_MAX_N - 1u - t, pend = pbeg + 1u;
+        CellData c(parent & 0x7FFFFFFFu, pbeg, pend, first, n - 1);
+        bad += !c.isNode() || c.isLeaf();
+        bad += c.first() != (int)first || c.n() != n;
+        bad += c.parent() != (int)(parent & 0x7FFFFFFFu);
+        bad += c.pbeg() != (int)pbeg || c.pend() != (int)pend;
+        c.update_parent(CELLDATA_MAX_CELLS - 1 - t);
+        bad += c.parent() != CELLDATA_MAX_CELLS - 1 - t || c.first() != (int)first || c.n() != n;
+        const int first2 = CELLDATA_MAX_CELLS - n - (t % 17);
+        c.update_first(first2);
+        bad += c.first() != first2 || c.n() != n || !c.isNode();
+        bad += c.parent() != CELLDATA_MAX_CELLS - 1 - t || c.pbeg() != (int)pbeg || c.pend() != (int)pend;
+
+        const CellData leaf(first, pbeg, pend);
+        bad += !leaf.isLeaf() || leaf.isNode();
+        bad += leaf.parent() != (int)first || leaf.pbeg() != (int)pbeg || leaf.pend() != (int)pend;
+    }
+    if (bad) atomicAdd(nbad, (unsigned int)bad);
+}
+
 /* ---------- Exported C interface ---------- */
 extern "C" {
 
@@ -160,6 +232,27 @@ extern "C" {
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess)
             fprintf(stderr, "CUDA Error (get_acc): %s\n", cudaGetErrorString(err));
+    }
+
+    /* index-packing limits: particles (Particle4 index) and cells (CellData first) */
+    int tree_max_particles(void) { return PARTICLE4_MAX_N; }
+    int tree_max_cells(void)     { return CELLDATA_MAX_CELLS; }
+
+    /* Last build's usage and the capacities (8 values, see Treecode::get_build_stats). */
+    void tree_get_build_stats(Tree* tree, long long* out) { tree->get_build_stats(out); }
+
+    /* Run the Particle4/CellData packing round trips on the device; returns
+     * the number of failures (0 = pass), or -1 on a CUDA error. */
+    int tree_selftest_packing(void)
+    {
+        const int ncase = 64 * 4 * 64;     /* 64 index groups x 4 bases x (8 sub x 8 octants) */
+        unsigned int *d_bad = NULL, h_bad = 0;
+        if (cudaMalloc(&d_bad, sizeof(unsigned int)) != cudaSuccess) return -1;
+        cudaMemset(d_bad, 0, sizeof(unsigned int));
+        k_selftest_packing<<<(ncase + 255) / 256, 256>>>(ncase, d_bad);
+        cudaError_t err = cudaMemcpy(&h_bad, d_bad, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+        cudaFree(d_bad);
+        return err == cudaSuccess ? (int)h_bad : -1;
     }
 
     void tree_set_verbose(Tree* tree, int verbose) {

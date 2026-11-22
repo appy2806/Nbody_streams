@@ -82,45 +82,55 @@ struct Particle4
   __host__ __device__ T& mass () { return packed_data.w;}
 };
 
+/* During the build .w holds (idx << 3) | octant instead of the mass: the
+ * original particle index in bits [31:3] (29 bits, so at most 2^29
+ * particles, PARTICLE4_MAX_N) and the octant 0..7 in bits [2:0].  Only
+ * octants 0..7 are ever stored (buildOctantBody's out-of-range marker 0xF
+ * lives in a register, never in .w).  float: the bits of the float;
+ * double: the low 32 bits of the double's bit pattern (the high bits are
+ * zeroed).  The shifts are unsigned: idx << 3 reaches bit 31. */
+#define PARTICLE4_IDX_BITS 29
+#define PARTICLE4_MAX_N    (1 << PARTICLE4_IDX_BITS)
+
 template<> __device__ __forceinline__ int Particle4<float>::get_idx() const
 {
-  return (__float_as_int(packed_data.w) >> 4) & 0x0FFFFFFF;
+  return (int)(__float_as_uint(packed_data.w) >> 3);
 }
 template<> __device__ __forceinline__ int Particle4<float>::get_oct() const
 {
-  return __float_as_int(packed_data.w) & 0xF;
+  return (int)(__float_as_uint(packed_data.w) & 0x7u);
 }
 template<> __device__ __forceinline__ int Particle4<float>::set_idx(const int idx)
 {
-  const int oct = get_oct();
-  packed_data.w = __int_as_float((idx << 4) | oct);
+  const unsigned int oct = __float_as_uint(packed_data.w) & 0x7u;
+  packed_data.w = __uint_as_float(((unsigned int)idx << 3) | oct);
   return idx;
 }
 template<> __device__ __forceinline__ int Particle4<float>::set_oct(const int oct)
 {
-  const int idx = get_idx();
-  packed_data.w = __int_as_float((idx << 4) | oct);
+  const unsigned int idx3 = __float_as_uint(packed_data.w) & ~0x7u;
+  packed_data.w = __uint_as_float(idx3 | ((unsigned int)oct & 0x7u));
   return oct;
 }
 
 template<> __device__ __forceinline__ int Particle4<double>::get_idx() const
 {
-  return ((unsigned long long)(packed_data.w) >> 4) & 0x0FFFFFFF;
+  return (int)((unsigned int)__double_as_longlong(packed_data.w) >> 3);
 }
 template<> __device__ __forceinline__ int Particle4<double>::get_oct() const
 {
-  return (unsigned long long)(packed_data.w) & 0xF;
+  return (int)((unsigned int)__double_as_longlong(packed_data.w) & 0x7u);
 }
 template<> __device__ __forceinline__ int Particle4<double>::set_idx(const int idx)
 {
-  const int oct = get_oct();
-  packed_data.w = (unsigned long long)((idx << 4) | oct);
+  const unsigned int oct = (unsigned int)__double_as_longlong(packed_data.w) & 0x7u;
+  packed_data.w = __longlong_as_double((long long)(((unsigned int)idx << 3) | oct));
   return idx;
 }
 template<> __device__ __forceinline__ int Particle4<double>::set_oct(const int oct)
 {
-  const int idx = get_idx();
-  packed_data.w = (unsigned long long)((idx << 4) | oct);
+  const unsigned int idx3 = (unsigned int)__double_as_longlong(packed_data.w) & ~0x7u;
+  packed_data.w = __longlong_as_double((long long)(idx3 | ((unsigned int)oct & 0x7u)));
   return oct;
 }
 
