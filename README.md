@@ -1,791 +1,275 @@
-# nbody_streams
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="plots/logo/nbody_streams_logo_dark.svg">
+    <img src="plots/logo/nbody_streams_logo_light.svg" width="480" alt="nbody_streams">
+  </picture>
+</p>
 
-Direct N-body simulator and utilities for collisionless multi-species systems.
-Designed around a minimal, Pythonic API — while keeping every computationally
-expensive routine in compiled, parallelized code with no pure-Python loops in
-the hot path.
+<p align="center">
+  <em>GPU N-body simulations of stellar streams in Python</em>
+</p>
 
-- **Multi-species** simulations with any number of particle types (dark matter, stars, gas tracers, black holes, …).
-- Single entry point: `run_simulation` with `architecture='cpu'|'gpu'` and `method='direct'|'tree'` flags.
-- **GPU direct**: hand-written CUDA kernels compiled at runtime via CuPy + nvcc — `float4` 128-bit vectorized loads, optional Kahan compensated summation, `--use_fast_math`, and architecture-tuned PTX.
-- **GPU tree**: Barnes-Hut GPU tree code (C++ / CUDA shared library) — O(N log N) scaling, per-particle softening, watchdog-guarded KDK integrator.
-- **CPU direct**: Numba JIT-compiled, auto-parallelized force kernels (`@njit(parallel=True)`) using all available CPU cores.
-- **CPU tree / FMM**: falcON fast multipole method via pyfalcon — true O(N) scaling for large particle counts.
-- Optional external potentials via Agama (evaluated in C++ per timestep, added to N-body accelerations).
-- Intended for collisionless systems with up to ~2M particles (benchmarks depend on hardware).
-- Fast stream-generation methods (particle spray, restricted N-body) via AGAMA.
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.8--3.13-4c8eda" alt="Python 3.8-3.13">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8aa1b4" alt="MIT license"></a>
+  <a href="https://doi.org/10.5281/zenodo.20834763"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.20834763.svg" alt="Zenodo DOI"></a>
+  <a href="https://doi.org/10.3847/1538-4357/ae89af"><img src="https://img.shields.io/badge/ApJ-1008%2C%2091%20(2026)-e8916b" alt="ApJ 1008, 91 (2026)"></a>
+</p>
 
 ---
+
+**nbody_streams** is a GPU-accelerated Python toolkit for simulating how
+satellite galaxies and star clusters are torn apart by their hosts. It runs
+N-body simulations on the GPU or CPU through one function, `run_simulation`,
+generates streams quickly with particle-spray and restricted N-body methods,
+and includes tools to analyse and plot the results.
+
+Host potentials use the formats of
+[Agama](https://github.com/GalacticDynamics-Oxford/Agama): pass any
+`agama.Potential`, or `PotentialGPU`, the package's own GPU implementation of
+Agama's potentials, which reads the same files and is faster for large
+particle counts.
+
+## Installation
+
+Python 3.8-3.13 (3.12 recommended) on Linux or macOS. The GPU features need
+an NVIDIA GPU and the CUDA compiler `nvcc` (CUDA 12+), which CuPy does not
+include.
+
+```bash
+# 1. A fresh environment with the CUDA compiler
+conda create -n nbody python=3.12 numpy setuptools
+conda activate nbody
+conda install -c conda-forge cuda-toolkit cuda-version=12   # provides nvcc
+pip install cupy-cuda12x
+
+# 2. The package, with Agama; this also compiles the GPU tree (~20 s)
+git clone https://github.com/appy2806/Nbody_streams.git
+cd Nbody_streams
+pip install -e ".[agama]" --no-build-isolation
+
+# 3. Check: compiles and runs one GPU force call
+python -c "import numpy as np, nbody_streams as nb; nb.compute_nbody_forces_gpu(np.random.rand(1000, 3), 1.0, softening=0.01); print('GPU direct OK | GPU tree:', nb._TREE_GPU_AVAILABLE)"
+```
+
+<details>
+<summary><strong>No GPU, or installing on a cluster</strong></summary>
+
+- **No GPU:** skip the `cuda-toolkit` and CuPy lines. The same `pip install`
+  works; you get the CPU backends and everything else except the GPU solvers.
+- **On a cluster:** replace the conda CUDA line with `module load cuda` (or
+  your cluster's equivalent), and load the same module in every job script:
+  the GPU direct sum and `PotentialGPU` compile their kernels with `nvcc` when
+  they first run. A login node usually has no GPU, so after installing there,
+  run `nbody-build-tree` once on a GPU node to rebuild the tree for that GPU.
+
+</details>
+
+<details>
+<summary><strong>Notes on the install commands</strong></summary>
+
+- `--no-build-isolation` makes pip build inside your current environment,
+  which is why numpy and setuptools are installed first.
+- Agama is compiled from source and needs a C++ compiler (`g++`).
+- For CUDA 13 use `cuda-version=13` and `cupy-cuda13x`. Either way, the CUDA
+  version must not be newer than the one `nvidia-smi` reports.
+- `nvcc` is used at install time to build the GPU tree, and at run time to
+  compile the GPU direct-sum and `PotentialGPU` kernels.
+
+</details>
+
+<details>
+<summary><strong>What each feature needs</strong></summary>
+
+| Feature | Needs |
+|---|---|
+| CPU direct sum | nothing extra |
+| CPU tree (falcON FMM) | `pip install -e ".[falcon]" --no-build-isolation` |
+| GPU direct sum, `PotentialGPU` | CuPy, and `nvcc` when the code runs |
+| GPU tree | CuPy, and `nvcc` when you run `pip install` |
+| Host potentials, `fast_sims`, `agama_helper` | [Agama](https://github.com/GalacticDynamics-Oxford/Agama) (the `[agama]` extra) |
+| Mollweide sky maps | `pip install -e ".[healpy]"` |
+
+</details>
+
+<details>
+<summary><strong>If the GPU tree did not build</strong></summary>
+
+Without `nvcc` the install still succeeds and prints a warning (visible with
+`pip install -v`); everything except the GPU tree works. Once `nvcc` is
+available, build the library in place with:
+
+```bash
+nbody-build-tree
+```
+
+Run it again after changing GPU or CUDA version, or after pulling changes to
+the `.cu` sources. Without a visible GPU the build targets `sm_80` (Ampere,
+e.g. an A100), which newer GPUs run less efficiently. Set
+`NBODY_STREAMS_BUILD_TREE=1` to make `pip install` fail instead of warning,
+or `0` to skip the build.
+
+The CuPy direct-sum kernels also run on AMD GPUs through ROCm; the tree code is
+NVIDIA-only (portable with `hipify`).
+
+</details>
+
+Units throughout: kpc, km/s and M<sub>sun</sub>; time is in kpc/(km/s)
+(~0.978 Gyr), and `G = 4.300917e-6`.
 
 ## Quick start
 
-```bash
-pip install -r requirements.txt
-pip install -e .          # editable (development) install
-
-# Optional extras (agama and pyfalcon require --no-build-isolation)
-pip install -e ".[agama]"  --no-build-isolation   # AGAMA for fast_sims & external potentials
-pip install -e ".[falcon]" --no-build-isolation   # pyfalcon tree/FMM backend
-pip install -e ".[healpy]"                        # HEALPix for mollweide projections
-pip install -e ".[all]"    --no-build-isolation   # all of the above
-
-# GPU support — install CuPy matching your CUDA version
-pip install cupy-cuda12x   # CUDA 12.x
-pip install cupy-cuda13x   # CUDA 13.x
-
-# GPU tree code — build the shared library (requires nvcc in PATH)
-cd nbody_streams/tree_gpu
-make -j$(nproc)            # produces libtreeGPU.so alongside the source files
-cd ../..
-```
-
----
-
-## Package overview
-
-| Subpackage | Description |
-|---|---|
-| `nbody_streams.species` | `Species` dataclass, `PerformanceWarning`, and array-building helpers |
-| `nbody_streams.sim` | `run_simulation` — unified multi-species entry point (all backends) |
-| `nbody_streams.fields` | Force and potential kernels: dispatches to GPU (CUDA) or CPU (Numba) backends |
-| `nbody_streams.cuda_kernels` | Loader for the direct-sum CUDA source in `nbody_streams/cuda/` (`direct.cu`, `softening.cuh`); compiled at runtime via nvcc, one module per precision and softening kernel |
-| `nbody_streams.run` | KDK leapfrog integrators (`run_nbody_gpu`, `run_nbody_cpu`); `make_plummer_sphere` IC generator |
-| `nbody_streams.tree_gpu` | GPU Barnes-Hut tree code: `tree_gravity_gpu`, `TreeGPU`, `run_nbody_gpu_tree`, watchdog; requires `make` |
-| `nbody_streams.io` | `ParticleReader` for HDF5 snapshots, save/load helpers |
-| `nbody_streams.utils` | Profile fitting (Dehnen, Plummer, double-power-law), iterative shape measurement, energy-based unbinding |
-| `nbody_streams.fast_sims` | Fast stream generation: particle spray and restricted N-body (requires AGAMA) |
-| `nbody_streams.agama_helper` | Fit, store, modify, and load Agama Multipole/CylSpline BFE potentials; HDF5 coefficient archives; time-evolving potentials; FIRE helpers; **`PotentialGPU`** — GPU-accelerated drop-in for `agama.Potential` (5–10× speedup at N≥50k) |
-| `nbody_streams.coords` | Coordinate transforms, vector field transforms, stream coordinate generation |
-| `nbody_streams.viz` | SPH/histogram surface density (`plot_density`), Mollweide projections, stream sky and evolution plots; `render_surface_density`, `get_smoothing_lengths` |
-
----
-
-## Under the hood
-
-The Python layer handles only orchestration: argument validation, backend dispatch,
-HDF5 I/O, and snapshot management.  Every force evaluation is delegated to
-compiled, parallelized code:
-
-| Path | Implementation | Key details |
-|---|---|---|
-| **GPU direct** | CUDA kernels compiled at runtime (CuPy + nvcc) | `float4` 128-bit vectorized loads; optional Kahan compensated summation; `--use_fast_math`; arch-tuned PTX via `compute_capability` auto-detection |
-| **GPU tree** | C++/CUDA shared library (`libtreeGPU.so`); ctypes interface | Barnes-Hut with monopole + quadrupole; per-particle softening (max convention); watchdog-guarded KDK; float32 tree on recentred positions |
-| **CPU direct** | Numba `@njit(parallel=True)` | Prange-parallelized inner loop; JIT-compiled on first call, cached thereafter |
-| **CPU tree / FMM** | falcON via pyfalcon (C++) | True O(N) fast multipole method; independent of the direct-force code path |
-| **Integration** | KDK symplectic leapfrog | float64 pos/vel on every backend; float32 force calls receive positions relative to a nearby centre (see "Float32 precision" below) |
-| **External potentials** | Agama C++ library | `agama.Potential.__call__` invoked once per timestep; result added directly to N-body accelerations |
-
----
-
-## API
-
-### Multi-species simulation (`run_simulation`, `Species`)
-
-The recommended entry point for all N-body runs.  It handles single- and
-multi-species setups, dispatches to the correct backend, and returns
-per-species final phase-space arrays.
-
-#### `Species` dataclass
+A 2&times;10<sup>4</sup> M<sub>sun</sub> globular cluster on an orbit in a
+Milky Way host, integrated for ~3 Gyr with the GPU tree (about 5 minutes on a
+laptop RTX 3080):
 
 ```python
-from nbody_streams import Species
+from importlib.resources import files
 
-# Named constructors for common types
-dm    = Species.dark(N=10_000, mass=1e6, softening=0.1)   # dark matter
-stars = Species.star(N=2_000,  mass=5e4, softening=0.03)  # stellar particles
-
-# Arbitrary species (e.g. a single central black hole)
-bh = Species(name='bh', N=1, mass=1e9, softening=0.001)
-
-# Per-particle mass / softening are also accepted
-import numpy as np
-m_arr = np.linspace(1e5, 2e5, 500)
-gas   = Species(name='gas', N=500, mass=m_arr, softening=0.05)
-```
-
-`Species` parameters:
-
-| Field | Type | Description |
-|---|---|---|
-| `name` | `str` | Unique species identifier |
-| `N` | `int` | Number of particles |
-| `mass` | `float` or `ndarray (N,)` | Particle mass(es) |
-| `softening` | `float` or `ndarray (N,)` | Gravitational softening length(s) |
-
----
-
-#### `run_simulation`
-
-```python
-from nbody_streams import run_simulation, Species, make_plummer_sphere
-import numpy as np
-
-result = run_simulation(
-    phase_space,          # (N_total, 6) — all species concatenated
-    species,              # list[Species] in the same order as phase_space
-    time_start=0.0,
-    time_end=1.0,
-    dt=0.001,
-    architecture='gpu',   # 'cpu' or 'gpu'
-    method='direct',      # 'direct' (O(N^2)) or 'tree' (GPU: Barnes-Hut; CPU: falcON O(N))
-    external_potential=pot,        # optional agama.Potential
-    output_dir='./output',
-    save_snapshots=True,
-    snapshots=100,
-    verbose=True,
-    debug_energy=False,   # True -> print Q=KE/|PE| and dE/E at each output interval
-    # Backend-specific kwargs (passed through **kwargs):
-    #   theta=0.6                  tree opening angle           (tree backends)
-    #   nthreads=None              CPU thread count             (CPU direct)
-    #   precision='float32_kahan'  force computation precision  (GPU direct)
-    #   external_update_interval=1 ext. force caching interval  (GPU backends)
-    #   nleaf=64, ncrit=64         tree node size params        (GPU tree only)
-)
-# result is dict[str, ndarray]  keyed by species name
-# result['dark'].shape  -> (N_dark,  6)
-# result['star'].shape  -> (N_star,  6)
-```
-
-**Example — single species: Globular Cluster**
-
-```python
-from nbody_streams import run_simulation, Species, make_plummer_sphere
-
-# ~10 000 equal-mass stars in a Plummer model
-# M_total = 5e5 Msun, scale radius a = 5 pc = 0.005 kpc
-N = 10_000
-xv, _ = make_plummer_sphere(N, M_total=5e5, a=0.005)
-
-gc = Species.star(N=N, mass=5e5 / N, softening=0.0005)  # 0.5 pc softening
-
-result = run_simulation(
-    xv, [gc],
-    time_start=0.0,
-    time_end=0.1,          # 0.1 kpc/(km/s) ~ 100 Myr
-    dt=1e-4,
-    architecture='gpu',    # or 'cpu' for quick tests
-    method='direct',
-    output_dir='./output/gc',
-    snapshots=50,
-)
-# result['star'] -> (10000, 6) final phase-space
-```
-
-**Example — multi-species: Dwarf Galaxy (dark matter + stars + gas tracers)**
-
-```python
-from nbody_streams import run_simulation, Species, make_plummer_sphere
-import numpy as np
-
-# --- Dark matter halo: 5 000 particles, extended (a = 1 kpc) ---
-N_dm = 5_000
-M_dm = 1e9          # Msun
-xv_dm, _ = make_plummer_sphere(N_dm, M_total=M_dm, a=1.0)
-dm = Species.dark(N=N_dm, mass=M_dm / N_dm, softening=0.1)  # 100 pc softening
-
-# --- Stellar disc: 1 000 particles, more concentrated (a = 0.3 kpc) ---
-N_star = 1_000
-M_star = 5e7        # Msun
-xv_star, _ = make_plummer_sphere(N_star, M_total=M_star, a=0.3)
-star = Species.star(N=N_star, mass=M_star / N_star, softening=0.03)
-
-# --- Gas tracers: 500 collisionless test particles (a = 0.5 kpc) ---
-N_gas = 500
-M_gas = 2e7         # Msun
-xv_gas, _ = make_plummer_sphere(N_gas, M_total=M_gas, a=0.5)
-gas = Species(name='gas', N=N_gas, mass=M_gas / N_gas, softening=0.05)
-
-# --- Combine all particles ---
-xv_all = np.vstack([xv_dm, xv_star, xv_gas])
-
-result = run_simulation(
-    xv_all,
-    [dm, star, gas],
-    time_start=0.0,
-    time_end=1.0,          # 1 kpc/(km/s) ~ 1 Gyr
-    dt=1e-3,
-    architecture='gpu',
-    method='direct',
-    output_dir='./output/dwarf',
-    snapshots=100,
-)
-
-# Per-species final coordinates
-dm_final   = result['dark']   # (5000, 6)
-star_final = result['star']   # (1000, 6)
-gas_final  = result['gas']    # (500,  6)
-```
-
-Reading snapshots from a multi-species run:
-
-```python
-from nbody_streams import ParticleReader
-
-r    = ParticleReader('./output/dwarf/snapshot.h5')
-snap = r.read_snapshot(50)
-
-# New primary API: per-species dict
-snap.species['dark']['posvel']   # (5000, 6)
-snap.species['star']['posvel']   # (1000, 6)
-snap.species['gas']['posvel']    # (500,  6)
-
-# Backward-compat aliases still work
-snap.dark['posvel']
-snap.star['posvel']
-```
-
----
-
-### Initial conditions (`make_plummer_sphere`)
-
-```python
-from nbody_streams import make_plummer_sphere
-
-xv, mass = make_plummer_sphere(
-    N         = 10_000,       # number of particles
-    M_total   = 1e5,          # total mass [Msun]
-    a         = 0.01,         # Plummer scale radius [kpc]
-    G         = 4.300917e-6,  # gravitational constant (kpc, km/s, Msun units)
-    seed      = 42,
-)
-# xv   : (N, 6) float64  — [x, y, z, vx, vy, vz]
-# mass : (N,)  float64  — equal-mass particles summing to M_total
-```
-
-Positions and velocities are sampled from the exact Plummer distribution using
-rejection sampling (Aarseth 1974).  The centre of mass and bulk velocity are
-corrected to zero before returning.
-
----
-
-### GPU tree-code (`tree_gpu`)
-
-The GPU tree backend must be compiled once before use:
-
-```bash
-cd nbody_streams/tree_gpu
-make -j$(nproc)    # auto-detects GPU architecture via nvidia-smi / CuPy
-```
-
-After building, it is available as a subpackage:
-
-```python
-from nbody_streams.tree_gpu import tree_gravity_gpu, TreeGPU, run_nbody_gpu_tree
-import cupy as cp
-
-# One-shot: compute forces + potential for N particles.
-# Pass float64 positions: they are recentred before the float32 tree sees them.
-pos  = cp.asarray(xv[:, :3])                     # float64
-mass = cp.asarray(masses,    dtype=cp.float32)
-eps  = cp.asarray(softening, dtype=cp.float32)   # per-particle or scalar
-
-acc, phi = tree_gravity_gpu(pos, mass, eps, G=4.3009e-6, theta=0.6)
-# center=[x, y, z] overrides the default centre (subsample centre of mass),
-# e.g. the progenitor position once most of the mass has been stripped.
-
-# Pre-allocated handle for time-stepping loops (saves ~27 ms of GPU malloc per step)
-with TreeGPU(N, eps=0.05, theta=0.6) as tree:
-    for step in range(n_steps):
-        acc, phi = tree_gravity_gpu(pos, mass, eps, tree=tree)
-        vel += 0.5 * dt * acc
-        pos += dt * vel
-        acc, phi = tree_gravity_gpu(pos, mass, eps, tree=tree)
-        vel += 0.5 * dt * acc
-
-# Full integration — same interface as run_simulation with method='tree'
-final_xv = run_nbody_gpu_tree(
-    phase_space, masses, time_start=0.0, time_end=5.0, dt=1e-4,
-    softening=eps_arr, theta=0.6, step_timeout_s=60.0,
-    output_dir="./output", snapshots=500,
-)
-
-# Or via the unified entry point:
-result = run_simulation(
-    phase_space, species,
-    time_start=0.0, time_end=5.0, dt=1e-4,
-    architecture='gpu', method='tree', theta=0.6,
-)
-```
-
-The `_StepWatchdog` inside `run_nbody_gpu_tree` fires a `KeyboardInterrupt` in
-the main thread if any single integration step exceeds `step_timeout_s` seconds,
-protecting against deadlocked CUDA kernels.
-
----
-
-### Low-level API — Direct N-body (`fields`, `run`)
-
-`run_simulation` covers the common case.  For full control — custom softening
-kernels, alternative float precision, per-particle softening, or
-`external_update_interval` on the CPU — call the backend functions directly:
-
-```python
-from nbody_streams import (
-    compute_nbody_forces_gpu,
-    compute_nbody_forces_cpu,
-    compute_nbody_potential_gpu,
-    run_nbody_gpu,
-    run_nbody_cpu,
-    make_plummer_sphere,
-)
-
-# Compute accelerations (GPU, float32 with Kahan correction).
-# Pass float64 pos: it is recentred before the float32 cast (see Float32 precision).
-acc = compute_nbody_forces_gpu(
-    pos, mass, softening=0.01,
-    precision='float32_kahan', kernel='spline',
-)
-
-# Compute potential energy per particle
-phi = compute_nbody_potential_gpu(
-    pos, mass, softening=0.01,
-    precision='float32_kahan', kernel='spline',
-)
-
-# Full N-body integration (GPU direct) — full kernel / precision control
-run_nbody_gpu(
-    phase_space,             # (N, 6) array [x, y, z, vx, vy, vz]
-    masses,
-    time_start=0.0,
-    time_end=1.0,
-    dt=0.001,
-    softening=0.01,
-    precision='float64',     # 'float32' | 'float64' | 'float32_kahan'
-    kernel='dehnen_k2',      # 'newtonian' | 'plummer' | 'dehnen_k1' | 'dehnen_k2' | 'spline'
-    external_potential=pot,
-    external_update_interval=5,  # cache ext. forces for 5 steps
-    force_extra=None,            # optional: callable(pos, vel, masses, t) -> (N,3)
-                                 # e.g. a Chandrasekhar DF closure — user handles GPU/CPU
-    debug_energy=True,       # print Q and dE/E at each output interval
-    snapshots=10,
-    output_dir='./output',
-)
-
-# Full N-body integration (CPU) — tree with custom kernel / theta
-run_nbody_cpu(
-    phase_space, masses,
-    time_start=0.0, time_end=1.0, dt=0.001,
-    softening=0.02,
-    method='tree',
-    kernel='dehnen_k2',      # or integer 2; pyfalcon: 0=plummer 1=dehnen_k1 2=dehnen_k2
-    theta=0.5,
-    nthreads=32,
-    debug_energy=True,       # phi returned for free by falcON; zero overhead
-    output_dir='./output',
-)
-```
-
-### Snapshots (`io`)
-
-```python
-from nbody_streams import ParticleReader
-
-r = ParticleReader("path/to/sim.*.h5", verbose=True)
-snap = r.read_snapshot(10)  # returns dict with pos, vel, mass, time
-```
-
-### Fast stream generation (`fast_sims`)
-
-All methods require [AGAMA](https://github.com/GalacticDynamics-Oxford/Agama) (`pip install agama`).
-
-#### Particle spray
-
-```python
 import agama
-agama.setUnits(mass=1, length=1, velocity=1)
+from nbody_streams import Species, make_plummer_sphere, run_simulation
+from nbody_streams.viz import plot_stream_sky
 
+agama.setUnits(mass=1, length=1, velocity=1)        # Msun, kpc, km/s
+host = agama.Potential(str(files("nbody_streams") / "data/potentials/McMillan17.ini"))
+
+# 10 pc Plummer cluster, shifted to its starting point on the orbit
+N = 20_000
+xv, _ = make_plummer_sphere(N, M_total=2e4, a=0.01, seed=1)
+xv += [-10.9, -3.4, -22.2, 70.4, 188.6, 95.8]       # x, y, z [kpc], vx, vy, vz [km/s]
+
+result = run_simulation(
+    xv, [Species.star(N=N, mass=2e4 / N, softening=4e-4)],  # softening 0.4 pc
+    time_start=0.0, time_end=3.0, dt=1e-4,          # 30,000 steps of ~0.1 Myr
+    architecture="gpu", method="tree",              # "direct" is as fast below ~3e4 particles
+    external_potential=host,
+    output_dir="./output/gc_stream", snapshots=50,
+    overwrite=True,                                 # replace snapshots from a previous run
+)
+stream = result["star"]                 # (N, 6) at time_end: the bound remnant plus its tails
+fig, axes = plot_stream_sky(stream)     # RA/Dec, v_los, (phi1, phi2) and XYZ panels
+```
+
+Without a GPU, use `architecture="cpu"`. At this N it takes well over an
+hour rather than minutes, and `method="tree"` on the CPU needs the `[falcon]`
+extra. Each run
+writes its snapshots to one HDF5 file:
+
+```python
+from nbody_streams import ParticleReader
+
+snap = ParticleReader("./output/gc_stream/snapshot.h5").read_snapshot(49)  # last of 50
+snap.time, snap.species["star"]["posvel"]
+```
+
+For thousands of streams, the particle-spray method skips the cluster's
+self-gravity: it releases stars near the cluster's tidal radius and
+integrates them as test particles in the host plus a cluster potential, in a
+few seconds. Note that it reads the phase-space point as the cluster's
+**present-day** position and first rewinds the orbit by `time_total`, so this
+stream ends where the cluster is today, not where the N-body run above ends:
+
+```python
 from nbody_streams.fast_sims import create_particle_spray_stream
 
-pot = agama.Potential(str(path_to_potential_ini))
-
-result = create_particle_spray_stream(
-    pot_host=pot,
-    initmass=20_000,                    # Msun
-    sat_cen_present=[-10.9, -3.4, -22.2, 70.4, 188.6, 95.8],  # [kpc, km/s]
-    scaleradius=0.01,                   # kpc
-    num_particles=10_000,
-    time_total=3.0,                     # Gyr lookback
-    time_end=13.78,                     # Gyr present epoch
-    save_rate=5,                        # number of output snapshots
-    prog_pot_kind='Plummer',            # or 'King', 'Plummer_withRcut'
-    dissolve_progenitor=False,          # if True, linearly dissolves progenitor mass to 0 at time_end
-)
-# result['times']   — (5,) save times
-# result['prog_xv'] — (5, 6) progenitor trajectory
-# result['part_xv'] — (N, 5, 6) stream particles at each snapshot
-```
-
-**Custom stripping times** (e.g. pericenter-weighted / episodic release):
-
-```python
-N = num_particles // 2 + 1
-t_strip = my_pericenter_times(N)  # length N, within [time_end - time_total, time_end]
-
-result = create_particle_spray_stream(
-    ...,
-    time_stripping=t_strip,  # duplicates are handled automatically
-)
-```
-
-**Fardal+2015 IC method:**
-
-```python
-from nbody_streams.fast_sims import (
-    create_particle_spray_stream,
-    create_ic_particle_spray_fardal2015,
-)
-
-result = create_particle_spray_stream(
-    ...,
-    create_ic_method=create_ic_particle_spray_fardal2015,
-)
-```
-
-**Adding a subhalo perturber:**
-
-```python
-result = create_particle_spray_stream(
-    ...,
-    add_perturber={
-        'mass': 1e8,              # Msun
-        'scaleRadius': 0.5,       # kpc (NFW)
-        'w_subhalo_impact': [x, y, z, vx, vy, vz],  # impact phase-space
-        'time_impact': 1.5,       # Gyr ago
-    },
-)
-```
-
-#### Restricted N-body
-
-```python
-from nbody_streams.fast_sims import run_restricted_nbody
-
-result = run_restricted_nbody(
-    pot_host=pot,
-    initmass=20_000,
+spray = create_particle_spray_stream(
+    pot_host=host, initmass=2e4, scaleradius=0.01,
     sat_cen_present=[-10.9, -3.4, -22.2, 70.4, 188.6, 95.8],
-    scaleradius=0.01,
     num_particles=10_000,
-    time_total=3.0,
-    time_end=13.78,
-    step_size=50,           # ODE steps per potential update
-    save_rate=5,
-    trajsize_each_step=5,
-    prog_pot_kind='Plummer',
-    dynFric=True,           # optional dynamical friction
+    time_total=3.0,        # how far back to start, kpc/(km/s) ~ 0.98 Gyr
+    time_end=13.78,        # the present-day time (matters only for time-dependent hosts)
 )
-# result['times']      — save times
-# result['prog_xv']    — progenitor trajectory
-# result['part_xv']    — particle phase-space
-# result['bound_mass'] — bound mass at each save time
+spray["part_xv"]           # (10000, 6) stream at time_end
 ```
 
-**Pre-existing particles** (skip rewinding/sampling):
-
-```python
-result = run_restricted_nbody(
-    pot_host=pot,
-    initmass=20_000,
-    sat_cen_present=com_xv,
-    xv_init=my_particles,   # shape (N, 6)
-    time_total=0.5,
-    time_end=13.78,
-    step_size=50,
-    save_rate=3,
-    trajsize_each_step=5,
-)
-```
-
-### AGAMA potential helper (`agama_helper`)
-
-> Requires [AGAMA](https://github.com/GalacticDynamics-Oxford/Agama).
-> See [`docs/agama_helper.md`](docs/agama_helper.md) for the full reference.
-
-```python
-from nbody_streams import agama_helper as ah
-from nbody_streams.agama_helper import PotentialGPU   # GPU-accelerated factory
-
-# --- Read coefficient dataclasses (file, HDF5, or raw string — same call) ---
-mc = ah.read_coefs("potential/090.dark.none_8.coef_mult")    # Multipole
-cc = ah.read_coefs("MW_cylsp.h5", group_name="snap_090")     # CylSpline from HDF5
-
-# Inspect
-print(mc.lmax, mc.l_values)        # e.g.  8  [0, 2, 4, 6, 8]
-print(mc.total_power(2))           # quadrupole power
-
-# Filter harmonics (int = all m for that l; tuple = specific (l,m))
-mc_axi = mc.zeroed([0, 2, 4])             # keep l=0,2,4; all m
-mc_sel = mc.zeroed([(0,0), (2,0)])        # keep specific (l,m) pairs
-
-# --- Load Agama potential (from any source) ---
-pot = ah.load_agama_potential("potential/090.dark.none_8.coef_mult")
-pot = ah.load_agama_potential("MW_mult.h5", group_name="snap_090")
-pot = ah.load_agama_potential(mc_axi)                  # directly from dataclass
-pot = ah.load_agama_potential("MW_mult.h5",
-                               group_name="snap_090",
-                               keep_lm_mult=[0, 2])    # in-memory filtering
-
-# --- Same loaders, gpu=True → PotentialGPU instead of agama.Potential ---
-pot_gpu = ah.load_agama_potential("potential/090.dark.none_8.coef_mult", gpu=True)
-pot_gpu = ah.load_agama_potential("potential/090.bar.none_8.coef_cylsp", gpu=True)
-pot_gpu = ah.load_agama_potential("MW_mult.h5", group_name="snap_090",
-                                   keep_lm_mult=[0, 2], gpu=True)
-
-# --- PotentialGPU factory: mirrors agama.Potential call style ---
-pot_gpu = PotentialGPU(type='NFW', mass=1e12, scaleRadius=20)        # analytic
-pot_gpu = PotentialGPU(type='Disk', surfaceDensity=5e8,              # composite BFE
-                        scaleRadius=3.0, scaleHeight=0.3)
-pot_gpu = PotentialGPU(file='potential/MW.ini')                       # INI (any extension)
-pot_gpu = PotentialGPU(mc_sel)                                         # from dataclass
-pot_gpu = PotentialGPU(mc_halo, mc_bar)                               # → CompositePotentialGPU
-pot_gpu = PotentialGPU(mc, center=lmc_traj[:, :4])                   # + shift modifier
-
-# GPU API matches agama.Potential:
-import cupy as cp
-xyz_cp = cp.asarray(xyz_np)
-phi  = pot_gpu.potential(xyz_cp, t=0.)    # (N,)
-F    = pot_gpu.force(xyz_cp, t=0.)        # (N,3)
-rho  = pot_gpu.density(xyz_cp, t=0.)     # (N,)
-F, dF = pot_gpu.forceDeriv(xyz_cp, t=0.) # (N,3), (N,6)
-
-# --- Time-evolving potential ---
-import numpy as np
-pot_ev     = ah.load_agama_evolving_potential("MW_mult.h5")           # CPU
-pot_ev_gpu = ah.load_agama_evolving_potential("MW_mult.h5", gpu=True) # GPU (EvolvingPotentialGPU)
-
-# From a native Agama .ini file
-pot_ev = ah.load_agama_evolving_potential("potential/MW_mult.ini")
-
-# With per-snapshot filtering
-pot_ev = ah.load_agama_evolving_potential("MW_mult.h5", keep_lm_mult=[0, 2])
-
-# --- Pack text coefficient files into HDF5 ---
-ah.write_snapshot_coefs_to_h5(
-    snapshot_ids=range(90, 101),
-    coef_file_patterns=["potential/{snap:03d}.dark.none_8.coef_mult"],
-    h5_output_paths=["MW_mult.h5"],
-    times=np.linspace(6.0, 14.0, 11),    # embed times for load_agama_evolving_potential
-)
-```
-
----
-
-### Analysis utilities (`utils`)
-
-```python
-from nbody_streams.utils import (
-    empirical_density_profile,
-    empirical_circular_velocity_profile,
-    empirical_velocity_dispersion_profile,
-    empirical_velocity_rms_profile,
-    empirical_velocity_anisotropy_profile,
-    fit_dehnen_profile,
-    fit_plummer_profile,
-    fit_double_spheroid_profile,
-    fit_iterative_ellipsoid,
-    uniform_spherical_grid,
-    fibonacci_sphere_grid,
-    find_center,
-    iterative_unbinding,
-)
-
-# Radial profiles
-r_bins, rho = empirical_density_profile(pos, mass, bins=50)
-r_bins, v_circ = empirical_circular_velocity_profile(pos, mass)
-r_bins, sigma = empirical_velocity_dispersion_profile(pos, vel)
-
-# Profile fitting
-gamma, a, M, r_fit, rho_fit = fit_dehnen_profile(pos, mass)
-a, M, r_fit, rho_fit = fit_plummer_profile(pos, mass)
-
-# Iterative shape measurement
-axes, axis_ratios, eigvecs = fit_iterative_ellipsoid(pos, mass)
-
-# Centre finding (default method="density_peak" via gravitational potential minimum)
-cen = find_center(pos, mass)
-
-# Centre finding with velocity centering
-cen_pos, cen_vel = find_center(pos, mass, vel=vel, return_velocity=True, vel_aperture=5.0)
-
-# Energy-based iterative unbinding
-bound_mask = iterative_unbinding(
-    pos, vel, mass,
-    center_position=cen,
-)
-```
-
-> **Note:** `find_center_position` is a deprecated alias for `find_center`.
-> `compute_iterative_boundness` is also deprecated -- use `iterative_unbinding` instead.
-
-### Coordinates (`coords`)
-
-```python
-from nbody_streams.coords import (
-    convert_coords,
-    convert_vectors,
-    convert_to_vel_los,
-    generate_stream_coords,
-    get_observed_stream_coords,
-)
-
-# Coordinate transforms: 'cart' <-> 'sph' <-> 'cyl'
-sph = convert_coords(pos, 'cart', 'sph')                   # (N, 3) -> (r, theta, phi)
-cyl = convert_coords(pos, 'cart', 'cyl')                   # (N, 3) -> (R, phi, z)
-
-# Vector field transforms (position + velocity together)
-pos_sph, vel_sph = convert_vectors(pos, vel, 'cart', 'sph')
-
-# Line-of-sight velocity
-v_los = convert_to_vel_los(xv)                              # from galactocentric phase-space
-
-# Stream coordinates (phi1, phi2) from galactocentric phase-space
-phi1, phi2 = generate_stream_coords(xv_stream, xv_prog=xv_prog)
-
-# Full observables: stream coords + distance, PM, v_los
-phi1, phi2, dist, pm, v_los = get_observed_stream_coords(
-    xv_stream, xv_prog=xv_prog,
-)
-```
-
-### Visualization (`viz`)
-
-```python
-from nbody_streams.viz import (
-    plot_density,
-    plot_mollweide,
-    plot_stream_sky,
-    plot_stream_evolution,
-    render_surface_density,   # low-level SPH renderer
-    get_smoothing_lengths,    # per-particle SPH smoothing lengths
-)
-
-# --- Projected density map ---
-
-# From raw arrays — SPH (default, GPU-accelerated when CuPy is available)
-plot_density(pos=pos, mass=mass, gridsize=100.0)
-
-# From a ParticleReader snapshot — extract dark matter automatically
-snap = reader.read_snapshot(50)
-plot_density(snap=snap, spec='dark', gridsize=100.0, vmin=4.0, vmax=9.0)
-
-# Choose rendering method
-plot_density(pos=pos, mass=mass, method='sph')          # SPH kernel (default)
-plot_density(pos=pos, mass=mass, method='gauss_smooth', smooth_sigma=1.5)
-plot_density(pos=pos, mass=mass, method='histogram')
-
-# Return the raw (pre-log10) density array for further analysis
-im, dens = plot_density(pos=pos, mass=mass, return_dens=True)
-
-# Slice along Z and render X-Y surface density
-plot_density(pos=pos, mass=mass, xval='x', yval='y',
-             slice_width=2.0, density_kind='surface')
-
-# --- Low-level SPH API ---
-
-# Full SPH surface-density grid (GPU -> CPU fallback)
-grid, bounds = render_surface_density(x, y, mass, resolution=512, gridsize=120.0)
-
-# Smoothing lengths only (useful for custom renderers)
-h = get_smoothing_lengths(np.column_stack([x, y]), k_neighbors=32)
-
-# --- Other viz ---
-
-# Mollweide sky projection (requires healpy)
-plot_mollweide(pos, weights=masses, initial_nside=60)
-
-# Stream in sky coordinates (alpha/delta and phi1/phi2)
-plot_stream_sky(xv_stream, xv_prog=xv_prog)
-
-# Stream evolution over time (from run_simulation output)
-plot_stream_evolution(result['prog_xv'], times=result['times'], part_xv=result['part_xv'])
-```
-
-#### `plot_density` method options
-
-| `method`       | Description                                          | Best for                              |
-|----------------|------------------------------------------------------|---------------------------------------|
-| `'sph'`        | SPH cubic-spline kernel splatting (GPU-accelerated)  | Physics-accurate density maps (default) |
-| `'gauss_smooth'` | 2-D histogram + Gaussian filter                   | Quick smooth previews                 |
-| `'histogram'`  | Raw 2-D histogram / pixel area                       | Counting statistics, debugging        |
-
----
-
-## Caveats and known limitations
-
-### Dynamical friction with external potentials
-
-When `external_potential` is supplied to any `run_*` function or
-`run_simulation`, the host is modelled as a **smooth, fixed background field**.
-There is no back-reaction on the host and no granularity-driven scattering.
-For low-mass satellites this is an excellent approximation; for LMC-class
-objects it is not.
-
-**Chandrasekhar DF is now implemented** via the `dynamical_friction=True` flag
-in `run_simulation`.
-
-```python
-import agama
-agama.setUnits(mass=1, length=1, velocity=1)
-pot = agama.Potential(type='NFW', mass=1e12, scaleRadius=15.0,
-                      outerCutoffRadius=300.0)
-
-result = run_simulation(
-    xv, [dm],
-    time_start=0.0, time_end=5.0, dt=1e-3,
-    architecture='gpu', method='direct',
-    external_potential=pot,
-    dynamical_friction=True,
-    df_M_sat=5e9,
-    df_coulomb_mode='variable',
-)
-```
-
-See [`docs/dynamical_friction.md`](docs/dynamical_friction.md) for the full
-reference including all `df_*` kwargs, the Coulomb logarithm modes, and
-core-stalling suppression.
-
-**For advanced users** the internal closure is available directly:
-
-```python
-from nbody_streams._chandrasekhar import make_df_force_extra
-
-df_fn = make_df_force_extra(pot, M_sat=5e9, t_start=0.0, t_end=5.0)
-final = run_nbody_gpu(xv, masses, ..., force_extra=df_fn)
-```
-
-**The `agama_helper` subpackage** is accessible as `nb.agama_helper` (or
-`from nbody_streams import agama_helper`).  See
-[`docs/agama_helper.md`](docs/agama_helper.md) for the full reference.
-
-**When DF is safe to ignore:**
-
-The Chandrasekhar inspiral timescale at orbital radius r scales as
-
-```
-t_df  ~  1.17 * (M_host / M_sat) * (r / V_c) / ln(Lambda)
-```
-
-| M_sat (Msun) | Example | t_df at 50 kpc in MW halo | Safe to ignore? |
-|---|---|---|---|
-| < 1e8 | Globular cluster | > 2000 Gyr | Yes, always |
-| 1e8 – 1e9 | Ultra-faint dwarf | 200 – 2000 Gyr | Yes |
-| 1e9 – 1e10 | SMC-class | 20 – 200 Gyr | Marginal over few-Gyr runs |
-| > 1e10 | LMC-class | < 20 Gyr | No — DF is important |
-
-For stream progenitors with M_tot < ~1e9 Msun, or for simulations shorter
-than a few Gyr, neglecting DF introduces negligible orbit evolution error.
-`run_simulation` emits a `PerformanceWarning` when the total satellite mass
-exceeds `1e10 M_sun` and `external_potential` is set but `dynamical_friction`
-is `False`.
-
----
+The restricted N-body method (`run_restricted_nbody`) sits in between: it
+also uses test particles, but refits the cluster's potential from the
+particles that are still bound as it goes, so it tracks the cluster's mass
+loss.
+
+### Example notebooks
+
+| Notebook | Shows |
+|---|---|
+| [`run_simulation`](examples/run_simulation.ipynb) | Species, single- and multi-species runs, reading snapshots |
+| [`stream_Nbody`](examples/stream_Nbody.ipynb) | A globular cluster (the AAU progenitor) disrupting in a Milky Way + LMC host: mass-loss rates, stripping times, stream morphology |
+| [`MW_LMC_evolv`](examples/MW_LMC_evolv.ipynb) | A moving LMC and the Milky Way's reflex motion as time-dependent potentials |
+| [`coef_time_axis`](examples/coef_time_axis.ipynb) | BFE coefficient time series and evolving cosmological hosts |
+| [`dynamical_friction_tutorial`](examples/dynamical_friction_tutorial.ipynb) | Chandrasekhar dynamical friction |
+| [`pretty_density_methods`](examples/pretty_density_methods.ipynb) | SPH, smoothed and histogram density maps |
+| [`MW_gpu_tree_stability`](examples/MW_gpu_tree_stability.ipynb), [`plummer_stability_gpu_tree`](examples/plummer_stability_gpu_tree.ipynb) | GPU-tree stability and energy conservation |
+
+## Documentation
+
+New to the package? Work through the `run_simulation` notebook, then
+`stream_Nbody`. In the code, `run_simulation` (`sim.py`) is the entry point:
+it checks the inputs and hands off to the direct-sum integrators (`run.py`,
+with force kernels in `fields.py`) or the GPU tree (`tree_gpu/`). Host
+potentials come from `agama_helper/`, the fast stream generators live in
+`fast_sims/`, and `coords/`, `utils/` and `viz/` work on the output.
+
+Module reference lives in [`docs/`](docs/index.md):
+
+| Module | Purpose | Reference |
+|---|---|---|
+| Quick start | Installation, units, first runs, choosing a backend | [quickstart.md](docs/quickstart.md) |
+| `nbody_streams` | `run_simulation`, `Species`, `make_plummer_sphere` | [main.md](docs/main.md) |
+| `fields` | Force and potential kernels (GPU and CPU) | [fields.md](docs/fields.md) |
+| `run` | Low-level KDK leapfrog integrators | [run.md](docs/run.md) |
+| `tree_gpu` | GPU Barnes-Hut tree: `tree_gravity_gpu`, `TreeGPU`, `run_nbody_gpu_tree` | [tree_gpu.md](docs/tree_gpu.md) |
+| `nbody_io` | HDF5 snapshots, restarts, `ParticleReader` | [io.md](docs/io.md) |
+| `fast_sims` | Particle spray and restricted N-body streams | [fast_sims.md](docs/fast_sims.md) |
+| `agama_helper` | Fit, store and load Agama BFE potentials; `PotentialGPU`; evolving and FIRE hosts | [agama_helper.md](docs/agama_helper.md) |
+| `coords` | Coordinate transforms, stream frames and observables | [coords.md](docs/coords.md) |
+| `utils` | Profiles, shapes, centre finding, unbinding, cosmology | [utils.md](docs/utils.md) |
+| `viz` | Density maps, SPH renderer, sky and evolution plots | [viz.md](docs/viz.md) |
+| Dynamical friction | Theory, `df_*` options, caveats | [dynamical_friction.md](docs/dynamical_friction.md) |
+
+Changes between versions are listed in [CHANGELOG.md](CHANGELOG.md).
+
+<details>
+<summary><strong>Under the hood</strong></summary>
+
+Python handles orchestration only (validation, dispatch, I/O); every force
+evaluation runs in compiled, parallel code.
+
+| Path | Implementation | Details |
+|---|---|---|
+| GPU direct | CUDA kernels compiled at runtime (CuPy + nvcc) | `float4` loads, optional Kahan summation, split source loop at small N |
+| GPU tree | C++/CUDA library (`libtreeGPU.so`) via ctypes | Barnes-Hut with quadrupoles, per-particle softening, float32 tree on recentred positions |
+| CPU direct | Numba `@njit(parallel=True)` | JIT-compiled and cached |
+| CPU tree | falcON via pyfalcon | O(N) fast multipole method |
+| Integration | KDK leapfrog | float64 positions and velocities on every backend |
+| Hosts | Agama (CPU) or `PotentialGPU` | Added to the self-gravity each step |
+
+</details>
 
 ## Performance
 
+<p align="center">
+  <img src="plots/acceleration_timings.png" width="700" alt="Time per particle per force evaluation against N for CPU direct, falcON FMM, and GPU direct and tree on an RTX 3080 Laptop, an L40 and an H200"/>
+</p>
+
+The GPU tree costs a constant ~1.2&times;10<sup>-8</sup> s per particle on
+an H200 or L40 from ~5&times;10<sup>5</sup> particles on, up to
+4.8&times;10<sup>8</sup> particles (6.0 s per force call). At 10<sup>6</sup>
+particles on an H200 it is ~90&times; faster than the GPU direct sum. The shaded bands
+mark the fastest solver on the laptop:
+
+| Particle count | Fastest | Notes |
+|---|---|---|
+| N < ~750 | CPU direct (Numba) | No kernel-launch overhead |
+| ~750 to ~3e4 | GPU direct | Exact pairwise forces; `float32_kahan` matches float64 to ~1e-6 |
+| N > ~3e4 | GPU tree | theta = 0.6: median force error ~1e-4, 99th percentile ~4e-4 |
+| No GPU, large N | CPU tree (falcON) | ~1.5e-6 s per particle on one core |
+
+<details>
+<summary><strong>Timing table and largest N per GPU</strong></summary>
+
 Time per force evaluation (all particles), Plummer sphere, eps = 0.01 a,
-theta = 0.6, minimum over repeated calls.  Laptop: RTX 3080 Laptop GPU (16 GB)
-+ i9-11980HK (16 threads); workstation: NVIDIA L40 (48 GB, shared, 26 GB
-free); datacenter: NVIDIA H200 (141 GB).  GPU direct uses `float32_kahan`.
+theta = 0.6, minimum over repeated calls. RTX 3080 Laptop GPU (16 GB) +
+i9-11980HK (16 threads); NVIDIA L40 (48 GB, shared, 26 GB free); NVIDIA H200
+(141 GB). GPU direct uses `float32_kahan`.
 
 | N | CPU direct (16 thr) | FMM falcON (1 core) | GPU direct RTX / L40 / H200 | GPU tree RTX / L40 / H200 |
 |---|---|---|---|---|
@@ -797,113 +281,132 @@ free); datacenter: NVIDIA H200 (141 GB).  GPU direct uses `float32_kahan`.
 | 100,000,000 | - | - | - | - / - / 1.22 s |
 | 400,000,000 | - | - | - | - / - / 4.97 s |
 
-The GPU tree costs a constant time per particle from ~5e5 particles on:
-3.8e-8 s on the RTX 3080 Laptop, 1.0-1.4e-8 s on the L40 and 1.2e-8 s on the
-H200, which holds that rate up to 4.8e8 particles (6.0 s per call).  Below
-~4e6 the L40 tree is faster than the H200's (higher clocks and FP32 rate);
-above 1e7 the H200 is ahead.  At small N the GPU direct sum splits its source
-loop across blocks to fill the GPU; at N = 10,240 on the RTX 3080: float32
-0.41 ms, float32_kahan 0.56 ms, float64 13.6 ms (consumer GPUs run float64
-at 1/64 rate).
+Below ~4e6 particles the L40 tree is faster than the H200's (higher clocks and
+FP32 rate); above 1e7 the H200 is ahead. At N = 10,240 on the RTX 3080 the GPU
+direct sum takes 0.41 ms (`float32`), 0.56 ms (`float32_kahan`) and 13.6 ms
+(`float64`; consumer GPUs run float64 at 1/64 rate).
 
-**Largest N per GPU (GPU tree).**  `TreeGPU` and `run_nbody_gpu_tree` refuse
-an N that would not fit in 80% of the free GPU memory, with a `ValueError`
-instead of an out-of-memory crash.  On a dedicated GPU raise the fraction with
-`nbody_streams.tree_gpu.set_memory_fraction(0.95)`.  A one-off call needs
-~215 B per particle on top of its float64 positions; `run_nbody_gpu_tree`
-~375 B per particle in all, and costs the same per step as one call (H200:
-1.24 s per step at 1e8, 2.47 s at 2e8).
+**Largest N.** `TreeGPU` and `run_nbody_gpu_tree` refuse an N that would not
+fit in 80% of the free GPU memory, with a `ValueError` instead of an
+out-of-memory crash; raise the fraction on a dedicated GPU with
+`nbody_streams.tree_gpu.set_memory_fraction(0.95)`. A one-off call needs
+~215 B per particle on top of its float64 positions, `run_nbody_gpu_tree`
+~375 B per particle in all (H200: 1.24 s per step at 1e8, 2.47 s at 2e8).
 
-| GPU | `tree_gravity_gpu` (0.8 / 0.95) | measured |
+| GPU | `tree_gravity_gpu` (0.8 / 0.95) | Measured |
 |---|---|---|
 | RTX 3080 Laptop, 16 GB | ~42M / ~50M | 4e7: 1.53 s per call, 10.6 GB |
 | H200, 141 GB | ~421M / ~494M | 4.8e8 at 0.95: 6.0 s per call, 108.6 GB |
 
-The index limit is 2^29 = 537M particles.  Benchmarks were run with
-`benchmarks/` (`timing_sweep.py`, `max_n.py`, `plot_timings.py`).
-
-### Which solver should I use?
-
-<p align="center">
-  <img src="plots/acceleration_timings.png" width="700" alt="Time per particle per force evaluation against N for CPU direct, falcON FMM, and GPU direct and tree on an RTX 3080 Laptop, an L40 and an H200"/>
-</p>
-
-| Particle count | Fastest | Notes |
-|---|---|---|
-| N < ~750 | **CPU direct** (Numba) | No kernel-launch overhead (~0.07-0.2 ms per GPU call). |
-| ~750 - ~3e4 | **GPU direct** | Exact pairwise forces; `float32_kahan` matches float64 to ~1e-6 (see Float32 precision).  Crossover to the tree ~3e4 (RTX) / ~4e4 (L40, H200). |
-| N > ~3e4 | **GPU tree** | theta = 0.6: median force error ~1e-4, 99th percentile ~5e-4; ~90x faster than GPU direct at 1e6 on an H200. |
-| No GPU, large N | **FMM** (falcON) | ~1.3-1.7e-6 s per particle on one core up to ~1e7. |
-
-The shaded bands in the figure mark the fastest choice on the laptop, from
-the measured crossovers.
-
----
-
-<details>
-<summary><strong>Float32 precision</strong></summary>
-
-### What limits float32
-
-float32 keeps ~7 significant digits *relative to the magnitude of each
-coordinate*.  Overall scale does not matter: a Plummer sphere at the origin
-gives the same float32 accuracy whether its scale radius is 10 or 0.001 length
-units (RTX 3080, N = 10,240, eps = 0.01 a):
-
-| Scale radius | Newton's 3rd law residual (float32 / float32_kahan) | Median force error (float32 / float32_kahan) |
-|---|---|---|
-| 10 | 3e-8 / 3e-10 | 1.2e-6 / 5e-8 |
-| 1 | 8e-9 / 3e-10 | 1.2e-6 / 5e-8 |
-| 0.01 | 3e-8 / 2e-10 | 1.2e-6 / 5e-8 |
-| 0.001 | 1e-8 / 1e-10 | 1.3e-6 / 6e-8 |
-
-What does matter is **distance from the origin compared with particle
-separations**.  A position at 40 kpc is rounded to ~4e-3 pc, a few percent of
-the separation between close neighbours in a 1-pc cluster.  Rescaling units
-does not help (the rounding is relative); translating does.
-
-### Recentring (automatic)
-
-Every float32 force path converts **float64** positions relative to a nearby
-centre, computed and subtracted in float64 (mass-weighted mean of a ~4096
-particle subsample; one fused kernel, ~0.04 ms).  Self-gravity is translation
-invariant, so only the precision changes.  The integrators store positions in
-float64, so they always benefit; float32 input is used as given.
-
-1-pc Hernquist cluster at 40 kpc (eps = 0.01 pc, N = 1e5), 99th-percentile
-force error against a float64 direct sum:
-
-| Path | float32 absolute input | float64 input (recentred) |
-|---|---|---|
-| Direct, `float32_kahan` (default) | 1.6e-2 | 8.9e-7 |
-| Direct, `float32` | 1.6e-2 | 1.2e-5 |
-| Direct, `float64` | 8.2e-7 | 8.2e-7 |
-| GPU tree, theta = 0.6 | 1.6e-2 | 4.2e-4 (same as at the origin) |
-
-The same cluster moving at 200 km/s at 40 kpc now evolves like the cluster at
-rest at the origin: final positions agree to 3e-9 pc (`run_nbody_gpu`) and
-2e-6 pc (`run_nbody_gpu_tree`), against 3.5e-4 pc and 4e-3 pc before.
-Recentring adds no measurable time to either solver.
-
-### Direct vs tree accuracy
-
-Hernquist sphere, N = 1e5, against a float64 direct sum:
-
-| Method | Median force error | 99th percentile |
-|---|---|---|
-| Direct, `float32_kahan` | 5e-8 | 9e-7 |
-| GPU tree, theta = 0.4 | 3.1e-5 | 1.5e-4 |
-| GPU tree, theta = 0.6 (default) | 9.7e-5 | 4.0e-4 |
-| GPU tree, theta = 0.8 | 2.9e-4 | 1.5e-3 |
-
-Energy conservation, 1e5 Msun / 1-pc Plummer cluster, dt = t_dyn/100:
-`run_nbody_gpu_tree` (theta = 0.5, N = 2e4, 2000 steps) dE/E = 1.7e-6;
-`run_nbody_gpu` (`float32_kahan`, N = 1e4, 1000 steps) dE/E = 3e-7.
+The index limit is 2^29 = 537M particles. Benchmarks: `benchmarks/`
+(`timing_sweep.py`, `max_n.py`, `plot_timings.py`).
 
 </details>
 
----
+<details>
+<summary><strong>Force accuracy, and clusters far from the origin</strong></summary>
+
+**How accurate are the forces?** Relative force error against an exact
+float64 direct sum (Hernquist sphere, N = 1e5):
+
+| Solver | Typical (median) | Worst 1% (99th percentile) |
+|---|---|---|
+| GPU direct (default `float32_kahan`) | 5e-8 | 9e-7 |
+| GPU tree, theta = 0.4 | 3e-5 | 1.5e-4 |
+| GPU tree, theta = 0.6 (default) | 1e-4 | 4e-4 |
+| GPU tree, theta = 0.8 | 3e-4 | 1.5e-3 |
+
+Energy is conserved to dE/E of 2e-6 or better over 1000-2000 steps for a 1-pc
+cluster with either solver.
+
+**Why distance from the origin matters, and what the code does about it.**
+GPU forces are computed in float32, which keeps about 7 significant digits of
+each coordinate. For a cluster 40 kpc from the host centre that means every
+position is rounded to ~0.004 pc, which is a few percent of the spacing
+between neighbouring stars in a 1-pc cluster, and the forces between them
+come out wrong.
+
+nbody_streams avoids this automatically. Positions are stored in float64, and
+before each float32 force call they are shifted (in float64) so the origin
+sits at the cluster's centre. Gravity between particles does not depend on
+where the origin is, so the forces are the same, but the rounding is now
+relative to the cluster's size instead of its distance from the host.
+
+The same 1-pc cluster at 40 kpc, worst-1% force error:
+
+| Solver | Without recentring | With recentring (automatic) |
+|---|---|---|
+| GPU direct | 1.6e-2 | 9e-7 |
+| GPU tree, theta = 0.6 | 1.6e-2 | 4e-4 (as accurate as at the origin) |
+
+This happens inside `run_simulation` and every integrator. If you call the
+low-level force functions yourself, pass float64 positions: float32 input is
+used as given, without recentring.
+
+</details>
+
+<details>
+<summary><strong>Caveats: hosts as fixed fields and dynamical friction</strong></summary>
+
+With `external_potential`, the host is a **smooth background field**: there
+is no back-reaction on the host and no scattering by its particles. This is
+an excellent approximation for low-mass satellites but not for LMC-class
+objects. Chandrasekhar dynamical friction on the satellite's centre of mass
+is available with `run_simulation(..., dynamical_friction=True, df_M_sat=...)`;
+see [dynamical_friction.md](docs/dynamical_friction.md).
+
+Rough inspiral times at 50 kpc in a Milky Way halo:
+
+| M<sub>sat</sub> (M<sub>sun</sub>) | Example | t<sub>DF</sub> | Ignore DF? |
+|---|---|---|---|
+| < 1e8 | Globular cluster | > 2000 Gyr | Yes |
+| 1e8 - 1e9 | Ultra-faint dwarf | 200 - 2000 Gyr | Yes |
+| 1e9 - 1e10 | SMC-class | 20 - 200 Gyr | Marginal over few-Gyr runs |
+| > 1e10 | LMC-class | < 20 Gyr | No |
+
+`run_simulation` emits a `PerformanceWarning` when the satellite mass exceeds
+1e10 M<sub>sun</sub> with an external potential and no dynamical friction.
+
+</details>
+
+## How to cite
+
+If you use nbody_streams in published work, please cite the paper and the
+software. The software entry is the archived v2.3.0 release on Zenodo; cite it
+whichever version you use.
+
+```bibtex
+@ARTICLE{Arora2026,
+       author = {{Arora}, Arpit and {Ferguson}, Peter S. and {Nibauer}, Jacob and {Shipp}, Nora and {Reddy}, Videep and {Vasiliev}, Eugene and {Kohm}, Jack and {Marin}, Laurella C. and {Price-Whelan}, Adrian M. and {Erkal}, Denis and {Pearson}, Sarah and {Wetzel}, Andrew and {Bailin}, Jeremy and {Feldmann}, Robert},
+        title = "{No Stream Left Unscathed: The Imprint of a Host Galaxy}",
+      journal = {The Astrophysical Journal},
+     keywords = {Stellar streams, Astrophysics of Galaxies},
+         year = 2026,
+        month = sep,
+       volume = {1008},
+       number = {1},
+          eid = {91},
+        pages = {91},
+          doi = {10.3847/1538-4357/ae89af},
+archivePrefix = {arXiv},
+       eprint = {2605.16200},
+ primaryClass = {astro-ph.GA},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2026ApJ..1008...91A},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}
+
+@software{nbody_streams,
+  author       = {Arpit Arora},
+  title        = {appy2806/Nbody\_streams: v2.3.0},
+  month        = jun,
+  year         = 2026,
+  publisher    = {Zenodo},
+  version      = {v2.3.0},
+  doi          = {10.5281/zenodo.20834763},
+  url          = {https://doi.org/10.5281/zenodo.20834763},
+}
+```
 
 ## License
 
-MIT
+MIT; see [LICENSE](LICENSE).
