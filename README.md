@@ -12,7 +12,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.8--3.13-4c8eda" alt="Python 3.8-3.13">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8aa1b4" alt="MIT license"></a>
-  <a href="https://doi.org/10.5281/zenodo.20834763"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.20834763.svg" alt="Zenodo DOI"></a>
+  <a href="https://doi.org/10.5281/zenodo.20834762"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.20834762.svg" alt="Zenodo DOI"></a>
   <a href="https://doi.org/10.3847/1538-4357/ae89af"><img src="https://img.shields.io/badge/ApJ-1008%2C%2091%20(2026)-e8916b" alt="ApJ 1008, 91 (2026)"></a>
 </p>
 
@@ -372,8 +372,9 @@ Rough inspiral times at 50 kpc in a Milky Way halo:
 ## How to cite
 
 If you use nbody_streams in published work, please cite the paper and the
-software. The software entry is the archived v2.3.0 release on Zenodo; cite it
-whichever version you use.
+software. The software DOI below always points to the latest release archived
+on Zenodo; the Zenodo page also lists a DOI for each version, if you want to
+cite the exact one you used.
 
 ```bibtex
 @ARTICLE{Arora2026,
@@ -397,13 +398,11 @@ archivePrefix = {arXiv},
 
 @software{nbody_streams,
   author       = {Arpit Arora},
-  title        = {appy2806/Nbody\_streams: v2.3.0},
-  month        = jun,
+  title        = {appy2806/Nbody\_streams},
   year         = 2026,
   publisher    = {Zenodo},
-  version      = {v2.3.0},
-  doi          = {10.5281/zenodo.20834763},
-  url          = {https://doi.org/10.5281/zenodo.20834763},
+  doi          = {10.5281/zenodo.20834762},
+  url          = {https://doi.org/10.5281/zenodo.20834762},
 }
 ```
 
