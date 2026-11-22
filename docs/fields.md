@@ -294,10 +294,11 @@ given (its precision was set when it was rounded), so pass float64 positions.
 small system cannot fill a large GPU (N = 16k gives 128 blocks).  When the
 grid has fewer than ~4 waves of resident blocks, the source loop is split
 across up to 16 slices whose partial sums are added in a fixed order
-(`nbody_streams/cuda/direct.cu`): on an L40 this is 2-8x faster for float32
-at N = 1k-16k, and 1.1-1.4x at N = 65k-262k.  Results stay deterministic run
-to run on a given GPU; the split changes only the summation order (float32:
-~1e-6 relative; float64: ~1e-15).  Large grids use the unsplit kernel.
+(`nbody_streams/cuda/direct.cu`).  On an L40 the force kernel is 1.6-8.5x
+faster at N = 1k-16k (float32; float64 4-7x at N <= 4k) and 1.05-1.5x at
+N = 32k-262k.  Results stay deterministic run to run on a given GPU; the
+split changes only the summation order (float32: ~1e-6 relative; float64:
+~1e-15).  Large grids use the unsplit kernel.
 
 ---
 

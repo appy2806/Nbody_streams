@@ -529,6 +529,7 @@ def _launch_direct(kernel_type, precision, kernel_id, src, out, G, N, split=None
     kreduce(((N + nt - 1) // nt,), (nt,),
             (part,) + out + (dtype(G), cp.int32(S), cp.int32(N)))
 
+
 def _validate_inputs(pos, mass, softening, precision, kernel):
     """
     Validate inputs and prepare CPU arrays.
