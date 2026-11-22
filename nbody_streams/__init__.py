@@ -42,7 +42,7 @@ try:
 except ImportError:
     _AGAMA_HELPER_AVAILABLE = False
 
-# GPU tree-code (optional - requires libtreeGPU.so; built separately with make)
+# GPU tree-code (optional - requires libtreeGPU.so, built by pip install or nbody-build-tree)
 try:
     from . import tree_gpu
     from .tree_gpu import tree_gravity_gpu, TreeGPU, cuda_alive, run_nbody_gpu_tree

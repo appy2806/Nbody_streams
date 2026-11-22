@@ -3,10 +3,10 @@ nbody_streams.tree_gpu
 ======================
 GPU Barnes-Hut tree code for N-body gravity (O(N log N) force evaluation).
 
-Build the shared library before first use::
+`pip install` builds the shared library when nvcc is available; rebuild it
+with::
 
-    cd nbody_streams/tree_gpu
-    make -j$(nproc)          # builds libtreeGPU.so alongside the source files
+    nbody-build-tree
 
 Public API
 ----------
@@ -51,7 +51,8 @@ try:
 except OSError as _e:
     raise ImportError(
         "nbody_streams.tree_gpu: could not load libtreeGPU.so. "
-        "Build it first:\n\n"
-        "    cd nbody_streams/tree_gpu && make -j$(nproc)\n\n"
+        "Build it with:\n\n"
+        "    nbody-build-tree\n\n"
+        "(needs nvcc from CUDA 12+ in PATH; or run make in the tree_gpu/ directory).\n\n"
         f"Original error: {_e}"
     ) from _e

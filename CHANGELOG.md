@@ -27,6 +27,13 @@ restart and rendering fixes; `benchmarks/`.
   against N), `max_n.py` (largest N and peak memory per GPU), `plot_timings.py`
   (the README figure, now with the L40), `large_n_check.py` (tree forces
   above 2^28 particles against a float64 direct sum) and a Slurm job script.
+- **`pip install` builds the GPU tree library.** A new `setup.py` runs the
+  `tree_gpu` Makefile during `build_py` (editable and regular installs), so
+  `libtreeGPU.so` is installed with the package instead of needing a separate
+  `make`. Without `nvcc` / `make` in `PATH` the install still succeeds and
+  prints a warning; `NBODY_STREAMS_BUILD_TREE=1` makes the build mandatory and
+  `0` skips it. Rebuild later with `nbody-build-tree` (e.g. on a cluster GPU
+  node, after a GPU or CUDA change).
 
 - **Mixed precision Multipole: `MultipolePotentialGPU(precision='float32')`.**
   The l > 0 harmonic sums run in float32; r, log r, the l = 0 term with its
@@ -83,6 +90,10 @@ restart and rendering fixes; `benchmarks/`.
 - **Integrator timing summaries separate integration from output**: ms/step
   and steps/s exclude snapshot and restart writes (the tree's "ms/step"
   previously included the final restart, e.g. 161 s/step for 3.6 s steps).
+- **`fast_sims` uses Agama's `separateTime=True` orbit output** in all
+  `agama.orbit` calls (`create_particle_spray_stream`, `run_restricted_nbody`,
+  the progenitor rewind and the perturber orbit), ahead of it becoming Agama's
+  only format. Results are bit-identical; the `FutureWarning` is gone.
 - **GPU tree: 2^29 particles and cells, smaller buffers, an accurate memory
   guard.** The particle index has 29 bits (was 28) and the cell level moved
   out of `CellData` (cells 2^27 -> 2^29 - 1). Initial build buffers are sized

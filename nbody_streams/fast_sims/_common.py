@@ -191,6 +191,7 @@ def _integrate_orbit_with_dynamical_friction(
     time_sat, orbit_sat = agama.orbit(
         ic=ic, potential=pot_host,
         time=-time_total, timestart=time_end, trajsize=trajsize,
+        separateTime=True,
     )
 
     if mass == 0:
@@ -408,6 +409,7 @@ def _create_perturber_potential(
         time=t_start - time_impact,   # negative -> rewind
         timestart=time_impact,
         trajsize=1,
+        separateTime=True,
     )[1][0]
     traj_perturber = np.column_stack(agama.orbit(
         potential=pot_host,
@@ -415,6 +417,7 @@ def _create_perturber_potential(
         time=time_total,
         timestart=t_start,
         trajsize=0,
+        separateTime=True,
     ))
 
     eps = 1e-5  # sharp step without cubic spline ringing

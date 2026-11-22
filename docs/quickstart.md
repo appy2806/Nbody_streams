@@ -34,17 +34,26 @@ pip install cupy-cuda12x   # CUDA 12.x
 pip install cupy-cuda13x   # CUDA 13.x
 ```
 
-### GPU tree code (one-time build)
+### GPU tree code
 
-The GPU Barnes-Hut tree code is a C++/CUDA shared library and must be compiled once before use.  Requires `nvcc` in `PATH`:
+The GPU Barnes-Hut tree code is a C++/CUDA shared library
+(`nbody_streams/tree_gpu/libtreeGPU.so`).  `pip install` compiles it
+automatically when `nvcc` (CUDA 12+) and `make` are in `PATH`, for the GPUs
+it finds with `nvidia-smi`.  Without `nvcc` the install still succeeds and
+prints a warning; the CPU and CuPy direct-sum backends do not need the
+library.  Set `NBODY_STREAMS_BUILD_TREE=1` to make the build mandatory (the
+install fails instead of warning) or `0` to skip it.
+
+Rebuild it later with:
 
 ```bash
-cd nbody_streams/tree_gpu
-make -j$(nproc)
-cd ../..
+nbody-build-tree
 ```
 
-This produces `nbody_streams/tree_gpu/libtreeGPU.so`.  Re-run `make` after pulling updates that touch the `.cu` source files.
+Do this after installing on a machine without a GPU (for example a cluster
+login node, where the build falls back to `sm_80` code), after changing GPU
+or CUDA version, or after pulling updates that touch the `.cu` sources.
+`pip install -v` shows the compiler output.
 
 ---
 

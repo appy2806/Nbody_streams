@@ -10,16 +10,23 @@ Optional dependency: **CuPy** (required at import time).
 
 ## Building the shared library
 
-The shared library must be compiled before the subpackage can be imported:
+`pip install` builds the shared library automatically when `nvcc` and `make`
+are in `PATH` (see `setup.py`; `NBODY_STREAMS_BUILD_TREE=1` makes the build
+mandatory, `0` skips it).  To rebuild in place, in either an editable or a
+regular install:
 
 ```bash
-cd nbody_streams/tree_gpu
-make -j$(nproc)          # builds libtreeGPU.so alongside the source files
+nbody-build-tree                 # make -j$(nproc) in the installed tree_gpu/
+nbody-build-tree --clean-all     # remove objects and the library first
 ```
 
-The Makefile auto-detects the GPU architecture via `nvidia-smi` / CuPy.  If
-`libtreeGPU.so` is absent, importing `nbody_streams.tree_gpu` raises an
-`ImportError` with the build command printed in the message.
+or run `make -j$(nproc)` in `nbody_streams/tree_gpu/` of a source checkout.
+
+The Makefile detects the GPU architecture with `nvidia-smi` (or CuPy) and
+falls back to `sm_80` plus PTX when no GPU is visible, so on a cluster build
+on a GPU node.  If `libtreeGPU.so` is absent, importing
+`nbody_streams.tree_gpu` raises an `ImportError` with the build command in
+the message.
 
 ---
 
