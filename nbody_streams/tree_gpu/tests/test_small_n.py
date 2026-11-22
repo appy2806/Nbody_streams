@@ -2,10 +2,11 @@
 test_small_n.py -- Regression test: the GPU tree with very few particles.
 
 The cell buffer used to be sized to exactly N cells, but the root split alone
-needs up to min(8, N) cells (plus a chain of nodes for coincident particles),
-so N = 1-2 always and N = 3-4 sometimes hit a device-side assert in
-buildOctant.  A device assert kills the CUDA context, so the cases run in a
-subprocess and the parent only reads their results.
+needs up to min(8, N) cells, so N = 1-2 always and N = 3-4 sometimes hit a
+device-side assert in buildOctant; more than nleaf coincident particles add a
+chain of ~30 nodes, which overflowed N (or N + small slack) cells.  A device
+assert kills the CUDA context, so the cases run in a subprocess and the
+parent only reads their results.
 """
 
 import json
@@ -45,36 +46,37 @@ _CHILD = textwrap.dedent(r"""
             return x
         raise ValueError(kind)
 
-    for kind in ("plummer", "coincident", "pair"):
-        for n in range(0, 9):
-            for nleaf in (16, 32, 64):
-                rng = np.random.default_rng(1000 * n + nleaf)
-                x = positions(kind, n, rng)
-                m = rng.uniform(0.5, 1.5, n)
-                eps = rng.uniform(0.01, 0.05, n)
-                acc, phi = tree_gravity_gpu(cp.asarray(x), cp.asarray(m), cp.asarray(eps),
-                                            G=1.0, theta=0.3, nleaf=nleaf)
-                cp.cuda.Device().synchronize()
-                res = dict(kind=kind, n=n, nleaf=nleaf, acc_shape=list(acc.shape),
-                           phi_shape=list(phi.shape), dtypes=[str(acc.dtype), str(phi.dtype)],
-                           finite=bool(cp.isfinite(acc).all() and cp.isfinite(phi).all()))
-                acc = cp.asnumpy(acc).astype(np.float64)
-                phi = cp.asnumpy(phi).astype(np.float64)
-                if n >= 1:
-                    a_ref = cp.asnumpy(compute_nbody_forces_gpu(
-                        x, m, softening=eps, G=1.0, precision="float64",
-                        kernel="plummer", return_cupy=True))
-                    p_ref = cp.asnumpy(compute_nbody_potential_gpu(
-                        x, m, softening=eps, G=1.0, precision="float64",
-                        kernel="plummer", return_cupy=True))
-                    a_scale = max(np.linalg.norm(a_ref, axis=1).max(), 1e-30)
-                    p_scale = max(np.abs(p_ref).max(), 1e-30)
-                    res["acc_err"] = float(np.linalg.norm(acc - a_ref, axis=1).max() / a_scale) if n > 1 else 0.0
-                    res["phi_err"] = float(np.abs(phi - p_ref).max() / p_scale) if n > 1 else 0.0
-                    res["acc_max"] = float(np.abs(acc).max())
-                    res["phi_max"] = float(np.abs(phi).max())
-                    res["self_scale"] = float((m / eps).max())
-                print("RESULT " + json.dumps(res), flush=True)
+    CASES = [(kind, n) for kind in ("plummer", "coincident", "pair") for n in range(9)]
+    CASES += [("coincident", n) for n in (17, 20, 25, 33, 40, 65)]   # > nleaf at one point
+    for kind, n in CASES:
+        for nleaf in (16, 32, 64):
+            rng = np.random.default_rng(1000 * n + nleaf)
+            x = positions(kind, n, rng)
+            m = rng.uniform(0.5, 1.5, n)
+            eps = rng.uniform(0.01, 0.05, n)
+            acc, phi = tree_gravity_gpu(cp.asarray(x), cp.asarray(m), cp.asarray(eps),
+                                        G=1.0, theta=0.3, nleaf=nleaf)
+            cp.cuda.Device().synchronize()
+            res = dict(kind=kind, n=n, nleaf=nleaf, acc_shape=list(acc.shape),
+                       phi_shape=list(phi.shape), dtypes=[str(acc.dtype), str(phi.dtype)],
+                       finite=bool(cp.isfinite(acc).all() and cp.isfinite(phi).all()))
+            acc = cp.asnumpy(acc).astype(np.float64)
+            phi = cp.asnumpy(phi).astype(np.float64)
+            if n >= 1:
+                a_ref = cp.asnumpy(compute_nbody_forces_gpu(
+                    x, m, softening=eps, G=1.0, precision="float64",
+                    kernel="plummer", return_cupy=True))
+                p_ref = cp.asnumpy(compute_nbody_potential_gpu(
+                    x, m, softening=eps, G=1.0, precision="float64",
+                    kernel="plummer", return_cupy=True))
+                a_scale = max(np.linalg.norm(a_ref, axis=1).max(), 1e-30)
+                p_scale = max(np.abs(p_ref).max(), 1e-30)
+                res["acc_err"] = float(np.linalg.norm(acc - a_ref, axis=1).max() / a_scale) if n > 1 else 0.0
+                res["phi_err"] = float(np.abs(phi - p_ref).max() / p_scale) if n > 1 else 0.0
+                res["acc_max"] = float(np.abs(acc).max())
+                res["phi_max"] = float(np.abs(phi).max())
+                res["self_scale"] = float((m / eps).max())
+            print("RESULT " + json.dumps(res), flush=True)
     print("DONE", flush=True)
 """)
 
@@ -93,7 +95,7 @@ def small_n_results():
 
 
 def test_small_n_no_crash_and_shapes(small_n_results):
-    assert len(small_n_results) == 3 * 9 * 3
+    assert len(small_n_results) == (3 * 9 + 6) * 3
     for r in small_n_results:
         assert r["finite"], r
         assert r["acc_shape"] == [r["n"], 3] and r["phi_shape"] == [r["n"]], r
