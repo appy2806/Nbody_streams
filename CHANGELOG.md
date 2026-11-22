@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`nbody_streams.tree_gpu.set_memory_fraction(f)` / `get_memory_fraction()`.**
+  The GPU tree memory guard plans for 80% of the free GPU memory by default;
+  raise it on a dedicated GPU (H200: ~4.2e8 -> ~4.9e8 particles per call at
+  0.95; measured 4.8e8 at 6.0 s per call, 108.6 GB).
+- **`benchmarks/`**: `timing_sweep.py` (CPU direct, FMM, GPU direct and tree
+  against N), `max_n.py` (largest N and peak memory per GPU), `plot_timings.py`
+  (the README figure, now with the L40), `large_n_check.py` (tree forces
+  above 2^28 particles against a float64 direct sum) and a Slurm job script.
+
 - **Mixed precision Multipole: `MultipolePotentialGPU(precision='float32')`.**
   The l > 0 harmonic sums run in float32; r, log r, the l = 0 term with its
   log-scaling, the extrapolation and the final combination stay float64.

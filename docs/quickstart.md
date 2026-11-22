@@ -161,9 +161,9 @@ print(result['star'].shape)   # (1000, 6)
 
 | Particle count | Recommended | Notes |
 |---|---|---|
-| N < ~1e3 | `cpu`, `direct` | Lowest latency; no GPU kernel-launch overhead |
-| ~1e3 – ~1.5e4 | `gpu`, `direct` | Exact pairwise forces |
-| N > ~1.5e4 | `gpu`, `tree` | Barnes-Hut, theta = 0.6: median force error ~1e-4; scales to ~1e8 particles on an 80 GB+ GPU; requires `make` in `tree_gpu/` |
+| N < ~750 | `cpu`, `direct` | Lowest latency; no GPU kernel-launch overhead |
+| ~750 – ~3e4 | `gpu`, `direct` | Exact pairwise forces (crossover to the tree ~3e4 on an RTX 3080, ~4e4 on an L40 / H200) |
+| N > ~3e4 | `gpu`, `tree` | Barnes-Hut, theta = 0.6: median force error ~1e-4; ~215 B per particle per call (~375 in `run_nbody_gpu_tree`): ~4.2e8 particles on a 141 GB H200 (~4.9e8 with `set_memory_fraction(0.95)`); requires `make` in `tree_gpu/` |
 | No GPU, large N | `cpu`, `tree` (falcON) | O(N) FMM, ~1.5e-6 s per particle on one core |
 
 Crossovers measured on an RTX 3080 Laptop; see the README Performance section for timings.

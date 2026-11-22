@@ -782,38 +782,61 @@ is `False`.
 
 ## Performance
 
-Time per force evaluation (all particles), Plummer sphere, eps = 0.01 a.
-Laptop: RTX 3080 Laptop GPU + i9-11980HK (16 threads); datacenter: NVIDIA H200.
+Time per force evaluation (all particles), Plummer sphere, eps = 0.01 a,
+theta = 0.6, minimum over repeated calls.  Laptop: RTX 3080 Laptop GPU (16 GB)
++ i9-11980HK (16 threads); workstation: NVIDIA L40 (48 GB, shared, 26 GB
+free); datacenter: NVIDIA H200 (141 GB).  GPU direct uses `float32_kahan`.
 
-| N | CPU direct (16 thr) | FMM falcON (1 core) | GPU direct RTX / H200 | GPU tree RTX / H200 |
+| N | CPU direct (16 thr) | FMM falcON (1 core) | GPU direct RTX / L40 / H200 | GPU tree RTX / L40 / H200 |
 |---|---|---|---|---|
-| 8,192 | 28.8 ms | 11 ms | 1.72 ms / 1.36 ms | 2.99 ms / 1.57 ms |
-| 131,072 | 7.06 s | 165 ms | 98 ms / 39.1 ms | 6.9 ms / 3.52 ms |
-| 1,048,576 | - | 1.56 s | 5.72 s / 2.08 s | 42 ms / 14.6 ms |
-| 8,388,608 | - | 13.9 s | - / 128 s | 319 ms / 102 ms |
-| 33,554,432 | - | 134 s | - | 1.29 s / 402 ms |
-| 100,000,000 | - | - | - | - / 1.23 s |
+| 8,192 | 27.9 ms | 11.6 ms | 0.48 / 0.12 / 0.22 ms | 2.75 / 1.03 / 1.40 ms |
+| 131,072 | 7.78 s | 180 ms | 57.7 / 15.9 / 19.3 ms | 7.11 / 2.28 / 3.40 ms |
+| 1,048,576 | - | 1.46 s | 3.60 / 1.27 / 1.23 s | 40.4 / 10.2 / 13.8 ms |
+| 8,388,608 | - | 13.6 s | - | 315 / 110 / 100 ms |
+| 33,554,432 | - | - | - | 1.30 / 0.48 / 0.40 s |
+| 100,000,000 | - | - | - | - / - / 1.22 s |
+| 400,000,000 | - | - | - | - / - / 4.97 s |
 
-The GPU tree scales linearly from ~5e5 particles on: 4e-8 s per particle on
-the RTX 3080 Laptop (up to 3.4e7, limited by its 16 GB) and 1.2e-8 s per
-particle on the H200 up to 1e8 particles.  GPU direct kernels (N = 10,240,
-RTX 3080): float32 + float4 1.5 ms, float32_kahan 1.7 ms, float64 ~20 ms.
+The GPU tree costs a constant time per particle from ~5e5 particles on:
+3.8e-8 s on the RTX 3080 Laptop, 1.0-1.4e-8 s on the L40 and 1.2e-8 s on the
+H200, which holds that rate up to 4.8e8 particles (6.0 s per call).  Below
+~4e6 the L40 tree is faster than the H200's (higher clocks and FP32 rate);
+above 1e7 the H200 is ahead.  At small N the GPU direct sum splits its source
+loop across blocks to fill the GPU; at N = 10,240 on the RTX 3080: float32
+0.41 ms, float32_kahan 0.56 ms, float64 13.6 ms (consumer GPUs run float64
+at 1/64 rate).
+
+**Largest N per GPU (GPU tree).**  `TreeGPU` and `run_nbody_gpu_tree` refuse
+an N that would not fit in 80% of the free GPU memory, with a `ValueError`
+instead of an out-of-memory crash.  On a dedicated GPU raise the fraction with
+`nbody_streams.tree_gpu.set_memory_fraction(0.95)`.  A one-off call needs
+~215 B per particle on top of its float64 positions; `run_nbody_gpu_tree`
+~375 B per particle in all, and costs the same per step as one call (H200:
+1.24 s per step at 1e8, 2.47 s at 2e8).
+
+| GPU | `tree_gravity_gpu` (0.8 / 0.95) | measured |
+|---|---|---|
+| RTX 3080 Laptop, 16 GB | ~42M / ~50M | 4e7: 1.53 s per call, 10.6 GB |
+| H200, 141 GB | ~421M / ~494M | 4.8e8 at 0.95: 6.0 s per call, 108.6 GB |
+
+The index limit is 2^29 = 537M particles.  Benchmarks were run with
+`benchmarks/` (`timing_sweep.py`, `max_n.py`, `plot_timings.py`).
 
 ### Which solver should I use?
 
 <p align="center">
-  <img src="plots/acceleration_timings.png" width="700" alt="Time per particle per force evaluation against N for CPU direct, falcON FMM, and GPU direct and tree on an RTX 3080 Laptop and an H200"/>
+  <img src="plots/acceleration_timings.png" width="700" alt="Time per particle per force evaluation against N for CPU direct, falcON FMM, and GPU direct and tree on an RTX 3080 Laptop, an L40 and an H200"/>
 </p>
 
 | Particle count | Fastest | Notes |
 |---|---|---|
-| N < ~1e3 | **CPU direct** (Numba) | No kernel-launch overhead. |
-| ~1e3 - ~1.5e4 | **GPU direct** | Exact pairwise forces; `float32_kahan` matches float64 to ~1e-6 (see Float32 precision). |
-| N > ~1.5e4 | **GPU tree** | Crossover ~1.5e4 (RTX) / ~1e4 (H200).  theta = 0.6: median force error ~1e-4, 99th percentile ~5e-4; 140x faster than GPU direct at 1e6 on an H200. |
+| N < ~750 | **CPU direct** (Numba) | No kernel-launch overhead (~0.07-0.2 ms per GPU call). |
+| ~750 - ~3e4 | **GPU direct** | Exact pairwise forces; `float32_kahan` matches float64 to ~1e-6 (see Float32 precision).  Crossover to the tree ~3e4 (RTX) / ~4e4 (L40, H200). |
+| N > ~3e4 | **GPU tree** | theta = 0.6: median force error ~1e-4, 99th percentile ~5e-4; ~90x faster than GPU direct at 1e6 on an H200. |
 | No GPU, large N | **FMM** (falcON) | ~1.3-1.7e-6 s per particle on one core up to ~1e7. |
 
-The shaded bands in the figure mark the fastest choice on the consumer GPU,
-from the measured crossovers.  Benchmark scripts are not yet in the repository.
+The shaded bands in the figure mark the fastest choice on the laptop, from
+the measured crossovers.
 
 ---
 
