@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **GPU direct sum: source loop split across blocks at small N.** When the
+  grid cannot fill the GPU, up to 16 slices each sum part of the sources and a
+  reduction kernel adds them in a fixed order (deterministic, no atomics); S is
+  chosen from the device's SM count and occupancy. `run_nbody_gpu` (float32,
+  L40) per step: 2.2x faster at N = 1e3, 5.5x at 1e4, 2.1x at 3e4, 1.03x at
+  1e5; kernel-only 1.6-8.5x at N <= 16k (float64 4-7x at N <= 4k). Large grids
+  keep the unsplit kernel, bitwise unchanged; below the threshold (GPU
+  dependent, ~870k particles on an L40) only the summation order changes
+  (float32 ~1e-6, float64 ~1e-15 relative).
 - Direct-sum CUDA kernels moved to `nbody_streams/cuda/` (`.cu` + shared
   `softening.cuh`); softening is a compile-time choice and the self pair is
   masked only on the diagonal tile. Float32 Plummer forces 2.1x faster at
@@ -42,6 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **GPU tree with very few particles** (`tree_gravity_gpu`, N = 1-2 always,
+  N = 3-4 or a few more than `nleaf` coincident particles sometimes) hit a
+  device assert in `buildOctant` that killed the CUDA context (e.g. the bound
+  subset of a dissolved satellite). The cell buffer has a 65536-cell floor
+  (2.6 MB) and the off-by-one in the cell and node-pool overflow checks is
+  fixed. N = 0 returns empty `(0, 3)` / `(0,)` float32 arrays (it hung);
+  `TreeGPU(n)` with negative or non-integer `n` raises `ValueError`.
 - `python_requires` was `<=3.13`, which rejects every 3.13 patch release
   (pip refused Python 3.13.9); now `<3.14`.
 - **Dehnen K2 force** used `3.75 h^4` instead of `1.875 h^4` (CUDA and CPU),
