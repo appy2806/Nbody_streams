@@ -48,7 +48,7 @@ cd ../..
 | `nbody_streams.species` | `Species` dataclass, `PerformanceWarning`, and array-building helpers |
 | `nbody_streams.sim` | `run_simulation` — unified multi-species entry point (all backends) |
 | `nbody_streams.fields` | Force and potential kernels: dispatches to GPU (CUDA) or CPU (Numba) backends |
-| `nbody_streams.cuda_kernels` | Hand-written CUDA kernel source strings (float32 `float4`, float64); compiled at runtime via nvcc |
+| `nbody_streams.cuda_kernels` | Loader for the direct-sum CUDA source in `nbody_streams/cuda/` (`direct.cu`, `softening.cuh`); compiled at runtime via nvcc, one module per precision and softening kernel |
 | `nbody_streams.run` | KDK leapfrog integrators (`run_nbody_gpu`, `run_nbody_cpu`); `make_plummer_sphere` IC generator |
 | `nbody_streams.tree_gpu` | GPU Barnes-Hut tree code: `tree_gravity_gpu`, `TreeGPU`, `run_nbody_gpu_tree`, watchdog; requires `make` |
 | `nbody_streams.io` | `ParticleReader` for HDF5 snapshots, save/load helpers |

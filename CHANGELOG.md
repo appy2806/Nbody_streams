@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `python_requires` was `<=3.13`, which rejects every 3.13 patch release
+  (pip refused Python 3.13.9); now `<3.14`.
 - **Dehnen K2 force** used `3.75 h^4` instead of `1.875 h^4` (CUDA and CPU),
   inconsistent with its potential. K2 accelerations change by up to ~10% of
   max |a| inside the softening length.
