@@ -302,5 +302,8 @@
   "300": "Empirical radial profiles",
   "301": "GroupData",
   "302": ".test_circular_orbit_decays",
-  "303": "[1.0.0] - 2025-XX-XX"
+  "303": "[1.0.0] - 2025-XX-XX",
+  "304": "_is_uniform",
+  "305": "Cosmology and the comoving frame",
+  "306": "README.md"
 }

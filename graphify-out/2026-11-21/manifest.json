@@ -130,7 +130,7 @@
     "semantic_hash": ""
   },
   "nbody_streams/fields.py": {
-    "mtime": 1795313841.5020914,
+    "mtime": 1795315688.9788356,
     "ast_hash": "a2d583fd4b474d3fd25c4a9dedcadf4f",
     "semantic_hash": ""
   },
@@ -155,13 +155,13 @@
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/Particle4.h": {
-    "mtime": 1773127094.4915366,
-    "ast_hash": "ade05dfa438c85f11959f111768912af",
+    "mtime": 1795317937.0685167,
+    "ast_hash": "5329e51e0f2b5c5992a3c31e3b12b5b0",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/Treecode.h": {
-    "mtime": 1795315296.73212,
-    "ast_hash": "b6bdbc6dfd90554c5be3a42ca1105e8a",
+    "mtime": 1795317937.0687017,
+    "ast_hash": "c9bf29a53af34c724cdce59acaf83f80",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/TreecodeInstances.h": {
@@ -170,8 +170,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/__init__.py": {
-    "mtime": 1794204944.3020236,
-    "ast_hash": "a0258f6f669151a5285ae4089fd5bdd9",
+    "mtime": 1795319197.377156,
+    "ast_hash": "e4b878c9e4cc56ee9eeb0ab95899edbf",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/_build.py": {
@@ -180,18 +180,18 @@
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/_force.py": {
-    "mtime": 1795315296.7322764,
-    "ast_hash": "508abe63ff03248071a3f49add8897db",
+    "mtime": 1795319197.3767343,
+    "ast_hash": "3343c64b0fb2d78b8323b01e43c9983c",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/buildTree.cu": {
-    "mtime": 1795315296.7326586,
-    "ast_hash": "2e26127f87253986d0cf6ffeaf2cb459",
+    "mtime": 1795317937.0693257,
+    "ast_hash": "f151d3c2bb9db2eaa41cadf140886d9a",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/computeForces.cu": {
-    "mtime": 1794204944.3025875,
-    "ast_hash": "c05427e92e8e87d493cfa645c01e7615",
+    "mtime": 1795317937.0704916,
+    "ast_hash": "f80a3ff6404e248829573336cb23f20f",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/computeMultipoles.cu": {
@@ -205,8 +205,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/cudamem.h": {
-    "mtime": 1795315296.7343996,
-    "ast_hash": "47f4bd16272b8b8f0643a0befa02999b",
+    "mtime": 1795317937.070627,
+    "ast_hash": "8bb2314cff52ef599abd508b4a9c195e",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/cutil.h": {
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/run_gpu_tree.py": {
-    "mtime": 1794728519.7859833,
-    "ast_hash": "438d22dc03b92a08bb2ffe3f6c917498",
+    "mtime": 1795319197.3770185,
+    "ast_hash": "3fdb5c7d49bfccb7743d04d98397e8cf",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/tests/__init__.py": {
@@ -265,8 +265,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/treeGPU_interface.cu": {
-    "mtime": 1795315296.7426624,
-    "ast_hash": "e216fe503746a978190f5bded53de344",
+    "mtime": 1795317937.072779,
+    "ast_hash": "e960333d4aaf1873d44cfc7972a150a3",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/vector3.h": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1795315296.791566,
-    "ast_hash": "4ca5f77fffed9bd09a10981003f1c8de",
+    "mtime": 1795320929.1391618,
+    "ast_hash": "944d6f120b02aaaa965a9054214ee91c",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
@@ -375,8 +375,8 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1795310359.821459,
-    "ast_hash": "8278c65a5855d28816d3081efa26b4f2",
+    "mtime": 1795320906.2504168,
+    "ast_hash": "c594bb797ec6bbb5db2e96ad72343b12",
     "semantic_hash": ""
   },
   "docs/agama_helper.md": {
@@ -400,7 +400,7 @@
     "semantic_hash": ""
   },
   "docs/fields.md": {
-    "mtime": 1795313841.4999578,
+    "mtime": 1795315688.9538329,
     "ast_hash": "6dfdefa3787deaa00360cb1f3362bd4e",
     "semantic_hash": ""
   },
@@ -420,8 +420,8 @@
     "semantic_hash": ""
   },
   "docs/quickstart.md": {
-    "mtime": 1794204944.2871099,
-    "ast_hash": "6147c3bb60d960c9399d79ccecaca339",
+    "mtime": 1795320915.7296488,
+    "ast_hash": "bfb19965fe0e8d0eb39beb8e9ab7f5a8",
     "semantic_hash": ""
   },
   "docs/run.md": {
@@ -430,8 +430,8 @@
     "semantic_hash": ""
   },
   "docs/tree_gpu.md": {
-    "mtime": 1795315296.731877,
-    "ast_hash": "2707fb3afc3c76a29f018a7016bf193b",
+    "mtime": 1795319204.1986532,
+    "ast_hash": "58fd5c56abf9f0856dc5be597540fa8b",
     "semantic_hash": ""
   },
   "docs/utils.md": {
@@ -460,8 +460,8 @@
     "semantic_hash": ""
   },
   "plots/acceleration_timings.png": {
-    "mtime": 1794204944.3038125,
-    "ast_hash": "7dba6f7fa806a0e99b00c42829baf41d",
+    "mtime": 1795318909.000104,
+    "ast_hash": "6155850f6ba2907bfed094db776ab4cf",
     "semantic_hash": ""
   },
   "tests/test_snapshot_schedule.py": {
@@ -575,7 +575,7 @@
     "semantic_hash": ""
   },
   "nbody_streams/cuda/direct.cu": {
-    "mtime": 1795313841.4886107,
+    "mtime": 1795315688.9783833,
     "ast_hash": "86d72f8b4c05d0bbf6bb73dd73efc7f4",
     "semantic_hash": ""
   },
@@ -600,18 +600,128 @@
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/tests/test_overflow.py": {
-    "mtime": 1795315296.7421427,
+    "mtime": 1795315688.9799085,
     "ast_hash": "2b8f59fdd1ab747a37ece907e2902583",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/tests/test_small_n.py": {
-    "mtime": 1795313841.4660785,
+    "mtime": 1795315688.9800122,
     "ast_hash": "059ef2f0e85f9ac7b6f6367d8078619c",
     "semantic_hash": ""
   },
   "tests/test_direct_split.py": {
-    "mtime": 1795313841.4891255,
+    "mtime": 1795315688.9802608,
     "ast_hash": "6e670595c8c2d388f3a17b154d794ba5",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/maxn_h200_call.json": {
+    "mtime": 1795320852.4449964,
+    "ast_hash": "d7fe193ace92d502736f4d0b3437708e",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/maxn_h200_call_f0.95.json": {
+    "mtime": 1795320852.544999,
+    "ast_hash": "dcbc75098c78174c4689564833b3debd",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/maxn_h200_run.json": {
+    "mtime": 1795320852.6490016,
+    "ast_hash": "c2ebea26905a90cc5320ed838131dd75",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/maxn_l40_call.json": {
+    "mtime": 1795318635.236651,
+    "ast_hash": "7e6c566008bae08c21bc0c085b7f1251",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/maxn_l40_run.json": {
+    "mtime": 1795318635.271851,
+    "ast_hash": "0e57836d9b4b49d1c5d89eae2ac7b587",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/maxn_rtx3080_call.json": {
+    "mtime": 1795318452.0963302,
+    "ast_hash": "0df278c6df3bc440a2ca4c962276de2a",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/maxn_rtx3080_run.json": {
+    "mtime": 1795318624.3984463,
+    "ast_hash": "e4bcfb1af7c72d684f5f892df6167a96",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/sweep_h200_gpu_direct.json": {
+    "mtime": 1795318635.879051,
+    "ast_hash": "84d09a777008e14cea7e1df090d3bf8d",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/sweep_h200_gpu_tree.json": {
+    "mtime": 1795318635.980251,
+    "ast_hash": "fbc6bae4a0be66d4158242f622cd8bb6",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/sweep_l40_gpu_direct.json": {
+    "mtime": 1795318635.307051,
+    "ast_hash": "aabd79d28e464e9c9c671deb57d4e402",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/sweep_l40_gpu_tree.json": {
+    "mtime": 1795318635.337851,
+    "ast_hash": "a4f75e60723d35c544400a6a8c2d32f1",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/sweep_rtx3080_cpu_direct.json": {
+    "mtime": 1795318310.1806655,
+    "ast_hash": "b0ba5175ad8ff5d3e41ce6e1b27fbd5b",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/sweep_rtx3080_fmm.json": {
+    "mtime": 1795318428.8746805,
+    "ast_hash": "af887c56783abc336fd2fababcc92743",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/sweep_rtx3080_gpu_direct.json": {
+    "mtime": 1795318737.5016382,
+    "ast_hash": "e34779ec9d31ac151012786057d45c6c",
+    "semantic_hash": ""
+  },
+  "benchmarks/data/sweep_rtx3080_gpu_tree.json": {
+    "mtime": 1795318188.598862,
+    "ast_hash": "b4a5960dad315132c38c474f2cf51429",
+    "semantic_hash": ""
+  },
+  "benchmarks/large_n_check.py": {
+    "mtime": 1795320842.8983858,
+    "ast_hash": "c4893ee67d53a6edea7fbbb407afbea0",
+    "semantic_hash": ""
+  },
+  "benchmarks/max_n.py": {
+    "mtime": 1795319234.4711716,
+    "ast_hash": "5592b883c8279fb66d43e1421a7f08ba",
+    "semantic_hash": ""
+  },
+  "benchmarks/plot_timings.py": {
+    "mtime": 1795318655.6339238,
+    "ast_hash": "bba7ebfe38b9ec0f6efed3a63c730fa3",
+    "semantic_hash": ""
+  },
+  "benchmarks/tillicum_job.sh": {
+    "mtime": 1795320677.4232843,
+    "ast_hash": "7e64c73c20380f73c63a113ac6aa3951",
+    "semantic_hash": ""
+  },
+  "benchmarks/timing_sweep.py": {
+    "mtime": 1795316634.2720494,
+    "ast_hash": "529959ff1fceb2d872f637fd3c2540ed",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/tests/test_limits.py": {
+    "mtime": 1795319210.2258573,
+    "ast_hash": "b8240ee7057235669c11c048d1c34e2d",
+    "semantic_hash": ""
+  },
+  "benchmarks/README.md": {
+    "mtime": 1795318125.8586457,
+    "ast_hash": "75a2c8183258e8a230c8a332a3458242",
     "semantic_hash": ""
   }
 }
