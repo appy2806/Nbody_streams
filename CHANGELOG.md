@@ -39,6 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Restart files are written uncompressed and atomically**, with constant
+  mass / softening stored as one value (or one per species), as in the
+  snapshots; the loader expands them and still reads older files.  At 1e7
+  particles 0.7 s instead of 15.3 s (zlib on one core took minutes at 1e8+).
+  `restart_interval=None` (or 0) turns restart files off, including the final
+  one, in `run_nbody_gpu`, `run_nbody_cpu`, `run_nbody_gpu_tree` and
+  `run_simulation`.
+- **Integrator timing summaries separate integration from output**: ms/step
+  and steps/s exclude snapshot and restart writes (the tree's "ms/step"
+  previously included the final restart, e.g. 161 s/step for 3.6 s steps).
 - **GPU tree: 2^29 particles and cells, smaller buffers, an accurate memory
   guard.** The particle index has 29 bits (was 28) and the cell level moved
   out of `CellData` (cells 2^27 -> 2^29 - 1). Initial build buffers are sized
@@ -67,6 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `run_nbody_cpu` with its defaults raised (`kernel=1` with `method='direct'`);
+  the kernel now defaults from the method (`'spline'` direct, 1 tree), as
+  documented.
 - **GPU tree with very few particles** (`tree_gravity_gpu`, N = 1-2 always,
   N = 3-4 or a few more than `nleaf` coincident particles sometimes) hit a
   device assert in `buildOctant` that killed the CUDA context (e.g. the bound
