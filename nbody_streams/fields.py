@@ -455,9 +455,12 @@ def _get_kernel(kernel_type, precision, use_kahan, kernel_id):
 _DIRECT_SPLIT = None
 # Auto rule: split while the grid has fewer than _SPLIT_FILL x (resident
 # blocks on the device) blocks; S is capped at _SPLIT_MAX and the tile count.
-_SPLIT_FILL = 1.0
+# Tuned on an L40 (1704 resident blocks): a grid of 1-2 resident waves still
+# loses ~5-12% to the partly filled last wave (N = 262k-524k), and S above 16
+# only helps float32 by a few percent while slowing Kahan at N ~ 4k.
+_SPLIT_FILL = 4.0
 _SPLIT_MAX = 16
-_SPLIT_REDUCE_THREADS = 256
+_SPLIT_REDUCE_THREADS = 128
 
 # (device, kernel_type, precision, use_kahan, kernel_id) ->
 #     (plain kernel, split kernel, reduce kernel, resident blocks on the device)

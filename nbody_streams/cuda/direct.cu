@@ -159,29 +159,11 @@ __device__ __forceinline__ void direct_sum(
 
 // Combine S slices of partial sums in the fixed order s = 0..S-1 and apply G.
 // Plain: sum in T. Kahan: each slice contributes sum - comp, accumulated in
-// double (float) or with Kahan compensation (double).
-template <typename T, bool KAHAN>
-__device__ __forceinline__ T reduce_one(const T* __restrict__ p, size_t stride, size_t comp_off,
-                                        int S, T G)
-{
-    if constexpr (!KAHAN) {
-        T acc = p[0];
-        for (int s = 1; s < S; s++) acc += p[s * stride];
-        return G * acc;
-    } else if constexpr (sizeof(T) == 4) {
-        double acc = 0.0;
-        for (int s = 0; s < S; s++)
-            acc += (double)p[s * stride] - (double)p[s * stride + comp_off];
-        return G * (T)acc;
-    } else {
-        T acc = 0, c = 0;
-        for (int s = 0; s < S; s++) {
-            accumulate<T, true>(acc, c, p[s * stride]);
-            accumulate<T, true>(acc, c, -p[s * stride + comp_off]);
-        }
-        return G * (acc - c);
-    }
-}
+// double (float) or with Kahan compensation (double). All components of a
+// slice are loaded together and the slice loop is unrolled, so the loads
+// overlap instead of costing one memory latency per slice.
+template <typename T, bool KAHAN> struct ReduceAcc { using type = T; };
+template <> struct ReduceAcc<float, true> { using type = double; };
 
 template <typename T, bool POT, bool KAHAN>
 __device__ __forceinline__ void reduce_split(const T* __restrict__ part, T* __restrict__ o0,
@@ -189,15 +171,37 @@ __device__ __forceinline__ void reduce_split(const T* __restrict__ part, T* __re
 {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= N) return;
+    using A = typename ReduceAcc<T, KAHAN>::type;
+    constexpr bool KAHAN_ACC = KAHAN && sizeof(T) == 8;
     constexpr int C = POT ? 1 : 3;
     constexpr int NC = C * (KAHAN ? 2 : 1);
     const size_t stride = (size_t)NC * N;
-    const size_t comp_off = (size_t)C * N;
+    A acc[C], cmp[C];
+#pragma unroll
+    for (int c = 0; c < C; c++) { acc[c] = 0; cmp[c] = 0; }
     const T* p = part + i;
-    o0[i] = reduce_one<T, KAHAN>(p, stride, comp_off, S, G);
-    if constexpr (!POT) {
-        o1[i] = reduce_one<T, KAHAN>(p + (size_t)N, stride, comp_off, S, G);
-        o2[i] = reduce_one<T, KAHAN>(p + 2 * (size_t)N, stride, comp_off, S, G);
+#pragma unroll 4
+    for (int s = 0; s < S; s++, p += stride) {
+        T v[NC];
+#pragma unroll
+        for (int k = 0; k < NC; k++) v[k] = p[(size_t)k * N];
+#pragma unroll
+        for (int c = 0; c < C; c++) {
+            if constexpr (!KAHAN) {
+                acc[c] += v[c];
+            } else if constexpr (!KAHAN_ACC) {
+                acc[c] += (A)v[c] - (A)v[C + c];
+            } else {
+                accumulate<A, true>(acc[c], cmp[c], v[c]);
+                accumulate<A, true>(acc[c], cmp[c], -v[C + c]);
+            }
+        }
+    }
+    T* out[3] = {o0, o1, o2};
+#pragma unroll
+    for (int c = 0; c < C; c++) {
+        if constexpr (KAHAN_ACC) out[c][i] = G * (acc[c] - cmp[c]);
+        else out[c][i] = G * (T)acc[c];
     }
 }
 

@@ -91,8 +91,10 @@ def test_auto_split_rule(monkeypatch):
                                           precision == "float32_kahan", kernel_id)[3]
             assert resident >= cp.cuda.Device().attributes["MultiProcessorCount"]
             # A grid that already fills the device is never split.
-            for N in (128 * resident, 128 * resident + 1, 4 * 128 * resident, 10**7):
+            full = int(128 * fields._SPLIT_FILL * resident)
+            for N in (full, full + 1, 4 * full, 10**8):
                 assert _choose_split(N, resident) == 1
+            assert _choose_split(full - 128, resident) > 1
             # A small grid is split, within the tile count and the cap.
             for N in (1, 129, 1000, 16384):
                 tiles = (N + 127) // 128
@@ -109,7 +111,7 @@ def test_auto_split_rule(monkeypatch):
 def test_auto_split_large_n_is_unsplit(monkeypatch):
     """At large N the automatic choice is the plain kernel (bitwise S = 1)."""
     resident = _split_launch_info("force", "float32", False, KERNEL_MAP["plummer"])[3]
-    N = 128 * resident + 5
+    N = int(128 * fields._SPLIT_FILL * resident) + 5
     pos, m, h = _system(N, seed=5)
     monkeypatch.setattr(fields, "_DIRECT_SPLIT", None)
     auto = compute_nbody_forces_gpu(pos, m, h, precision="float32", kernel="plummer")
