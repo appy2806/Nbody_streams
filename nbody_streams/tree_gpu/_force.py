@@ -105,17 +105,48 @@ _WALK_POOL_BYTES_PER_SM = 12 << 20
 _IDX_CAP = 1 << 29
 
 _n_sm = None
+_MEM_FRACTION = 0.80
+
+
+def set_memory_fraction(fraction: float) -> float:
+    """Set the fraction of free GPU memory the GPU tree may plan for.
+
+    ``TreeGPU`` and ``run_nbody_gpu_tree`` refuse an N whose modelled
+    footprint exceeds this fraction of the free memory (default 0.80; the
+    rest absorbs allocator rounding, fragmentation and CuPy pool growth).
+    The model is sized for the worst distribution measured (a cubic lattice
+    at ``nleaf=16``); smooth distributions use ~10-20% less, so e.g. 0.95
+    admits ~1.2x more particles on a dedicated GPU.  Above the default an
+    unusual distribution can run out of memory inside the build, which ends
+    the process.
+
+    Returns the previous value.
+    """
+    global _MEM_FRACTION
+    f = float(fraction)
+    if not 0.0 < f <= 1.0:
+        raise ValueError(f"fraction must be in (0, 1], got {fraction}")
+    old, _MEM_FRACTION = _MEM_FRACTION, f
+    return old
+
+
+def get_memory_fraction() -> float:
+    """Fraction of free GPU memory the GPU tree may plan for (see
+    :func:`set_memory_fraction`)."""
+    return _MEM_FRACTION
+
 
 def _max_n(extra_bytes_per_particle: int = 0) -> int:
     """Largest N whose tree (plus ``extra_bytes_per_particle`` that the caller
-    will allocate later) fits in 80% of the free GPU memory; the other 20%
-    absorbs allocator rounding, fragmentation and CuPy pool growth."""
+    will allocate later) fits in ``get_memory_fraction()`` (default 80%) of
+    the free GPU memory; the rest absorbs allocator rounding, fragmentation
+    and CuPy pool growth."""
     global _n_sm
     if _n_sm is None:
         _n_sm = int(cp.cuda.Device().attributes["MultiProcessorCount"])
     free, _ = cp.cuda.runtime.memGetInfo()
     walk = min(free // 4, _WALK_POOL_BYTES_PER_SM * _n_sm)
-    usable = int(free * 0.80) - _FIXED_BYTES - walk
+    usable = int(free * _MEM_FRACTION) - _FIXED_BYTES - walk
     per = _TREE_BYTES_PER_PARTICLE + _CALL_BYTES_PER_PARTICLE + int(extra_bytes_per_particle)
     return max(0, min(usable // per, _IDX_CAP))
 
@@ -246,7 +277,8 @@ class TreeGPU:
         if n > cap:
             raise ValueError(
                 f"N={n:,} exceeds the GPU tree limit ({cap:,}), set by "
-                + ("free GPU memory (see _max_n)" if cap < _IDX_CAP
+                + (f"{_MEM_FRACTION:.0%} of free GPU memory (raise it with "
+                   "nbody_streams.tree_gpu.set_memory_fraction)" if cap < _IDX_CAP
                    else "the 29-bit particle index (2^29 particles)") + ".")
         self._ptr = _lib.tree_new(_flt(eps), _flt(theta))
         _lib.tree_set_verbose(self._ptr, int(verbose))

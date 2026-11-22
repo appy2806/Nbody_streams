@@ -69,7 +69,7 @@ try:
 except ImportError:
     from nbody_streams.species import Species, _build_particle_arrays  # type: ignore[no-redef]
 
-from ._force import tree_gravity_gpu, TreeGPU, G_DEFAULT, _max_n, _IDX_CAP
+from ._force import tree_gravity_gpu, TreeGPU, G_DEFAULT, _max_n, _IDX_CAP, get_memory_fraction
 
 # GPU memory the integrator allocates per particle beyond what the TreeGPU
 # guard counts (the float64 pos/vel, float32/float64 masses and float32
@@ -431,7 +431,8 @@ def run_nbody_gpu_tree(
     if N > cap:
         raise ValueError(
             f"N={N:,} exceeds the GPU tree run limit ({cap:,}), set by "
-            + ("free GPU memory (tree plus integrator arrays)" if cap < _IDX_CAP
+            + (f"{get_memory_fraction():.0%} of free GPU memory (tree plus integrator arrays; "
+               "raise it with nbody_streams.tree_gpu.set_memory_fraction)" if cap < _IDX_CAP
                else "the 29-bit particle index (2^29 particles)") + ".")
     tree     = TreeGPU(N, eps=0.0, theta=theta, verbose=False)
     watchdog = _StepWatchdog(timeout_s=step_timeout_s)

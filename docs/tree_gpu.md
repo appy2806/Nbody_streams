@@ -117,7 +117,7 @@ context manager.
 
 | Name | Type | Description |
 |------|------|-------------|
-| `n` | int | Number of particles. `ValueError` if the tree would not fit in 80% of the free GPU memory, or above 2^29 (the particle-index limit); see [GPU memory layout](#gpu-memory-layout). |
+| `n` | int | Number of particles. `ValueError` if the tree would not fit in 80% of the free GPU memory (`set_memory_fraction` changes the fraction), or above 2^29 (the particle-index limit); see [GPU memory layout](#gpu-memory-layout). |
 | `eps` | float | Default fallback softening length. |
 | `theta` | float | Barnes-Hut opening angle, in (0, 1.15). |
 | `verbose` | bool | Print timing from C++ layer. |
@@ -618,11 +618,12 @@ to the actual cell count, not the capacity.
 
 **Memory guard.**  `TreeGPU(N)` raises `ValueError` unless
 
-    N × (216 + 40) + 64 MiB + walk pool  <=  0.8 × free GPU memory
+    N × (216 + 40) + 64 MiB + walk pool  <=  f × free GPU memory
 
 and N <= 2^29: 216 B/particle covers the tree after a call for trees of up
 to 0.4 N cells (the most measured is 0.37 N), 40 the per-call arrays above;
-the 20% margin absorbs allocator rounding and CuPy pool growth.  (It used
+the remaining 1 - f (default f = 0.8) absorbs allocator rounding and CuPy
+pool growth.  (It used
 52 B/particle, admitting ~5x more particles than fit.)  `run_nbody_gpu_tree`
 checks before it creates its handle (its float64 pos/vel, float32/float64
 masses and float32 softening, 64 B/particle, already exist and count as used)
@@ -644,6 +645,18 @@ positions: 32 B/particle; `run_nbody_gpu_tree`: 64):
 | 48 GB (L40, 45 GiB usable, 142 SMs) | ~129M | ~84M | ~79M |
 | 141 GB (H200, 132 SMs) | ~422M | ~273M | ~259M |
 | 192 GB (B200, 148 SMs) | 537M (2^29 index limit; memory ~577M) | ~374M | ~354M |
+
+On a dedicated GPU, raise f to plan for more of the memory:
+
+```python
+import nbody_streams.tree_gpu as tg
+tg.set_memory_fraction(0.95)   # returns the previous value; get_memory_fraction() reads it
+```
+
+The 216 B/particle term is the worst distribution measured (a cubic lattice
+at `nleaf = 16`); smooth distributions need ~10-20% less, so 0.95 is safe for
+them.  Above the default an unusual distribution can run out of memory inside
+the build, which ends the process.
 
 Checked on an L40 with 25 GiB free (other users held the rest): the largest
 N the guard admits for a one-off call (72M, cubic lattice, nleaf = 16) peaked

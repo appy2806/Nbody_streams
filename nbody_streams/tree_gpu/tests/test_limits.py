@@ -96,3 +96,24 @@ def test_guard_model_covers_measured_footprint():
         del x, m
     slope = (per[1] - per[0]) / 1_000_000
     assert 120 < slope <= _force._TREE_BYTES_PER_PARTICLE, slope
+
+
+def test_memory_fraction():
+    """set_memory_fraction scales the guard; bad values raise; default 0.8."""
+    import nbody_streams.tree_gpu as tg
+    assert tg.get_memory_fraction() == 0.8
+    n80 = _force._max_n()
+    old = tg.set_memory_fraction(0.95)
+    try:
+        assert old == 0.8 and tg.get_memory_fraction() == 0.95
+        n95 = _force._max_n()
+        assert n95 >= n80
+        if n80 < _force._IDX_CAP:
+            assert n95 > n80
+        for bad in (0.0, -0.1, 1.5):
+            with pytest.raises(ValueError):
+                tg.set_memory_fraction(bad)
+        assert tg.get_memory_fraction() == 0.95
+    finally:
+        tg.set_memory_fraction(old)
+    assert _force._max_n() == pytest.approx(n80, rel=0.02)

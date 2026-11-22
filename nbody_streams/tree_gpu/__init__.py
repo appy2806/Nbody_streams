@@ -43,10 +43,11 @@ The softening convention matches nbody_streams direct-sum:
 """
 
 try:
-    from ._force import tree_gravity_gpu, TreeGPU, cuda_alive, G_DEFAULT
+    from ._force import (tree_gravity_gpu, TreeGPU, cuda_alive, G_DEFAULT,
+                         set_memory_fraction, get_memory_fraction)
     from .run_gpu_tree import run_nbody_gpu_tree
     __all__ = ["tree_gravity_gpu", "TreeGPU", "cuda_alive", "G_DEFAULT",
-               "run_nbody_gpu_tree"]
+               "run_nbody_gpu_tree", "set_memory_fraction", "get_memory_fraction"]
 except OSError as _e:
     raise ImportError(
         "nbody_streams.tree_gpu: could not load libtreeGPU.so. "
