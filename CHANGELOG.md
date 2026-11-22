@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-21
+
+Highlights: GPU tree to 2^29 particles with an accurate memory guard and
+recovery from build-buffer overflow (4.8e8 particles in 6.0 s per force call
+on an H200); small-N GPU direct sum 2-5x faster per step; float32 and
+mixed-precision host potentials (analytic, Multipole, CylSpline) and
+time-dependent triaxial Spheroids; CylSpline matching Agama to machine
+precision; coefficient time series and comoving FIRE hosts; softening-kernel,
+restart and rendering fixes; `benchmarks/`.
+
 ### Added
 
 - **`nbody_streams.tree_gpu.set_memory_fraction(f)` / `get_memory_fraction()`.**
@@ -36,6 +46,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mmax = 8: 21.7 -> 3.5 ms per 1e6 forces (float64 path 14.6 ms), within
   ~5e-9 of float64 (max 8e-7). Whole m12i host: 47.1 -> 6.6 ms; a 1e6-particle
   GPU-tree step 75.5 -> 38.0 ms (RTX 3080 Laptop).
+
+
+- **Time-dependent halo shapes: `SpheroidPotentialGPU`.** Agama's Spheroid
+  density (same keywords; also NFW and Dehnen) with `axisRatioY`,
+  `axisRatioZ`, `mass` or `densityNorm` given as `[t, value]` tables. The
+  potential is evaluated directly from the density with the homoeoid-theorem
+  1D integral, so the shape can change every step without rebuilding
+  anything, and there is no lmax truncation. `PotentialGPU(type='Spheroid' |
+  'NFW' | 'Dehnen', ...)` routes here only when one of those keywords is a
+  table; static shapes keep the Agama Multipole route unchanged. `mass=`
+  holds the mass inside every ellipsoid fixed as the shape changes. Force
+  ~1e-14 to ~3e-9, 14-28 ms per 1e6 particles (RTX 3080 Laptop, FP64), versus
+  51 ms for the lmax=6 Multipole route. `precision='float32'` runs the
+  kernels in single precision (~5e-7 force, 0.4 ms per 1e6 particles);
+  inputs and outputs stay float64. Composes with `rotation=`,
+  `orientation=`, `center=`, `scale=`.
+
+- **GPU rotation modifiers.** `TiltedPotentialGPU` (`orientation=`) and
+  `RotatingPotentialGPU` (`rotation=`, constant angle or `[t, angle]` table)
+  mirror Agama's modifiers; `PotentialGPU(..., orientation=, rotation=)` and
+  component dicts / INI sections accept them, nesting in Agama's order (scale,
+  rotation, orientation, center). Nested rotations collapse into one matrix.
+  This makes time-dependent tilts (e.g. a halo tumbling about x) run fully on
+  the GPU. `euler_matrix()` gives Agama's orientation matrix.
 
 ### Changed
 
@@ -74,6 +108,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   harmonic), read the (N,3) array and write the force directly.
 - The CylSpline module keeps `-Xptxas -O0` (Hopper ptxas workaround) only on
   compute capability >= 9.0.
+
+
+- **Fewer passes in the GPU direct-sum integrator** (`run_nbody_gpu`). Mass
+  and softening are cast to the force precision once (a per-particle
+  softening array was re-uploaded every step), positions and masses are
+  packed into float4 in one kernel, the force kernel's x/y/z output feeds a
+  fused closing kick (self + external + kick, in place), and kick + drift is
+  one kernel. 2.7-2.9x faster per step at N = 1e3, ~25% at 3e3, ~8% at 1e4
+  (RTX 3080 Laptop); results agree with the old loop to rounding (1e-15
+  km/s after two steps). `compute_nbody_forces_gpu` packs float4 and
+  assembles its output in one kernel each (bitwise unchanged).
+- **Analytic GPU kernels return the force and `-Hessian` directly**, reading
+  the float64 `(N,3)` positions in-kernel: the separate negation and
+  per-axis slicing passes are gone, 1.2-3x faster in float64 too.
+- **Fewer passes around the GPU tree.** `tree_gravity_gpu` writes the
+  recentred float32 positions straight into the tree's SoA layout, finishes
+  with one kernel (layout, self-term, G), and checks a softening array only
+  the first time a tree handle sees it (the check cost a host sync).
+  `run_nbody_gpu_tree` updates positions, velocities and acceleration in
+  place with two fused kick kernels. 1.9 -> 0.8 ms per step at 1e6 particles;
+  tree forces are bitwise unchanged, and the kick increment `h a` is now
+  formed in float64 also without an external potential.
+
+
+- **`MultipoleCoefs.to_coef_string()` raises when `dphi_dr is None`.**  Agama
+  fails with `RuntimeError: Error loading Multipole potential` on a
+  `#Phi`-only Multipole file, so writing one is now refused up front rather
+  than deferred to load time.  A `#Phi`-only *CylSpline* file does load (Agama
+  reconstructs the derivatives, ~7e-5 relative error on `Phi`) and stays a
+  legal fallback.
+
+- **`load_agama_evolving_potential(..., gpu=True)` skips the text round-trip**
+  when the source is already a coefficient object, feeding the arrays straight
+  to `_build_multipole_data` / `_build_cylspline_data`.  This is
+  precision-preserving, not merely faster: the text format writes `%.13g` /
+  `%.14g`, which truncates float64.  Verified bit-identical potential and force
+  against the string path on fixtures quantised to the text format.
 
 ### Fixed
 
@@ -139,62 +210,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   3080 Laptop. Inputs and outputs stay float64. Multipole-backed types raise
   for float32.
 
-### Changed
-
-- **Fewer passes in the GPU direct-sum integrator** (`run_nbody_gpu`). Mass
-  and softening are cast to the force precision once (a per-particle
-  softening array was re-uploaded every step), positions and masses are
-  packed into float4 in one kernel, the force kernel's x/y/z output feeds a
-  fused closing kick (self + external + kick, in place), and kick + drift is
-  one kernel. 2.7-2.9x faster per step at N = 1e3, ~25% at 3e3, ~8% at 1e4
-  (RTX 3080 Laptop); results agree with the old loop to rounding (1e-15
-  km/s after two steps). `compute_nbody_forces_gpu` packs float4 and
-  assembles its output in one kernel each (bitwise unchanged).
-- **Analytic GPU kernels return the force and `-Hessian` directly**, reading
-  the float64 `(N,3)` positions in-kernel: the separate negation and
-  per-axis slicing passes are gone, 1.2-3x faster in float64 too.
-- **Fewer passes around the GPU tree.** `tree_gravity_gpu` writes the
-  recentred float32 positions straight into the tree's SoA layout, finishes
-  with one kernel (layout, self-term, G), and checks a softening array only
-  the first time a tree handle sees it (the check cost a host sync).
-  `run_nbody_gpu_tree` updates positions, velocities and acceleration in
-  place with two fused kick kernels. 1.9 -> 0.8 ms per step at 1e6 particles;
-  tree forces are bitwise unchanged, and the kick increment `h a` is now
-  formed in float64 also without an external potential.
-
-### Fixed
 
 - Cancellation in the analytic kernels: NFW force/Hessian at r << rs
   (2e-11 at 1 pc), cusp Hessians' radial component, `DiskAnsatz` potential
   near the midplane (1e-2 at |z| < 1e-3 h), Dehnen potential at r >> a,
   isochrone density at r >> b.
 
-### Added
-
-- **Time-dependent halo shapes: `SpheroidPotentialGPU`.** Agama's Spheroid
-  density (same keywords; also NFW and Dehnen) with `axisRatioY`,
-  `axisRatioZ`, `mass` or `densityNorm` given as `[t, value]` tables. The
-  potential is evaluated directly from the density with the homoeoid-theorem
-  1D integral, so the shape can change every step without rebuilding
-  anything, and there is no lmax truncation. `PotentialGPU(type='Spheroid' |
-  'NFW' | 'Dehnen', ...)` routes here only when one of those keywords is a
-  table; static shapes keep the Agama Multipole route unchanged. `mass=`
-  holds the mass inside every ellipsoid fixed as the shape changes. Force
-  ~1e-14 to ~3e-9, 14-28 ms per 1e6 particles (RTX 3080 Laptop, FP64), versus
-  51 ms for the lmax=6 Multipole route. `precision='float32'` runs the
-  kernels in single precision (~5e-7 force, 0.4 ms per 1e6 particles);
-  inputs and outputs stay float64. Composes with `rotation=`,
-  `orientation=`, `center=`, `scale=`.
-
-- **GPU rotation modifiers.** `TiltedPotentialGPU` (`orientation=`) and
-  `RotatingPotentialGPU` (`rotation=`, constant angle or `[t, angle]` table)
-  mirror Agama's modifiers; `PotentialGPU(..., orientation=, rotation=)` and
-  component dicts / INI sections accept them, nesting in Agama's order (scale,
-  rotation, orientation, center). Nested rotations collapse into one matrix.
-  This makes time-dependent tilts (e.g. a halo tumbling about x) run fully on
-  the GPU. `euler_matrix()` gives Agama's orientation matrix.
-
-### Fixed
 
 - `ShiftedPotentialGPU` accepted only CuPy positions; NumPy input now works
   (it is moved to the GPU, like the other modifiers).
@@ -343,23 +364,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `NBODY_STREAMS_POT_DIR`) at your own coefficient archives; the models are not
   shipped with the package.
 
-### Changed
-
-- **`MultipoleCoefs.to_coef_string()` raises when `dphi_dr is None`.**  Agama
-  fails with `RuntimeError: Error loading Multipole potential` on a
-  `#Phi`-only Multipole file, so writing one is now refused up front rather
-  than deferred to load time.  A `#Phi`-only *CylSpline* file does load (Agama
-  reconstructs the derivatives, ~7e-5 relative error on `Phi`) and stays a
-  legal fallback.
-
-- **`load_agama_evolving_potential(..., gpu=True)` skips the text round-trip**
-  when the source is already a coefficient object, feeding the arrays straight
-  to `_build_multipole_data` / `_build_cylspline_data`.  This is
-  precision-preserving, not merely faster: the text format writes `%.13g` /
-  `%.14g`, which truncates float64.  Verified bit-identical potential and force
-  against the string path on fixtures quantised to the text format.
-
-### Fixed
 
 - **`agama_helper` no longer needs CuPy to import.**  CuPy is an optional extra
   (`nbody_streams[cuda]`), but `agama_helper/__init__.py` imported
