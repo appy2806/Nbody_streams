@@ -28,9 +28,10 @@ atomic adds to the shared grid buffer.  This is efficient for moderate
 smoothing lengths.  For repeated renders on the same particle set, pass
 pre-computed ``h`` to avoid re-running the KNN query.
 
-CPU splatting uses Numba ``prange`` with an array-reduction pattern: Numba
-allocates per-thread private copies of the grid and sums them after the loop,
-so there are no race conditions.  The first call incurs JIT compilation
+CPU splatting splits the particles into one chunk per thread, deposits each
+chunk into its own private grid with Numba ``prange`` and then adds the
+private grids row by row, so no two threads write the same element (a plain
+``grid[i, j] += ...`` inside ``prange`` is a data race that loses mass).  The first call incurs JIT compilation
 overhead (~1-5 s); subsequent calls use the on-disk cache.
 """
 
@@ -41,7 +42,7 @@ import warnings
 from typing import Literal, Optional, Tuple
 
 import numpy as np
-from numba import cuda, njit, prange
+from numba import cuda, njit, prange, get_num_threads
 from scipy.spatial import KDTree
 
 try:  # tqdm is optional; fall back to a no-op passthrough when absent
@@ -319,11 +320,12 @@ def _sph_splat_cpu_kernel(
 ) -> None:
     """Numba-parallel CPU SPH splatting kernel (in-place, no return value).
 
-    Each particle is processed by a separate thread via ``prange``.  Numba
-    detects the ``grid[i, j] += value`` pattern as an array reduction and
-    allocates per-thread private copies of the grid, summed at the end.
-    This avoids race conditions and is faster than explicit atomic ops when
-    the average particle footprint spans many pixels.
+    The particles are split into one contiguous chunk per thread; each chunk
+    is splatted into its own private grid (``prange`` over chunks), and the
+    private grids are then added row by row (``prange`` over rows), so no
+    two threads write the same element.  The result is deterministic for a
+    given thread count.  The private grids are capped at ~1 GiB in total
+    (fewer chunks than threads for very large grids).
 
     Parameters
     ----------
@@ -345,7 +347,23 @@ def _sph_splat_cpu_kernel(
     ny = grid.shape[1]
     inv_pixel = 1.0 / pixel_size
 
-    for idx in prange(n):
+    nchunk = min(get_num_threads(), max(1, n), max(1, (1 << 28) // max(1, nx * ny)))
+    parts = np.zeros((nchunk, nx, ny), dtype=grid.dtype)
+    for c in prange(nchunk):
+        _splat_range(x, y, mass, h, parts[c], x_min, y_min, pixel_size, inv_pixel,
+                     (c * n) // nchunk, ((c + 1) * n) // nchunk)
+    for i in prange(nx):
+        for c in range(nchunk):
+            for j in range(ny):
+                grid[i, j] += parts[c, i, j]
+
+
+@njit(cache=True, fastmath=True)
+def _splat_range(x, y, mass, h, grid, x_min, y_min, pixel_size, inv_pixel, lo, hi_idx):
+    """Serial SPH splat of particles ``lo .. hi_idx - 1`` into ``grid``."""
+    nx = grid.shape[0]
+    ny = grid.shape[1]
+    for idx in range(lo, hi_idx):
         px = x[idx]
         py = y[idx]
         hi = h[idx]

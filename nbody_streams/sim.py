@@ -46,7 +46,7 @@ def run_simulation(
     save_snapshots: bool = True,
     snapshots: int = 100,
     num_files_to_write: int = 1,
-    restart_interval: int = 1000,
+    restart_interval: int | None = 1000,
     continue_run: bool = False,
     overwrite: bool = False,
     verbose: bool = True,
@@ -113,8 +113,9 @@ def run_simulation(
         Number of evenly-spaced snapshots.  Default: 100.
     num_files_to_write : int, optional
         Split output across this many HDF5 files.  Default: 1.
-    restart_interval : int, optional
-        Save a restart checkpoint every this many steps.  Default: 1000.
+    restart_interval : int or None, optional
+        Save a restart checkpoint every this many steps and at the end.
+        Default: 1000.  ``None`` or 0: no restart files.
     continue_run : bool, optional
         Resume from an existing restart file.  Default: ``False``.
     verbose : bool, optional

@@ -684,8 +684,147 @@ from nbody_streams.agama_helper import PotentialGPU
 | Analytic: `UniformAcceleration` (constant or time-dependent) | Direct CuPy kernel |
 | `Disk` | `CompositePotentialGPU(DiskAnsatzGPU + MultipolePotentialGPU)` |
 | `Spheroid`, `King` | Agama CPU export → `MultipolePotentialGPU` |
+| `Spheroid`, `NFW`, `Dehnen` with a time table for `axisRatioY`/`axisRatioZ`/`mass`/`densityNorm` | `SpheroidPotentialGPU` (direct from the density) |
 | Multi-component `.ini` / any text file with `[Potential]` | `CompositePotentialGPU` |
 | `EvolvingPotentialGPU` | Linear lerp of snapshot GPU potentials |
+
+### Single precision: `precision=`
+
+Every analytic class (`NFW`, `Plummer`, `Hernquist`, `Isochrone`,
+`MiyamotoNagai`, `LogHalo`, spherical `Dehnen`, `DiskAnsatz`,
+`UniformAcceleration`) and `SpheroidPotentialGPU` take
+`precision='float64'` (default) or `'float32'`, also through the factory:
+
+```python
+host = PotentialGPU(type='NFW', mass=1e12, scaleRadius=15, precision='float32')
+host.precision            # 'float32'
+```
+
+The kernels read the float64 `(N,3)` positions, convert to the chosen type in
+registers (like the tree code's `(float)(p - c)` recentring), and write
+float64 results, so the interface is the same in both modes. They also return
+the force and `-Hessian` directly: there is no separate cast or negation pass.
+
+| | float64 | float32 |
+|---|---|---|
+| error vs float64 (Φ, force, Hessian) | — | ~1e-7 typical, ≤ 2e-6 |
+| NFW force, 1e6 particles (RTX 3080 Laptop) | 0.79 ms | 0.13 ms |
+| Dehnen force (`pow`-bound) | 1.4 ms | 0.12 ms |
+| force + Hessian, any model | 0.4-3.3 ms | ~0.31 ms |
+
+float32 runs at the memory-bandwidth floor (~0.12 ms per 1e6 forces) for
+every model. FP64 runs at 1/64 of the FP32 rate on consumer and L40-class
+GPUs, and at 1/2 on H100/H200, where float64 costs little.
+
+**Accuracy.** In a host potential the float32 error is a noise floor of
+~1e-7 |F_host|. Differences of the host force over a separation d (the
+tidal field) carry ~1e-7 R/d relative error, but against a cluster's own
+gravity at its tidal radius this is ~1e-5 for 1e4-1e5 Msun at 20-100 kpc in
+m12i, far below the tree's force error. The formulas were rewritten where
+float32 (and to a lesser degree float64) loses digits to cancellation:
+
+* NFW force/Hessian at r << rs: a series in `w = s/(1+s)` below
+  `s = r/rs = 1` (float32) / 0.25 (float64); the old closed form lost
+  ~eps/s (2e-11 at r = 1 pc in float64).
+* Cusp Hessians (NFW, Hernquist, Dehnen) as `D2 n n + B (1 - n n)`, so the
+  radial component does not cancel at r << a.
+* `DiskAnsatz` `H(z) = (h/2)(e^-u - 1 + u)` as a series for `u < 1` (the old
+  form was 1e-2 off in float64 at |z| < 1e-3 h).
+* Dehnen Φ as `expm1(-(2-γ) log1p(a/r))` at r >> a; isochrone density
+  without the `r >> b` cancellation.
+
+Float32 `exp(-r/hr)` in `DiskAnsatz` still carries ~eps r/hr, i.e. ~1e-6 at
+r = 30 kpc, where that term is negligible.
+
+**Multipole: mixed precision.** `MultipolePotentialGPU(precision='float32')`
+(also `PotentialGPU(file=..., precision='float32')`, every component of an
+INI file or composite, `load_agama_potential(..., gpu=True,
+precision='float32')`, and the types Agama builds as a Multipole: static
+`Spheroid`, `King`, `Disk`, triaxial or γ=2 `Dehnen`) splits the work. With
+Agama's log-scaling every l > 0 coefficient is stored as the ratio
+Φ_lm/Φ_0, so
+
+    Φ = C0 (MUL0 Y00 + S),           S = Σ ratio_lm Y_lm T_m
+    dΦ/dln r = dC0 (MUL0 Y00 + S) + C0 S_r,   dΦ/dθ = C0 S_θ, ...
+
+r, log r, the radial cell, the l = 0 spline and its log-scaling inverse
+(which cancels), the extrapolation off the grid and the final combination
+stay float64; the l > 0 sums (Legendre and cos/sin(mφ) recurrences, the
+quintic splines from a float copy of the table) run in float32. The sums are
+the non-spherical correction, ~7% of the force for m12i, so the error is
+~1e-7 times that. Hessian and density stay float64.
+
+m12i z = 0 DM halo, 1e6 particles at 1-200 kpc, RTX 3080 Laptop:
+
+| | lmax = 4 | lmax = 8 |
+|---|---|---|
+| force, float64 | 12.1 ms | 33.5 ms |
+| force, float32 (mixed) | 2.1 ms | 3.7 ms |
+| force error vs float64, median / max | 1e-8 / 3e-7 | 1.5e-8 / 5e-7 |
+| tidal ΔF over 1 pc at 40 kpc, median | 4e-4 | 7e-4 (pure float32: 4e-3) |
+
+float32 needs |m| ≤ 28 (PREFACT[m] underflows float beyond).
+
+**CylSpline: mixed precision.** Same idea: the m = 0 harmonic is stored as
+log(-Φ_0) and the others as Φ_m/Φ_0, so Φ = Φ_0 (1 + Σ ratio_m trig_m). The
+asinh coordinates, grid search, m = 0 patch and its `exp`, the outer
+asymptotic region and the combination stay float64; the m ≠ 0 bicubic
+patches (from a float copy of the node table) and the Fourier sums run in
+float32. Both precisions now compute the cell geometry once per particle
+rather than per harmonic and take cos/sin(mφ) from a recurrence started at
+x/R, y/R (the old kernel called `atan2` plus `cos`/`sin` per harmonic).
+Axisymmetric files (`axi_*`, m = 0 only) gain nothing from float32.
+
+m12i z = 0 baryons, 1e6 particles at 1-200 kpc, RTX 3080 Laptop:
+
+| | mmax = 4 | mmax = 8 | axisymmetric |
+|---|---|---|---|
+| force, before | 12.8 ms | 21.7 ms | 3.3 ms |
+| force, float64 now | 7.9 ms | 14.6 ms | 3.2 ms |
+| force, float32 (mixed) | 3.1 ms | 3.5 ms | 3.0 ms |
+| force error vs float64, median / max | 5e-9 / 8e-7 | 5e-9 / 8e-7 | — |
+
+The largest float32 errors (~3e-6) sit within 10 pc of the centre, where
+the force goes through zero.
+
+**Agreement with Agama** (float64; m12i `none_8` and `axi_4`, pointwise, on
+the grid): potential ~1e-15, force 1e-14 typical / ≤ 2e-11, Hessian 1e-13
+typical / ≤ 4e-9, at nodes, between nodes and in the disk plane. Until
+2026-11-15 the force was 1e-4 to 2e-3 off (0.5% in the inner disk, up to 9%
+off the grid) because the outer-asymptote fit used a broken Legendre
+recurrence; that also set the wrong `Rscale` (the asinh scale of the spline
+coordinates: 7.05 instead of 1.98 kpc for m12i), so it reached every point.
+
+**Off the grid the GPU deliberately differs from Agama.** Both fit the same
+PowerLaw multipole (l ≤ 8, all m) to the grid boundary, but Agama then
+evaluates only its m = 0, even-l terms: `PowerLawMultipole` takes its (l, m)
+set from the `U` array, which CylSpline's `determineAsympt` passes as zeros,
+so the asymptote gets full symmetry (agama 1.0.160 and current GitHub).
+That drops the non-axisymmetric and z-asymmetric part of the potential
+beyond the grid. The GPU keeps all terms: the potential jump across the grid
+edge drops from 5.6e-3 to 4.3e-4 (median; max 4.1e-2 → 7.5e-3) for m12i,
+and the GPU minus those extra terms equals Agama to 1e-15. Beyond the grid
+the two then differ by ~1% (up to 10% for m12i `none_8`; identical for
+axisymmetric, z-symmetric files). `Rscale` still uses Agama's terms
+(`Mtot` from its asymptote on the z axis at `R_max`), because the spline
+interpolation, and so agreement on the grid, depends on it.
+
+On the z axis every quantity is the limit approached along +x (the azimuth
+that `atan2(0, 0)` gives): on the grid the m ≠ 0 harmonics vanish with zero
+slope at R = 0 and contribute `f''` terms to Hxx, Hyy, Hxy (exact for
+m = 2); off the grid the expansion is smooth and is averaged at x = ±1e-6 r.
+Agama's own axis Hessian is wrong (it returns `Hxx = Hyy = Hxy`).
+
+The CylSpline module is compiled with `-Xptxas -O0` only on compute
+capability ≥ 9.0, the workaround for a Hopper ptxas miscompile; earlier
+GPUs (RTX 30xx, L40) keep the optimizer, which on the 3080 is 17% (float64)
+and 80% (float32) faster.
+
+**Whole m12i host** (DM Multipole lmax = 8 + baryon CylSpline mmax = 8),
+1e6 particles: 47.1 ms → 6.6 ms per force call, max deviation 1.4e-7; a
+GPU-tree step with that host goes from 75.5 to 38.0 ms.
+`run_simulation`'s `precision=` sets the self-gravity only: set the host's
+precision on the potential.
 
 ### Rotation modifiers: `orientation=` and `rotation=`
 
@@ -712,6 +851,95 @@ halo  = PotentialGPU(PotentialGPU(inner, rotation=t_theta_table),
 
 Stacked rotation modifiers collapse into one 3x3 matrix (`.matrix(t)`), so the
 cost per call is two (N,3)x(3,3) products plus the inner evaluation.
+
+### Time-dependent shapes: `SpheroidPotentialGPU`
+
+A triaxial halo whose axis ratios change during the run. Agama has no such
+model, so a time table for the shape is evaluated directly from the density
+instead of through an Agama Multipole. **The static route is unchanged:**
+`PotentialGPU(type='Spheroid', axisRatioZ=0.6, ...)` still builds the Agama
+Multipole; only a *table* switches to the direct kernel.
+
+```python
+q_t = [[0.0, 0.5], [3.0, 0.7], [6.0, 0.9]]          # [t, z/x]: rounding up
+halo = PotentialGPU(type='NFW', mass=1e12, scaleRadius=15,
+                    axisRatioY=0.85, axisRatioZ=q_t)
+halo = PotentialGPU(type='Spheroid', densityNorm=1e7, scaleRadius=15, alpha=1, beta=3,
+                    gamma=1, outerCutoffRadius=300, axisRatioZ=q_t)
+halo = PotentialGPU(type='Dehnen', mass=1e12, scaleRadius=15, gamma=1.5,
+                    axisRatioZ=q_t, rotation=[[0, 0], [6, 1.2]])   # modifiers compose
+
+from nbody_streams.agama_helper._spheroid import SpheroidPotentialGPU
+halo = SpheroidPotentialGPU(mass=1e12, scaleRadius=15, beta=3, axisRatioZ=q_t, nodes=64)
+halo.shape(t)    # (p, q) at t
+halo.rho0(t)     # density normalisation at t
+```
+
+| keyword | meaning |
+|---|---|
+| `axisRatioY`, `axisRatioZ` | `p = y/x`, `q = z/x`: scalar, `(T,2)` `[t, value]` (regularized natural cubic spline, as `center=`), or `(T,3)` `[t, value, dvalue/dt]` (Hermite) |
+| `mass` | scalar or table. `rho0(t) = mass / (4 pi a^3 p q I)`, `I` = the profile's mass integral, so **the mass inside every ellipsoid stays fixed while the shape changes**. Finite-mass profiles match Agama's `mass=`; for infinite mass (`beta <= 3`, no cutoff, where Agama raises) `I = 1`, the NFW normalisation |
+| `densityNorm` | scalar or table: `rho0` itself; enclosed masses then change with `p q` |
+| `scaleRadius`, `alpha`, `beta`, `gamma`, `outerCutoffRadius`, `cutoffStrength` | static, as Agama. A time-dependent size comes from `scale=` |
+| `nodes` | quadrature nodes, default 32 |
+| `precision` | `'float64'` (default) or `'float32'`: arithmetic inside the kernels; inputs and outputs stay float64 |
+
+`type='NFW'` fixes `alpha, beta, gamma = 1, 3, 1`; `type='Dehnen'` fixes
+`alpha, beta = 1, 4`. Multipole-only keywords (`lmax`, `gridSizeR`) raise.
+
+**How it works.** For `rho(m)`, `m^2 = x^2 + y^2/p^2 + z^2/q^2`, the homoeoid
+theorem (Chandrasekhar 1969; BT08 eq. 2.140) gives the force as a 1D integral
+of the density itself. With `tau = 1/s^2 - 1`, `D_y = 1 + (p^2-1) s^2`,
+`D_z = 1 + (q^2-1) s^2`, `D_x = 1`:
+
+```
+dPhi/dx_i = 4 pi G p q x_i int_0^1 rho(m(s)) s^2 / (D_i sqrt(D_y D_z)) ds
+Phi       = -2 pi G p q    int_0^1 dpsi(m(s))    / sqrt(D_y D_z)      ds
+m(s)^2    = s^2 (x^2 + y^2/D_y + z^2/D_z),   dpsi(m) = 2 int_m^inf rho m' dm'
+```
+
+The force needs only `rho` (closed form), so a new shape costs nothing:
+`p(t), q(t)` are spline-evaluated on the CPU once per call and the per-node
+factors (`1/D_y`, `1/D_z`, weights) are rebuilt only when they change. `dpsi`
+depends on the radial profile alone, so it is tabulated once and only the
+potential reads it. The Hessian follows by differentiating under the integral
+(needs `dln rho / dln m`, also closed form). No Poisson solve, no expansion.
+
+Quadrature is Gauss-Legendre in `v` with `s = v^2`, which removes the cusp's
+`s^(2-gamma)` singularity and puts nodes where the far-field integrand lives
+(plain `s`, as Galax uses with 50 nodes, loses 1e-4 to 1e-3 in the force
+for a gamma = 1.5 cusp at 30-100 r_s).
+
+**Accuracy and cost** (RTX 3080 Laptop, p = 0.8, q = 0.5, r <= 40 r_s, 32 nodes):
+
+| profile | precision | force err | ms / 1e6 particles |
+|---|---|---|---|
+| NFW + cutoff, Hernquist, Jaffe (alpha=1, integer slopes: fast path) | float64 | ~1e-14 | 14 |
+| general (e.g. alpha=2, beta=3.5, gamma=0.7) | float64 | ~3e-9 | 28 |
+| either | **float32** | ~5e-7 | **0.4** |
+| Agama Spheroid → Multipole, lmax=6 (static only) | float64 | ~1e-3 vs exact | 51 |
+| spherical `NFWPotentialGPU` (reference) | float64 | — | 0.8 |
+
+Kernels read the float64 `(N,3)` positions directly, scale by `1/a` in
+float64 and convert to `T` in registers, then write float64 results: the same
+pattern as the tree code's `(float)(p - c)` recentring, with no separate cast
+or negation passes, so `force()` costs exactly the kernel time. Any `center=`
+shift is subtracted in float64 (`ShiftedPotentialGPU`) before the kernel sees
+the positions, the analogue of the tree's recentring on the density peak.
+
+`precision='float32'` is the counterpart of the `float32` self-gravity
+kernels: errors ~1e-6 (potential, Hessian) and ~5e-7 (force), 35-70x
+faster on a consumer GPU (see [Single precision](#single-precision-precision)).
+
+Force derivatives reach ~1e-7 at 32 nodes; `nodes=64` gives ~1e-12 for
+both at twice the cost. Validated against Agama's exact triaxial `Dehnen`,
+the closed-form spherical NFW, Agama's Multipole as lmax grows (it converges
+to this kernel), finite differences and Poisson's equation
+(`agama_helper/tests/test_spheroid_shape.py`).
+
+Consumer GPUs run FP64 at 1/64 of the FP32 rate, so the cost is the count of
+`pow`/`exp` per node; the fast path (alpha = 1 with integer `gamma` and
+`beta - gamma`, and `cutoffStrength = 2`) replaces them with multiplications.
 
 ### Factory: `PotentialGPU(...)`
 
@@ -853,7 +1081,8 @@ read back. Rebuild from the same array or file you gave Agama.
 | Multipole l=0 (monopole) | ~1e-12 | ~1e-12 |
 | Multipole l>0 harmonics | ~1e-7 | ~1e-5 |
 | Disk composite (DiskAnsatz + Multipole lmax=32) | ~1e-6 | ~2e-6 |
-| Analytic (NFW, Hernquist, etc.) | ~1e-15 | ~1e-15 |
+| CylSpline (pointwise, on the grid; off it see CylSpline section) | ~1e-15 | ~1e-14 (max 2e-11) |
+| Analytic (NFW, Hernquist, etc.) | ~1e-15 | ~1e-15 (float32: ~1e-7) |
 | `UniformAcceleration` (constant and time-dependent) | ~1e-14 | ~1e-15 |
 
 l>0 errors are a numerical floor from log-scaling derivative cancellation —

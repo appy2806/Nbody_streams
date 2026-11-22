@@ -7,7 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-21
+
+Highlights: GPU tree to 2^29 particles with an accurate memory guard and
+recovery from build-buffer overflow (4.8e8 particles in 6.0 s per force call
+on an H200); small-N GPU direct sum 2-5x faster per step; float32 and
+mixed-precision host potentials (analytic, Multipole, CylSpline) and
+time-dependent triaxial Spheroids; CylSpline matching Agama to machine
+precision; coefficient time series and comoving FIRE hosts; softening-kernel,
+restart and rendering fixes; `benchmarks/`.
+
 ### Added
+
+- **`nbody_streams.tree_gpu.set_memory_fraction(f)` / `get_memory_fraction()`.**
+  The GPU tree memory guard plans for 80% of the free GPU memory by default;
+  raise it on a dedicated GPU (H200: ~4.2e8 -> ~4.9e8 particles per call at
+  0.95; measured 4.8e8 at 6.0 s per call, 108.6 GB).
+- **`benchmarks/`**: `timing_sweep.py` (CPU direct, FMM, GPU direct and tree
+  against N), `max_n.py` (largest N and peak memory per GPU), `plot_timings.py`
+  (the README figure, now with the L40), `large_n_check.py` (tree forces
+  above 2^28 particles against a float64 direct sum) and a Slurm job script.
+- **`pip install` builds the GPU tree library.** A new `setup.py` runs the
+  `tree_gpu` Makefile during `build_py` (editable and regular installs), so
+  `libtreeGPU.so` is installed with the package instead of needing a separate
+  `make`. Without `nvcc` / `make` in `PATH` the install still succeeds and
+  prints a warning; `NBODY_STREAMS_BUILD_TREE=1` makes the build mandatory and
+  `0` skips it. Rebuild later with `nbody-build-tree` (e.g. on a cluster GPU
+  node, after a GPU or CUDA change).
+
+- **Mixed precision Multipole: `MultipolePotentialGPU(precision='float32')`.**
+  The l > 0 harmonic sums run in float32; r, log r, the l = 0 term with its
+  log-scaling, the extrapolation and the final combination stay float64.
+  Force within ~1e-8 of float64 (max 5e-7) on m12i; 33.5 -> 3.7 ms per 1e6
+  forces at lmax = 8 (12.1 -> 2.1 ms at lmax = 4) on an RTX 3080 Laptop.
+  `precision=` now reaches every component of an INI file or composite,
+  `load_agama_potential` / `load_agama_evolving_potential(gpu=True)`, and the
+  types Agama builds as a Multipole (Spheroid, King, Disk, triaxial Dehnen).
+  The Multipole potential/force kernels read the (N,3) array and write the
+  force directly (no column copies or negation pass), and take cos/sin(phi)
+  from x/R, y/R instead of atan2 + sincos.
+
+- **Mixed precision CylSpline: `CylSplinePotentialGPU(precision='float32')`.**
+  The m != 0 harmonics run in float32; the asinh coordinates, grid search,
+  m = 0 term, outer region and combination stay float64. m12i baryons at
+  mmax = 8: 21.7 -> 3.5 ms per 1e6 forces (float64 path 14.6 ms), within
+  ~5e-9 of float64 (max 8e-7). Whole m12i host: 47.1 -> 6.6 ms; a 1e6-particle
+  GPU-tree step 75.5 -> 38.0 ms (RTX 3080 Laptop).
+
+
+- **Time-dependent halo shapes: `SpheroidPotentialGPU`.** Agama's Spheroid
+  density (same keywords; also NFW and Dehnen) with `axisRatioY`,
+  `axisRatioZ`, `mass` or `densityNorm` given as `[t, value]` tables. The
+  potential is evaluated directly from the density with the homoeoid-theorem
+  1D integral, so the shape can change every step without rebuilding
+  anything, and there is no lmax truncation. `PotentialGPU(type='Spheroid' |
+  'NFW' | 'Dehnen', ...)` routes here only when one of those keywords is a
+  table; static shapes keep the Agama Multipole route unchanged. `mass=`
+  holds the mass inside every ellipsoid fixed as the shape changes. Force
+  ~1e-14 to ~3e-9, 14-28 ms per 1e6 particles (RTX 3080 Laptop, FP64), versus
+  51 ms for the lmax=6 Multipole route. `precision='float32'` runs the
+  kernels in single precision (~5e-7 force, 0.4 ms per 1e6 particles);
+  inputs and outputs stay float64. Composes with `rotation=`,
+  `orientation=`, `center=`, `scale=`.
 
 - **GPU rotation modifiers.** `TiltedPotentialGPU` (`orientation=`) and
   `RotatingPotentialGPU` (`rotation=`, constant angle or `[t, angle]` table)
@@ -17,7 +78,155 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   This makes time-dependent tilts (e.g. a halo tumbling about x) run fully on
   the GPU. `euler_matrix()` gives Agama's orientation matrix.
 
+### Changed
+
+- **Restart files are written uncompressed and atomically**, with constant
+  mass / softening stored as one value (or one per species), as in the
+  snapshots; the loader expands them and still reads older files.  At 1e7
+  particles 0.7 s instead of 15.3 s (zlib on one core took minutes at 1e8+).
+  `restart_interval=None` (or 0) turns restart files off, including the final
+  one, in `run_nbody_gpu`, `run_nbody_cpu`, `run_nbody_gpu_tree` and
+  `run_simulation`.
+- **Integrator timing summaries separate integration from output**: ms/step
+  and steps/s exclude snapshot and restart writes (the tree's "ms/step"
+  previously included the final restart, e.g. 161 s/step for 3.6 s steps).
+- **`fast_sims` uses Agama's `separateTime=True` orbit output** in all
+  `agama.orbit` calls (`create_particle_spray_stream`, `run_restricted_nbody`,
+  the progenitor rewind and the perturber orbit), ahead of it becoming Agama's
+  only format. Results are bit-identical; the `FutureWarning` is gone.
+- **GPU tree: 2^29 particles and cells, smaller buffers, an accurate memory
+  guard.** The particle index has 29 bits (was 28) and the cell level moved
+  out of `CellData` (cells 2^27 -> 2^29 - 1). Initial build buffers are sized
+  from measured usage (200 -> 151 B/particle at allocation, ~238 -> 188 after
+  a call); `TreeGPU` and `run_nbody_gpu_tree` raise `ValueError` when N would
+  not fit in 80% of free GPU memory (the old 52 B/particle estimate admitted
+  ~5x too many particles). Forces bitwise unchanged; new `TreeGPU.build_stats()`.
+- **GPU direct sum: source loop split across blocks at small N.** When the
+  grid cannot fill the GPU, up to 16 slices each sum part of the sources and a
+  reduction kernel adds them in a fixed order (deterministic, no atomics); S is
+  chosen from the device's SM count and occupancy. `run_nbody_gpu` (float32,
+  L40) per step: 2.2x faster at N = 1e3, 5.5x at 1e4, 2.1x at 3e4, 1.03x at
+  1e5; kernel-only 1.6-8.5x at N <= 16k (float64 4-7x at N <= 4k). Large grids
+  keep the unsplit kernel, bitwise unchanged; below the threshold (GPU
+  dependent, ~870k particles on an L40) only the summation order changes
+  (float32 ~1e-6, float64 ~1e-15 relative).
+- Direct-sum CUDA kernels moved to `nbody_streams/cuda/` (`.cu` + shared
+  `softening.cuh`); softening is a compile-time choice and the self pair is
+  masked only on the diagonal tile. Float32 Plummer forces 2.1x faster at
+  N >= 65k (3.2x at 16k), spline 1.4-1.6x (RTX 3080 Laptop). Same results.
+- CylSpline potential/force kernels compute the cell geometry once per
+  particle and cos/sin(m phi) by recurrence (no atan2 / cos / sin per
+  harmonic), read the (N,3) array and write the force directly.
+- The CylSpline module keeps `-Xptxas -O0` (Hopper ptxas workaround) only on
+  compute capability >= 9.0.
+
+
+- **Fewer passes in the GPU direct-sum integrator** (`run_nbody_gpu`). Mass
+  and softening are cast to the force precision once (a per-particle
+  softening array was re-uploaded every step), positions and masses are
+  packed into float4 in one kernel, the force kernel's x/y/z output feeds a
+  fused closing kick (self + external + kick, in place), and kick + drift is
+  one kernel. 2.7-2.9x faster per step at N = 1e3, ~25% at 3e3, ~8% at 1e4
+  (RTX 3080 Laptop); results agree with the old loop to rounding (1e-15
+  km/s after two steps). `compute_nbody_forces_gpu` packs float4 and
+  assembles its output in one kernel each (bitwise unchanged).
+- **Analytic GPU kernels return the force and `-Hessian` directly**, reading
+  the float64 `(N,3)` positions in-kernel: the separate negation and
+  per-axis slicing passes are gone, 1.2-3x faster in float64 too.
+- **Fewer passes around the GPU tree.** `tree_gravity_gpu` writes the
+  recentred float32 positions straight into the tree's SoA layout, finishes
+  with one kernel (layout, self-term, G), and checks a softening array only
+  the first time a tree handle sees it (the check cost a host sync).
+  `run_nbody_gpu_tree` updates positions, velocities and acceleration in
+  place with two fused kick kernels. 1.9 -> 0.8 ms per step at 1e6 particles;
+  tree forces are bitwise unchanged, and the kick increment `h a` is now
+  formed in float64 also without an external potential.
+
+
+- **`MultipoleCoefs.to_coef_string()` raises when `dphi_dr is None`.**  Agama
+  fails with `RuntimeError: Error loading Multipole potential` on a
+  `#Phi`-only Multipole file, so writing one is now refused up front rather
+  than deferred to load time.  A `#Phi`-only *CylSpline* file does load (Agama
+  reconstructs the derivatives, ~7e-5 relative error on `Phi`) and stays a
+  legal fallback.
+
+- **`load_agama_evolving_potential(..., gpu=True)` skips the text round-trip**
+  when the source is already a coefficient object, feeding the arrays straight
+  to `_build_multipole_data` / `_build_cylspline_data`.  This is
+  precision-preserving, not merely faster: the text format writes `%.13g` /
+  `%.14g`, which truncates float64.  Verified bit-identical potential and force
+  against the string path on fixtures quantised to the text format.
+
 ### Fixed
+
+- **CPU surface-density rendering lost mass** (`render_surface_density(...,
+  arch='cpu')`): `grid[i, j] += ...` inside Numba `prange` is a data race,
+  not the per-thread reduction the code assumed, so overlapping particles
+  dropped deposits (up to 2x per pixel in dense regions; intermittent test
+  failure).  Each thread now splats into a private grid, summed by rows;
+  deterministic, ~1.5x slower.
+- `run_nbody_cpu` with its defaults raised (`kernel=1` with `method='direct'`);
+  the kernel now defaults from the method (`'spline'` direct, 1 tree), as
+  documented.
+- **GPU tree with very few particles** (`tree_gravity_gpu`, N = 1-2 always,
+  N = 3-4 or a few more than `nleaf` coincident particles sometimes) hit a
+  device assert in `buildOctant` that killed the CUDA context (e.g. the bound
+  subset of a dissolved satellite). The cell buffer has a 65536-cell floor
+  (2.6 MB) and the off-by-one in the cell and node-pool overflow checks is
+  fixed. N = 0 returns empty `(0, 3)` / `(0,)` float32 arrays (it hung);
+  `TreeGPU(n)` with negative or non-integer `n` raises `ValueError`.
+- **GPU tree build overflow no longer kills the CUDA context.** Inputs with
+  thousands of > `nleaf` coincident clumps (e.g. 4000 x 17 identical positions,
+  N = 68k) overflowed the node pool / cell list and hit a device assert. The
+  build now flags the overflow without any out-of-bounds write
+  (compute-sanitizer clean), grows the buffers (>= 2x, kept on the handle) and
+  rebuilds; the result is bitwise equal to a large-enough handle. Normal-path
+  speed unchanged (L40, within 1%); an unrecoverable case raises `RuntimeError`.
+- `python_requires` was `<=3.13`, which rejects every 3.13 patch release
+  (pip refused Python 3.13.9); now `<3.14`.
+- **Dehnen K2 force** used `3.75 h^4` instead of `1.875 h^4` (CUDA and CPU),
+  inconsistent with its potential. K2 accelerations change by up to ~10% of
+  max |a| inside the softening length.
+- **Spline potential** for q <= 0.5 used `q^4` for `q^2` (discontinuous at
+  q = 0.5); potentials change by up to 0.23%. Forces unchanged.
+- CPU Dehnen K2 potential used `d^-2` instead of `d^-5/2` (up to 0.9%).
+- **CylSpline now matches Agama to machine precision on the grid** (force
+  1e-14 typical, was 1e-4 to 2e-3 with 0.5% in the inner disk). The
+  associated-Legendre recurrence used for the outer asymptote
+  (`_sph_harm_agama[_vect]`, `sphHarm_device`) took P_{l-3} for P_{l-2}, so
+  the asymptote fit was wrong from l = 2 up, and through `Mtot` so was
+  `Rscale`, the coordinate scale of the whole spline. `Mtot` now comes from
+  the asymptote on the z axis, as in Agama. Off the grid the force includes
+  dPhi/dtheta (dropped, with a wrong-signed Jacobian) and the Hessian is
+  exact (was monopole-only); on the grid the Hessian has the dPhi/dphi terms
+  of non-axisymmetric harmonics (Hxx, Hyy, Hxy were up to 18% off). On the z
+  axis all quantities are the limit along +x (the Hessian assumed
+  axisymmetry). New pointwise tests (`test_cylspline_agama.py`).
+
+- **Agama difference, recorded:** off the grid Agama evaluates only the
+  m = 0, even-l terms of its fitted CylSpline asymptote (`PowerLawMultipole`
+  takes its (l, m) set from the all-zero `U` array). The GPU keeps every
+  term, which makes the potential 13x closer to continuous across the grid
+  edge for m12i; there the two differ by ~1%.
+
+- Multipole force exactly on the -z axis had the wrong sign in its x/y
+  component from m = 1 terms (the pole limit of Y_l1/sin(theta) is
+  -dY/dtheta there); also in the Hessian kernel.
+
+- **`precision='float32'` for the analytic GPU potentials.** NFW, Plummer,
+  Hernquist, Isochrone, MiyamotoNagai, LogHalo, spherical Dehnen,
+  DiskAnsatz and UniformAcceleration (and `PotentialGPU(type=..., precision=)`)
+  run their arithmetic in single precision: ~1e-7 typical error, ~0.12 ms
+  per 1e6 forces (bandwidth floor) versus 0.2-1.5 ms in float64 on an RTX
+  3080 Laptop. Inputs and outputs stay float64. Multipole-backed types raise
+  for float32.
+
+
+- Cancellation in the analytic kernels: NFW force/Hessian at r << rs
+  (2e-11 at 1 pc), cusp Hessians' radial component, `DiskAnsatz` potential
+  near the midplane (1e-2 at |z| < 1e-3 h), Dehnen potential at r >> a,
+  isochrone density at r >> b.
+
 
 - `ShiftedPotentialGPU` accepted only CuPy positions; NumPy input now works
   (it is moved to the GPU, like the other modifiers).
@@ -166,23 +375,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `NBODY_STREAMS_POT_DIR`) at your own coefficient archives; the models are not
   shipped with the package.
 
-### Changed
-
-- **`MultipoleCoefs.to_coef_string()` raises when `dphi_dr is None`.**  Agama
-  fails with `RuntimeError: Error loading Multipole potential` on a
-  `#Phi`-only Multipole file, so writing one is now refused up front rather
-  than deferred to load time.  A `#Phi`-only *CylSpline* file does load (Agama
-  reconstructs the derivatives, ~7e-5 relative error on `Phi`) and stays a
-  legal fallback.
-
-- **`load_agama_evolving_potential(..., gpu=True)` skips the text round-trip**
-  when the source is already a coefficient object, feeding the arrays straight
-  to `_build_multipole_data` / `_build_cylspline_data`.  This is
-  precision-preserving, not merely faster: the text format writes `%.13g` /
-  `%.14g`, which truncates float64.  Verified bit-identical potential and force
-  against the string path on fixtures quantised to the text format.
-
-### Fixed
 
 - **`agama_helper` no longer needs CuPy to import.**  CuPy is an optional extra
   (`nbody_streams[cuda]`), but `agama_helper/__init__.py` imported

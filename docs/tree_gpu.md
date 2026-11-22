@@ -10,16 +10,23 @@ Optional dependency: **CuPy** (required at import time).
 
 ## Building the shared library
 
-The shared library must be compiled before the subpackage can be imported:
+`pip install` builds the shared library automatically when `nvcc` and `make`
+are in `PATH` (see `setup.py`; `NBODY_STREAMS_BUILD_TREE=1` makes the build
+mandatory, `0` skips it).  To rebuild in place, in either an editable or a
+regular install:
 
 ```bash
-cd nbody_streams/tree_gpu
-make -j$(nproc)          # builds libtreeGPU.so alongside the source files
+nbody-build-tree                 # make -j$(nproc) in the installed tree_gpu/
+nbody-build-tree --clean-all     # remove objects and the library first
 ```
 
-The Makefile auto-detects the GPU architecture via `nvidia-smi` / CuPy.  If
-`libtreeGPU.so` is absent, importing `nbody_streams.tree_gpu` raises an
-`ImportError` with the build command printed in the message.
+or run `make -j$(nproc)` in `nbody_streams/tree_gpu/` of a source checkout.
+
+The Makefile detects the GPU architecture with `nvidia-smi` (or CuPy) and
+falls back to `sm_80` plus PTX when no GPU is visible, so on a cluster build
+on a GPU node.  If `libtreeGPU.so` is absent, importing
+`nbody_streams.tree_gpu` raises an `ImportError` with the build command in
+the message.
 
 ---
 
@@ -117,7 +124,7 @@ context manager.
 
 | Name | Type | Description |
 |------|------|-------------|
-| `n` | int | Number of particles. Must not exceed available VRAM (80% free, capped at 28-bit Particle4 index). |
+| `n` | int | Number of particles. `ValueError` if the tree would not fit in 80% of the free GPU memory (`set_memory_fraction` changes the fraction), or above 2^29 (the particle-index limit); see [GPU memory layout](#gpu-memory-layout). |
 | `eps` | float | Default fallback softening length. |
 | `theta` | float | Barnes-Hut opening angle, in (0, 1.15). |
 | `verbose` | bool | Print timing from C++ layer. |
@@ -125,6 +132,9 @@ context manager.
 **Attributes and methods**
 
 - `theta` — settable property; the new value applies from the next force call.
+- `build_stats()` — dict with the last build's `cells`, `nodes`, `leaves`,
+  `levels`, `work_items` and the build capacities `cell_capacity`,
+  `node_capacity`, `work_capacity` (these grow when a build overflows them).
 - `close()` — free GPU memory.
 - Context manager: `__enter__` / `__exit__` call `close()`.
 
@@ -222,7 +232,7 @@ evaluations through `tree_gravity_gpu`.
 | `save_snapshots` | bool | Write HDF5 snapshots. Default True. |
 | `snapshots` | int | Number of snapshots to write. Exactly this many datasets are produced, ids `000`..`snapshots-1`, the last one at `time_end`. Default 100. |
 | `num_files_to_write` | int | Distribute snapshots across this many HDF5 files. Default 1. |
-| `restart_interval` | int | Save restart checkpoint every N steps. Default 1000. |
+| `restart_interval` | int or None | Save restart checkpoint every N steps and at the end. Default 1000; `None` or 0 writes no restart files. The closing summary reports integration and output time separately. |
 | `continue_run` | bool | Resume from an existing restart file. Default False. |
 | `overwrite` | bool | Delete existing snapshot files before starting. Default False. |
 | `verbose` | bool | Print header, progress (rate/ETA), and snapshot messages. Default True. |
@@ -327,6 +337,22 @@ tree should see positions measured from the system it resolves:
 
 Energy diagnostics are computed in float64.
 
+### Passes around the tree
+
+At N = 1M the work outside the tree walk is 0.8 ms per step (it was 1.9 ms):
+
+- `tree_gravity_gpu`: one kernel subtracts the centre, casts to float32 and
+  writes the `(3, N)` layout the tree reads (`to_float32_relative_soa`); one
+  kernel after the walk transposes the accelerations, removes the self term
+  from `phi` and multiplies by `G`, with the same float32 operations as
+  before (outputs are bitwise unchanged). With a `TreeGPU` handle, an `eps`
+  array is checked for positive values only the first time that array object
+  is passed (the check costs a host sync).
+- `run_nbody_gpu_tree`: positions, velocities and the total float64
+  acceleration are updated in place by two kernels per step, kick + drift
+  and (self-gravity + external) + kick. The kick increment `h a` is formed in
+  float64 in both cases.
+
 ---
 
 ## `G_DEFAULT`
@@ -353,22 +379,31 @@ packed_data = { x, y, z, mass/idx }
 ```
 
 The `.w` field is dual-purpose: during the tree walk it holds the particle
-mass.  During tree construction the lower 28 bits encode the sorted particle
-index and the lowest 4 bits encode the octant, using `__float_as_int` /
-`__int_as_float` bit-casting.  This limits particle count to 2^28 ≈ 268M.
+mass.  During tree construction its bits hold `(idx << 3) | octant`: the
+original particle index in bits [31:3] and the octant (0..7) in bits [2:0],
+via `__float_as_uint` / `__uint_as_float` (the `double` specialisation uses
+the low 32 bits of the double's bit pattern).  This limits the particle count
+to 2^29 = 536,870,912 (`PARTICLE4_MAX_N`; was 2^28 with a 4-bit octant field).
 
 **`CellData`** (`Treecode.h`)
 
 Each tree cell is packed into a `uint4` (128 bits):
 
 ```
-packed_data.x  bits[31:27] = tree level (5 bits)
-               bits[26:0]  = parent cell index
-packed_data.y  bits[31:29] = n_children - 1 (3 bits, 0=leaf)
+packed_data.x  = parent cell index (32 bits)
+packed_data.y  bits[31:29] = n_children - 1 (3 bits)
                bits[28:0]  = first child index (or 0xFFFFFFFF for leaf)
 packed_data.z  = particle begin index (pbeg)
 packed_data.w  = particle end index (pend)
 ```
+
+The cell's tree level is not stored: the build writes it straight into the
+level-sort key array (`d_key`), which `buildTree` sorts to order the cells by
+level.  (It used to occupy bits [31:27] of `.x`, which limited the parent
+index, and so the cell count, to 2^27.)  The 29-bit first-child index limits
+the cells to 2^29 - 1 (`CELLDATA_MAX_CELLS`); below that a node's `.y` can
+never equal the leaf marker.  `Particle4` and `CellData` round trips at these
+limits are checked by `tree_selftest_packing()` (`tests/test_limits.py`).
 
 `isLeaf()` returns true when `.y == 0xFFFFFFFF`.
 
@@ -400,7 +435,7 @@ executes four CUDA kernels in sequence:
 #### Phase 1 — `buildTree`
 
 1. Bounding-box reduction over all particle positions (warp-level `fminf`/`fmaxf`, then inter-warp shared-memory reduction).
-2. Octree construction: **host-driven iterative build** (replaced CDP1 recursive kernel launches for CUDA 12 compatibility).  Each split of a cell scatters its particles into octants (no particle sort by space-filling-curve key happens here) and appends work items for children that need further splitting to a `PendingWork` queue.  Per level, the host reads the queue back, buckets the items by grid size (a power of two, at most 10 buckets), uploads them to a second queue and launches **one batched kernel per bucket** (`buildOctantBatch`: `blockIdx.z` = work item, `blockIdx.y` = octant).  This replaced one launch per work item (~7000 launches per build at N = 1M; build time 30 ms -> 6 ms on an RTX 3080 Laptop).  The queues hold `max(262144, N/16 + 1)` work items, sized at allocation: nodes split at one level are disjoint and each holds more than `nleaf` >= 16 particles, so N/16 always suffices.  (This was a fixed 262144, which overflowed near ~20M particles.)
+2. Octree construction: **host-driven iterative build** (replaced CDP1 recursive kernel launches for CUDA 12 compatibility).  Each split of a cell scatters its particles into octants (no particle sort by space-filling-curve key happens here) and appends work items for children that need further splitting to a `PendingWork` queue.  Per level, the host reads the queue back, buckets the items by grid size (a power of two, at most 10 buckets), uploads them to a second queue and launches **one batched kernel per bucket** (`buildOctantBatch`: `blockIdx.z` = work item, `blockIdx.y` = octant).  This replaced one launch per work item (~7000 launches per build at N = 1M; build time 30 ms -> 6 ms on an RTX 3080 Laptop).  The queues hold `max(16384, N/32 + 1)` work items initially (grown on overflow, see [GPU memory layout](#gpu-memory-layout)); the most measured is 0.017 N, for a very thin straight filament (<= 0.0074 N in 3-D).
    Depth is capped at level 30 (`TREE_MAX_LEVEL`): children created there become leaves even if they hold more than `nleaf` particles, so particles that cannot be separated (exact duplicates, or closer than the float resolution of the box) end up in one oversized leaf whose forces the walk sums directly.  Balanced trees are ~15-20 levels deep, so the cap never triggers in normal use.
 3. Cells are then stable-sorted by tree level (Thrust `stable_sort_by_key`) so each level is contiguous.
 4. A permutation array `d_origIdx[tree_idx] = original_user_idx` is built so output forces can be returned in user order.
@@ -544,20 +579,118 @@ reused, and Thrust sort
 scratch goes through a caching allocator owned by the tree.  The cell arrays
 grow (never shrink) with the number of cells.  The main allocations:
 
-| Buffer | Size | Purpose |
-|--------|------|---------|
-| `d_ptclPos`, `d_ptclAcc` | N × 16 bytes (float4) | Particle positions, accelerations |
-| `d_ptclEpsTree` | N × 4 bytes | Per-particle softening (tree order) |
-| `d_stack_memory_pool` | `max(N/5, 65536) × 96 × 4` bytes | Build-tree stack (≈ 24 MB for N=1M) |
-| `d_cellDataList` | N × 16 bytes | Cell metadata |
-| `d_cellMonopole`, `d_cellQuad0/1` | N × 16 + 8 bytes | Monopole + quadrupole moments |
-| `d_cellEpsMax` | N × 4 bytes | Per-cell max softening |
-| `d_cellComD`, `d_cellBoxMin/Max` | nCells × 64 bytes | Bottom-up multipole scratch |
-| Build scratch (`d_build_workQueue`, `d_build_workQueueIn`) | 2 × `max(262144, N/16) × 64` bytes (32 MB up to N = 4M; 8 bytes/particle above) | Host-driven build queues |
-| Walk pool (`d_gmem_pool`) | 2 MB per persistent block | e.g. 384 blocks ≈ 768 MB on a 48-SM GPU; capped at 1/4 of free memory |
+| Buffer | Size | Bytes/particle |
+|--------|------|----------------|
+| `d_ptclPos`, `d_ptclVel`, `d_ptclPos_tmp`, `d_ptclAcc` | 4 × N × 16 (float4) | 64 |
+| `d_ptclEpsTree`, `d_origIdx` | 2 × N × 4 | 8 |
+| `d_stack_memory_pool` (node pool) | `max(N/8, 16384)` × 96 × 4 initially (grown on overflow) | 48 |
+| `d_cellDataList` (+ `_tmp`, `d_key`, `d_value`) | `max(0.6 N + 64, 65536)` × (16+16+4+4) initially (grown on overflow) | 24 |
+| `d_leafList` | `min(N, cell capacity)` × 4 | 2.4 |
+| Build work queues (`d_build_workQueue`, `...In`) | 2 × `max(N/32 + 1, 16384)` × 64 initially (grown on overflow) | 4 |
+| **at allocation** | | **151** (was 200) |
+| Cell multipoles, sizes, eps, COM, boxes (8 arrays) | nCells × 124, allocated by the first call | 7 (nleaf 64) - 45 (nleaf 16) |
+| `d_groupList` | N × 8 | 8 |
+| Thrust scratch (level sort, group sort) | ~16 × nCells, cached | 1 - 6 |
+| Walk pool (`d_gmem_pool`) | 2 MiB per persistent block, 6 blocks per SM, capped at 1/4 of free memory | fixed: 576 MiB (48 SMs), 1.7 GiB (L40, 142 SMs), 1.6 GiB (H200) |
 
-Total VRAM for N = 1M particles: approximately **700 MB** before quadrupole
-storage.  `TreeGPU` checks that 80% of free VRAM is available before allocating.
+Measured with `cudaMemGetInfo` around `TreeGPU(N)` plus one
+`tree_gravity_gpu` call (slope between N = 1e7 and 5e7, Plummer, L40):
+**188 B/particle at nleaf = 16, 166 at nleaf = 64** (before: 238 / 216),
+plus the fixed walk pool; the most-cells tree measured (a cubic lattice at
+5e7, nleaf = 16, 0.37 N cells) takes 208 (before: 258).  Each `tree_gravity_gpu` call also allocates, from the CuPy
+pool, 41 B/particle: float32 SoA positions (12), SoA acceleration (12) and
+potential (4), and the returned (N, 3) acceleration (12); the returned acc
+and phi (16) stay with the caller.
+
+Usage measured with `TreeGPU.build_stats()` (maximum over N = 1e5 - 5e7,
+nleaf = 16; with nleaf = 64 cells are <= 0.083 N):
+
+| Input | cells / N | nodes / N | work items / N |
+|-------|-----------|-----------|----------------|
+| Plummer | 0.243 | 0.032 | 0.0020 |
+| Hernquist | 0.237 | 0.031 | 0.0012 |
+| Dehnen gamma = 1.5 cusp | 0.237 | 0.031 | 0.0012 |
+| Cold stream (arc, width 0.05 of 20) + core | 0.268 | 0.038 | 0.0057 |
+| Thin exponential disc (h_z / R_d = 0.02) | 0.251 | 0.044 | 0.0048 |
+| Uniform cube | 0.349 | 0.045 | 0.0073 |
+| Cubic lattice | 0.369 | 0.046 | 0.0074 |
+| Straight filament (width 1e-4 of length) | 0.274 | 0.067 | 0.0174 |
+| **initial capacity** | **0.6** | **0.125** | **0.031** |
+
+The initial capacities are >= 1.5x every measured case (1.63x for cells,
+1.86x for nodes, 1.8x for work items), so realistic inputs never grow them;
+0.6 N cells also covers the ~0.54 N of a uniform distribution with ~17
+particles in every cell of one level.  The cell multipole arrays are sized
+to the actual cell count, not the capacity.
+
+**Memory guard.**  `TreeGPU(N)` raises `ValueError` unless
+
+    N × (216 + 40) + 64 MiB + walk pool  <=  f × free GPU memory
+
+and N <= 2^29: 216 B/particle covers the tree after a call for trees of up
+to 0.4 N cells (the most measured is 0.37 N), 40 the per-call arrays above;
+the remaining 1 - f (default f = 0.8) absorbs allocator rounding and CuPy
+pool growth.  (It used
+52 B/particle, admitting ~5x more particles than fit.)  `run_nbody_gpu_tree`
+checks before it creates its handle (its float64 pos/vel, float32/float64
+masses and float32 softening, 64 B/particle, already exist and count as used)
+with a further 128 B/particle: the float64 total acceleration (24), the
+previous step's float32 acc and phi, alive during the next tree call (16),
+the (N, 6) float64 pos/vel concatenation for snapshots and restarts (48) and
+CuPy pool fragmentation between them (~40; measured, the pool peaks at 232
+B/particle with snapshots, 196 without), plus 24 for the float64 external
+acceleration when `external_potential` or `force_extra` is given (the
+potential's own scratch is not counted).
+
+Largest N the guard admits, from total memory M with ~0.5 GB taken by the
+CUDA context and the inputs already on the GPU (a one-off call with float64
+positions: 32 B/particle; `run_nbody_gpu_tree`: 64):
+
+| GPU memory | `tree_gravity_gpu` | `run_nbody_gpu_tree` (no external) | (with external) |
+|------------|--------------------|------------------------------------|-----------------|
+| 16 GB (RTX 3080 Laptop, 48 SMs) | ~45M | ~29M | ~28M |
+| 48 GB (L40, 45 GiB usable, 142 SMs) | ~129M | ~84M | ~79M |
+| 141 GB (H200, 132 SMs) | ~422M | ~273M | ~259M |
+| 192 GB (B200, 148 SMs) | 537M (2^29 index limit; memory ~577M) | ~374M | ~354M |
+
+On a dedicated GPU, raise f to plan for more of the memory:
+
+```python
+import nbody_streams.tree_gpu as tg
+tg.set_memory_fraction(0.95)   # returns the previous value; get_memory_fraction() reads it
+```
+
+The 216 B/particle term is the worst distribution measured (a cubic lattice
+at `nleaf = 16`); smooth distributions need ~10-20% less, so 0.95 is safe for
+them.  Above the default an unusual distribution can run out of memory inside
+the build, which ends the process.
+
+Checked on an L40 with 25 GiB free (other users held the rest): the largest
+N the guard admits for a one-off call (72M, cubic lattice, nleaf = 16) peaked
+at 78% of the free memory.
+
+With the old 52 B/particle guard the laptop admitted ~220M particles (capped
+at 2^28) for a tree that fit only up to ~45M even with all of the memory.
+
+The node pool, cell list and work queues are sized for typical trees, not
+for the worst case: a rigorous bound would need ~2.7 N cells and ~1.7 N node
+slots (~65 GB of node pool at N = 1e8), because a clump of more than `nleaf`
+(nearly) coincident particles becomes a chain of ~25 single-child nodes down
+to the depth cap.  Inputs with thousands of such clumps (e.g. 4000 clusters of
+17 identical positions, N = 68k) exceed them.  The build then recovers: a
+block whose allocation would exceed a capacity writes no tree data (no cell,
+node-pool slot, work item or leaf), finalises its particles as leaves would,
+and sets an overflow flag; the counters keep counting.  `buildTree` reads the
+flag with the counters it always reads back (no extra synchronisation),
+restores the input particle order, grows each overflowed buffer to
+`max(2 × capacity, 1.5 × count reached)` and builds again.  The buffers stay
+grown on the handle, so a `TreeGPU` reused across steps pays this once; the
+rebuilt tree is bitwise the one a big-enough handle builds.  With
+`verbose=True` each round prints a `treeGPU: tree build overflowed` line to
+stderr.  If a buffer cannot grow (index-packing cap: 2^29 - 1 cells, which
+also bounds nodes and work items; or out of GPU memory) `tree_gravity_gpu` raises
+`RuntimeError`.  For testing, `TREEGPU_DEBUG_BUILD_CAPACITY=k` (read when a
+handle is allocated) starts all three buffers at k entries.
 
 ---
 
@@ -630,6 +763,6 @@ argument marshalling and the two-sort permutation to restore user order.
 
 - **Single GPU only** — the ctypes interface always operates on device 0.  Multi-GPU support would require per-device `Tree*` instances and explicit `cudaSetDevice` calls in the C interface.
 - **float32 tree** — the tree itself works in float32; see [Precision](#precision) for how `run_nbody_gpu_tree` keeps this from limiting compact structure far from the origin, and what direct callers of `tree_gravity_gpu` should do.
-- **Device-side failures terminate the process** — device-side checks call `assert` / `exit`, which kills the Python process rather than raising an exception.  Pipeline phases are not synchronised individually; set the environment variable `TREE_SYNC_CHECK=1` to synchronise after each phase so an execution error is reported at the kernel that caused it.
+- **Device-side failures terminate the process** — device-side checks call `assert` / `exit`, which kills the Python process rather than raising an exception.  (Build-buffer overflow is not one of them: it is detected and the buffers grow, see [GPU memory layout](#gpu-memory-layout).)  Pipeline phases are not synchronised individually; set the environment variable `TREE_SYNC_CHECK=1` to synchronise after each phase so an execution error is reported at the kernel that caused it.
 - **Fixed timestep only** — `run_nbody_gpu_tree` uses a global fixed dt (KDK leapfrog).  Individual/block timesteps are not implemented.
 - **No periodic boundary conditions** — the bounding box is recomputed from actual particle positions each step.

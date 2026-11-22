@@ -507,6 +507,7 @@ def create_particle_spray_stream(
     time_sat, orbit_sat = agama.orbit(
         ic=sat_cen_present, potential=pot_host_eff,
         time=-time_total, timestart=time_end, trajsize=N,
+        separateTime=True,
     )
 
     # Reverse to forward-time order
@@ -658,17 +659,17 @@ def create_particle_spray_stream(
                 f"Integrating {len(ic_stream) - 2} stream particles "
                 f"to t={time_end:.3f} (single snapshot)."
             )
-        part_xv = np.concatenate(
-            agama.orbit(
-                potential=pot_total,
-                ic=ic_stream[:-2],
-                timestart=time_seed[:-2],
-                time=time_end - time_seed[:-2],
-                trajsize=1, # Only final state
-                accuracy=accuracy_integ,
-                verbose=verbose,
-                )[:, 1].tolist(), axis=0
-            )
+        _, traj = agama.orbit(
+            potential=pot_total,
+            ic=ic_stream[:-2],
+            timestart=time_seed[:-2],
+            time=time_end - time_seed[:-2],
+            trajsize=1,  # only the final state
+            accuracy=accuracy_integ,
+            verbose=verbose,
+            separateTime=True,
+        )
+        part_xv = traj[:, 0]  # (N, 1, 6) -> (N, 6)
 
     if verbose:
         print(f"Done. Stream shape: {part_xv.shape}.")

@@ -132,19 +132,55 @@ quintic_eval(const double* __restrict__ poly,
 
 
 // ---------------------------------------------------------------------------
-//  multipole_eval_device<DO_GRAD>
-//  One thread per particle: potential + (optionally) gradient.
-//  Handles quintic splines and Agama log-scaling.
+//  quintic_eval_t<F> --- value and first derivative of one spline interval,
+//  in the type of the table (double, or the float copy used by the mixed
+//  precision kernels).
 // ---------------------------------------------------------------------------
 
-template<bool DO_GRAD>
+template<typename F>
+__device__ __forceinline__ void
+quintic_eval_t(const F* __restrict__ poly, int c, int k, int n_intervals, F s,
+               F* val, F* dval_ds)
+{
+    int base = (c * n_intervals + k) * 6;
+    F a0=__ldg(poly+base  ), a1=__ldg(poly+base+1), a2=__ldg(poly+base+2);
+    F a3=__ldg(poly+base+3), a4=__ldg(poly+base+4), a5=__ldg(poly+base+5);
+    *val = fma(s, fma(s, fma(s, fma(s, fma(s, a5, a4), a3), a2), a1), a0);
+    if (dval_ds)
+        *dval_ds = fma(s, fma(s, fma(s, fma(s, F(5)*a5, F(4)*a4), F(3)*a3), F(2)*a2), a1);
+}
+
+
+// ---------------------------------------------------------------------------
+//  multipole_eval_device<DO_GRAD, F>
+//  One thread per particle: potential + (optionally) force.
+//  Handles quintic splines and Agama log-scaling.
+//
+//  Precision split.  With log-scaling every l>0 coefficient is stored as the
+//  ratio Phi_lm/Phi_0, so
+//      Phi       = C0 (MUL0 Y00 + S),            S   = sum mul ratio Y T
+//      dPhi/dlnr = dC0 (MUL0 Y00 + S) + C0 S_r,  S_r = sum mul dratio/dlnr Y T
+//      dPhi/dth  = C0 S_th,   dPhi/dphi / sin(th) = C0 S_ph
+//  (without log-scaling the coefficients are absolute and the sums add to
+//  the l=0 term).  Everything that sets the absolute scale or cancels --- r,
+//  log r, the radial cell, the l=0 spline and its log-scaling inverse, the
+//  extrapolation, the final combination --- is double.  The l>0 sums run in
+//  F: double reproduces the full-precision kernel; float is the mixed
+//  precision mode, reading a float copy of the coefficient table (polyF).
+//  The sums are corrections of relative size f_ns (the non-spherical part),
+//  so float rounding enters the result at ~1e-7 f_ns.
+//
+//  Reads the C-contiguous float64 (N,3) positions and writes the force
+//  -grad(Phi) directly.
+// ---------------------------------------------------------------------------
+
+template<bool DO_GRAD, typename F>
 __device__ void
 multipole_eval_device(
     int tid,
-    const double* __restrict__ x,
-    const double* __restrict__ y,
-    const double* __restrict__ z,
+    const double* __restrict__ pos,
     const double* __restrict__ poly,
+    const F* __restrict__ polyF,
     double logr_min, double dlogr, double inv_dlogr,
     int n_intervals, int n_lm, int lmax,
     const int* __restrict__ lm_l,
@@ -153,12 +189,12 @@ multipole_eval_device(
     double inner_s, double inner_U, double inner_W,
     double outer_s, double outer_U, double outer_W,
     double* __restrict__ phi_out,
-    double* __restrict__ grad_out,
+    double* __restrict__ force_out,
     int N)
 {
     if (tid >= N) return;
 
-    double px = x[tid], py = y[tid], pz = z[tid];
+    double px = pos[3*tid], py = pos[3*tid+1], pz = pos[3*tid+2];
     double r2   = px*px + py*py + pz*pz;
     double r    = sqrt(r2);
     double Rcyl = sqrt(px*px + py*py);
@@ -166,7 +202,7 @@ multipole_eval_device(
     if (r < 1.0e-300) {
         // At exact origin: Phi = W (finite), force = 0
         phi_out[tid] = MUL0 * inner_W * PREFACT[0];
-        if (DO_GRAD) { grad_out[3*tid]=0.; grad_out[3*tid+1]=0.; grad_out[3*tid+2]=0.; }
+        if (DO_GRAD) { force_out[3*tid]=0.; force_out[3*tid+1]=0.; force_out[3*tid+2]=0.; }
         return;
     }
 
@@ -180,14 +216,11 @@ multipole_eval_device(
         double Phi0 = inner_U * r_ratio_s + inner_W;
         phi_out[tid] = MUL0 * Phi0 * PREFACT[0];  // l=0 only (higher l vanish as r^l -> 0)
         if (DO_GRAD) {
-            // dPhi/d(logr) = U * s * (r/r0)^s
-            double dPhi0_dlr = inner_U * inner_s * r_ratio_s;
-            double inv_r2 = 1.0 / r2;
-            // gradient = dPhi/dlogr * (x/r^2) for each component
-            double g = MUL0 * dPhi0_dlr * PREFACT[0];
-            grad_out[3*tid+0] = g * (px * inv_r2);
-            grad_out[3*tid+1] = g * (py * inv_r2);
-            grad_out[3*tid+2] = g * (pz * inv_r2);
+            // dPhi/d(logr) = U * s * (r/r0)^s;  force = -dPhi/dlogr * (x/r^2)
+            double g = -MUL0 * inner_U * inner_s * r_ratio_s * PREFACT[0] / r2;
+            force_out[3*tid+0] = g * px;
+            force_out[3*tid+1] = g * py;
+            force_out[3*tid+2] = g * pz;
         }
         return;
     }
@@ -204,43 +237,22 @@ multipole_eval_device(
         phi_out[tid]    = MUL0 * Phi0 * PREFACT[0];
         if (DO_GRAD) {
             double dPhi0_dlr = -outer_W * exp_neg + outer_s * outer_U * exp_s;
-            double g = MUL0 * dPhi0_dlr * PREFACT[0];
-            double inv_r2 = 1.0 / r2;
-            grad_out[3*tid+0] = g * px * inv_r2;
-            grad_out[3*tid+1] = g * py * inv_r2;
-            grad_out[3*tid+2] = g * pz * inv_r2;
+            double g = -MUL0 * dPhi0_dlr * PREFACT[0] / r2;
+            force_out[3*tid+0] = g * px;
+            force_out[3*tid+1] = g * py;
+            force_out[3*tid+2] = g * pz;
         }
         return;
     }
     double s = (logr - (logr_min + k * dlogr)) * inv_dlogr;
     if (s < 0.0) s = 0.0; if (s > 1.0) s = 1.0;
 
-    double cos_theta = pz   / r;
-    double sin_theta = Rcyl / r;
-    double phi_az    = atan2(py, px);
-
-    // Rolling trig state: cm = cos(absm*phi), sm = sin(absm*phi).
-    // Advanced once per m-group via: cm_new = cm*cph - sm*sph; sm = sm*cph + cm*sph.
-    double cph, sph;
-    sincos(phi_az, &sph, &cph);
-    double cm = 1.0, sm = 0.0;  // cos(0), sin(0)
-
-    // P_0^0 = PREFACT[0] (constant), dP_0^0/dθ = 0 --- no arrays needed.
-    const bool near_pole = (sin_theta < 1.0e-10);
-
-    double Phi            = 0.0;
-    double dPhi_dlogr     = 0.0;
-    double dPhi_dtheta    = 0.0;
-    double dPhi_dphi_os   = 0.0;  // dPhi/dphi / sin_theta (pole-safe)
-
     // -----------------------------------------------------------------------
-    // c=0 (l=0, m=0): evaluate and apply log-scaling inverse transform
+    // c=0 (l=0, m=0), double: evaluate and apply log-scaling inverse transform
     // -----------------------------------------------------------------------
     double C0_sc, dC0_sc_ds = 0.0;
-    quintic_eval(poly, 0, k, n_intervals, s,
-                 &C0_sc,
-                 DO_GRAD ? &dC0_sc_ds : (double*)0,
-                 (double*)0);
+    quintic_eval_t<double>(poly, 0, k, n_intervals, s,
+                           &C0_sc, DO_GRAD ? &dC0_sc_ds : (double*)0);
 
     double C0_val  = C0_sc;
     double dC0_dlr = 0.0;
@@ -255,19 +267,29 @@ multipole_eval_device(
         if (DO_GRAD) dC0_dlr = dC0_sc_ds * inv_dlogr;
     }
 
-    // c=0: Ylm=PREFACT[0], dYlm=0 (constant), Tlm=1
-    Phi += MUL0 * C0_val * PREFACT[0];
-    if (DO_GRAD) dPhi_dlogr += MUL0 * dC0_dlr * PREFACT[0];
-    // dPhi_dtheta += 0; dPhi_dphi_os += 0
+    // Angles.  cos/sin(phi) straight from x/R, y/R (no atan2 + sincos);
+    // at R = 0 this is phi = 0, as atan2(0, 0) gave.
+    const double cos_theta_d = pz   / r;
+    const double sin_theta_d = Rcyl / r;
+    const double cos_phi_d   = (Rcyl > 1.0e-300) ? px / Rcyl : 1.0;
+    const double sin_phi_d   = (Rcyl > 1.0e-300) ? py / Rcyl : 0.0;
 
     // -----------------------------------------------------------------------
-    // c>0: on-the-fly Legendre recurrence (lm sorted by |m|, l in Python).
-    // Replaces Plm_arr[289]/dPlm_arr[289] with ~8 registers per m-group.
+    // c>0, in F: on-the-fly Legendre recurrence (lm sorted by |m|, l in Python).
     //   raw_cur/prev  = P_l^|m| / PREFACT[|m|]   (un-normalized)
     //   der_cur/prev  = d/dθ of the above
     //   pfact_cur     = NORM_LM[l*(l+1)+absm]  (on-the-fly, updated per l)
+    // Rolling trig state: cm = cos(absm*phi), sm = sin(absm*phi).
     // -----------------------------------------------------------------------
-    double sin_pow = 1.0;  // sin^absm; updated at end of each m-group
+    const F cos_theta = (F)cos_theta_d, sin_theta = (F)sin_theta_d;
+    const F cph = (F)cos_phi_d, sph = (F)sin_phi_d;
+    const F sF  = (F)s;
+    const bool near_pole = (sin_theta_d < 1.0e-10);
+
+    F cm = F(1), sm = F(0);
+    F S = F(0), S_r = F(0), S_th = F(0), S_ph = F(0);
+
+    F sin_pow = F(1);      // sin^absm; updated at end of each m-group
     int ci = 1;            // cursor through sorted lm arrays; c=0 already done
 
     for (int absm = 0; absm <= lmax && ci < n_lm; absm++) {
@@ -275,64 +297,57 @@ multipole_eval_device(
         int ci_absm = (lm_m[ci] >= 0) ? lm_m[ci] : -lm_m[ci];
         if (ci_absm != absm) {
             sin_pow = (absm == 0) ? sin_theta : sin_pow * sin_theta;
-            { double _t = cm*cph - sm*sph; sm = sm*cph + cm*sph; cm = _t; }
+            { F _t = cm*cph - sm*sph; sm = sm*cph + cm*sph; cm = _t; }
             continue;
         }
 
         // --- Initialize P_m^m / PREFACT[m] ---
-        double pf = PREFACT[absm];
-        double pfact_cur = pf;  // = NORM_LM[absm*(absm+1)+absm]; advanced per l in l-loop
-        double raw_prev;  // holds P_{l}^absm/PREFACT at l=absm
-        double der_prev = 0.0;
+        F pf = (F)PREFACT[absm];
+        F pfact_cur = pf;  // = NORM_LM[absm*(absm+1)+absm]; advanced per l in l-loop
+        F raw_prev;        // holds P_{l}^absm/PREFACT at l=absm
+        F der_prev = F(0);
         if (absm == 0) {
-            raw_prev = 1.0;
+            raw_prev = F(1);
         } else if (absm == 1) {
             raw_prev = -sin_theta;
             if (DO_GRAD) der_prev = -cos_theta;
         } else {
-            raw_prev = (pf != 0.0) ? COEF[absm] * sin_pow / pf : 0.0;
-            if (DO_GRAD) der_prev = near_pole ? 0.0
-                : (double)absm * COEF[absm] * sin_pow / (pf * sin_theta) * cos_theta;
+            // COEF/PREFACT = +-(2m-1)!! is formed in double: it overflows
+            // float only beyond m = 30, but PREFACT alone underflows sooner
+            F cp_ratio = (F)(COEF[absm] / PREFACT[absm]);
+            raw_prev = (PREFACT[absm] != 0.0) ? cp_ratio * sin_pow : F(0);
+            if (DO_GRAD) der_prev = near_pole ? F(0)
+                : F(absm) * cp_ratio * sin_pow / sin_theta * cos_theta;
         }
         // raw_cur = P_{m+1}^m / PREFACT[m]
-        double raw_cur = raw_prev * cos_theta * (double)(2*absm + 1);
-        double der_cur = 0.0;
+        F raw_cur = raw_prev * cos_theta * F(2*absm + 1);
+        F der_cur = F(0);
         if (DO_GRAD)
-            der_cur = der_prev*cos_theta*(double)(2*absm+1)
-                    - raw_prev*sin_theta*(double)(2*absm+1);
+            der_cur = der_prev*cos_theta*F(2*absm+1)
+                    - raw_prev*sin_theta*F(2*absm+1);
 
         // Helper macro: accumulate one active term at (l_val, m_val=+-absm, ci_idx)
         // Uses raw_lm = raw_cur (l > absm) or raw_prev (l == absm).
         // pfact_cur = NORM_LM[l_val*(l_val+1)+absm] (maintained by caller).
-        // cm/sm = cos(absm*phi) / sin(absm*phi) (rolling state, outer scope).
 #define ACCUM_LM(ci_idx, l_val, m_val, raw_lm, der_lm)                          \
         {                                                                         \
-            double _Ylm  = (raw_lm) * pfact_cur;                                 \
-            double _Cc_sc, _dCc_sc_ds = 0.0;                                     \
-            quintic_eval(poly, (ci_idx), k, n_intervals, s,                      \
-                         &_Cc_sc, DO_GRAD ? &_dCc_sc_ds : (double*)0, (double*)0); \
-            double _Cv = _Cc_sc, _dCv = 0.0;                                     \
-            if (log_scaling) {                                                    \
-                double _dlr = _dCc_sc_ds * inv_dlogr;                            \
-                if (DO_GRAD) _dCv = _dlr*C0_val + _Cc_sc*dC0_dlr;               \
-                _Cv = _Cc_sc * C0_val;                                            \
-            } else {                                                              \
-                if (DO_GRAD) _dCv = _dCc_sc_ds * inv_dlogr;                     \
-            }                                                                     \
-            double _mul = (absm == 0) ? MUL0 : MUL1;                            \
-            double _Tlm = ((m_val) >= 0) ? cm : sm;                              \
-            Phi += _mul * _Cv * _Ylm * _Tlm;                                     \
+            F _Ylm  = (raw_lm) * pfact_cur;                                      \
+            F _Cc, _dCc = F(0);                                                   \
+            quintic_eval_t<F>(polyF, (ci_idx), k, n_intervals, sF,               \
+                              &_Cc, DO_GRAD ? &_dCc : (F*)0);                    \
+            F _mul = (absm == 0) ? F(MUL0) : F(MUL1);                            \
+            F _Tlm = ((m_val) >= 0) ? cm : sm;                                   \
+            S += _mul * _Cc * _Ylm * _Tlm;                                       \
             if (DO_GRAD) {                                                        \
-                double _dYlm = (der_lm) * pfact_cur;                             \
-                double _dTlm = ((m_val) >= 0)                                    \
-                    ? -(double)absm * sm                                          \
-                    :  (double)absm * cm;                                         \
-                dPhi_dlogr  += _mul * _dCv  * _Ylm * _Tlm;                      \
-                dPhi_dtheta += _mul * _Cv   * _dYlm * _Tlm;                     \
-                double _Pos = (absm == 0) ? 0.0                                  \
-                    : (sin_theta > 1.0e-10) ? _Ylm / sin_theta                  \
-                    : ((absm == 1) ? _dYlm : 0.0);                               \
-                dPhi_dphi_os += _mul * _Cv * _Pos * _dTlm;                      \
+                F _dYlm = (der_lm) * pfact_cur;                                  \
+                F _dTlm = ((m_val) >= 0) ? -F(absm) * sm : F(absm) * cm;         \
+                S_r  += _mul * _dCc * _Ylm  * _Tlm;                              \
+                S_th += _mul * _Cc  * _dYlm * _Tlm;                              \
+                /* on the axis Y/sin(th) -> +-dY/dth (sign of cos(th)) */    \
+                F _Pos = (absm == 0) ? F(0)                                      \
+                    : (sin_theta_d > 1.0e-10) ? _Ylm / sin_theta                 \
+                    : ((absm == 1) ? (cos_theta_d >= 0.0 ? _dYlm : -_dYlm) : F(0)); \
+                S_ph += _mul * _Cc * _Pos * _dTlm;                               \
             }                                                                     \
         }
 
@@ -348,19 +363,19 @@ multipole_eval_device(
         // --- l = absm+1 … lmax ---
         for (int l = absm + 1; l <= lmax; l++) {
             if (l > absm + 1) {
-                double inv_lm = 1.0 / (double)(l - absm);
-                double nr = fma((double)(2*l-1)*cos_theta, raw_cur,
-                                -(double)(l+absm-1)*raw_prev) * inv_lm;
-                double nd = 0.0;
+                F inv_lm = F(1) / F(l - absm);
+                F nr = fma(F(2*l-1)*cos_theta, raw_cur,
+                           -F(l+absm-1)*raw_prev) * inv_lm;
+                F nd = F(0);
                 if (DO_GRAD)
-                    nd = fma((double)(2*l-1),
+                    nd = fma(F(2*l-1),
                              fma(cos_theta, der_cur, -sin_theta*raw_cur),
-                             -(double)(l+absm-1)*der_prev) * inv_lm;
+                             -F(l+absm-1)*der_prev) * inv_lm;
                 raw_prev = raw_cur; der_prev = der_cur;
                 raw_cur  = nr;      der_cur  = nd;
             }
             // pfact_cur advances from PREFACT[absm] -> NORM_LM[l*(l+1)+absm]
-            pfact_cur *= sqrt((2.0*l+1)/(2.0*l-1) * (double)(l-absm)/(double)(l+absm));
+            pfact_cur *= sqrt(F(2*l+1)/F(2*l-1) * F(l-absm)/F(l+absm));
             if (ci >= n_lm) break;
             if (lm_l[ci] != l) {
                 // Not active at l but next ci has higher l (same absm or different)
@@ -382,7 +397,29 @@ multipole_eval_device(
 #undef ACCUM_LM
 
         sin_pow = (absm == 0) ? sin_theta : sin_pow * sin_theta;
-        { double _t = cm*cph - sm*sph; sm = sm*cph + cm*sph; cm = _t; }
+        { F _t = cm*cph - sm*sph; sm = sm*cph + cm*sph; cm = _t; }
+    }
+
+    // -----------------------------------------------------------------------
+    // Combine in double
+    // -----------------------------------------------------------------------
+    const double base = MUL0 * PREFACT[0];
+    double Phi, dPhi_dlogr = 0.0, dPhi_dtheta = 0.0, dPhi_dphi_os = 0.0;
+    if (log_scaling) {
+        const double ang = base + (double)S;
+        Phi = C0_val * ang;
+        if (DO_GRAD) {
+            dPhi_dlogr   = dC0_dlr * ang + C0_val * ((double)S_r * inv_dlogr);
+            dPhi_dtheta  = C0_val * (double)S_th;
+            dPhi_dphi_os = C0_val * (double)S_ph;
+        }
+    } else {
+        Phi = base * C0_val + (double)S;
+        if (DO_GRAD) {
+            dPhi_dlogr   = base * dC0_dlr + (double)S_r * inv_dlogr;
+            dPhi_dtheta  = (double)S_th;
+            dPhi_dphi_os = (double)S_ph;
+        }
     }
 
     phi_out[tid] = Phi;
@@ -390,69 +427,77 @@ multipole_eval_device(
     if (DO_GRAD) {
         double inv_r  = 1.0 / r;
         double inv_r2 = inv_r * inv_r;
-        double cos_phi = (Rcyl > 1.0e-300) ? px / Rcyl : 1.0;
-        double sin_phi = (Rcyl > 1.0e-300) ? py / Rcyl : 0.0;
 
         // Gradient in Cartesian using pole-safe phi contribution:
         //   dPhi/dphi * dphi/dx_i = (dPhi/dphi / sin_theta) * (-sin_phi / r)  for x
         //                         = (dPhi/dphi / sin_theta) * ( cos_phi / r)  for y
         // Since R = r*sin_theta, this is equivalent to the standard formula
-        // away from the pole, but finite at sin_theta=0.
-        grad_out[3*tid+0] = dPhi_dlogr*(px*inv_r2)
-                          + dPhi_dtheta*(cos_theta*cos_phi*inv_r)
-                          + dPhi_dphi_os*(-sin_phi*inv_r);
-        grad_out[3*tid+1] = dPhi_dlogr*(py*inv_r2)
-                          + dPhi_dtheta*(cos_theta*sin_phi*inv_r)
-                          + dPhi_dphi_os*(cos_phi*inv_r);
-        grad_out[3*tid+2] = dPhi_dlogr*(pz*inv_r2)
-                          + dPhi_dtheta*(-sin_theta*inv_r);
+        // away from the pole, but finite at sin_theta=0.  Written as the force.
+        force_out[3*tid+0] = -(dPhi_dlogr*(px*inv_r2)
+                             + dPhi_dtheta*(cos_theta_d*cos_phi_d*inv_r)
+                             + dPhi_dphi_os*(-sin_phi_d*inv_r));
+        force_out[3*tid+1] = -(dPhi_dlogr*(py*inv_r2)
+                             + dPhi_dtheta*(cos_theta_d*sin_phi_d*inv_r)
+                             + dPhi_dphi_os*(cos_phi_d*inv_r));
+        force_out[3*tid+2] = -(dPhi_dlogr*(pz*inv_r2)
+                             + dPhi_dtheta*(-sin_theta_d*inv_r));
     }
 }
 
-
 // ---- C-linkage __global__ wrappers ----
+// *_kernel: full double precision.  *_kernel_f32: l>0 sums in float, from
+// the float copy polyF of the coefficient table (mixed precision).
+
+#define MULT_EVAL_PARAMS                                                        \
+    double logr_min, double dlogr, double inv_dlogr,                            \
+    int n_intervals, int n_lm, int lmax,                                        \
+    const int* __restrict__ lm_l, const int* __restrict__ lm_m,                 \
+    int log_scaling, double invPhi0,                                            \
+    double inner_s, double inner_U, double inner_W,                             \
+    double outer_s, double outer_U, double outer_W,                             \
+    double* __restrict__ phi_out, double* __restrict__ force_out,               \
+    int N
+#define MULT_EVAL_ARGS                                                          \
+    logr_min, dlogr, inv_dlogr, n_intervals, n_lm, lmax, lm_l, lm_m,           \
+    log_scaling, invPhi0, inner_s, inner_U, inner_W, outer_s, outer_U, outer_W, \
+    phi_out, force_out, N
 
 extern "C" __global__ __launch_bounds__(256,2) void
-multipole_potential_kernel(
-    const double* __restrict__ x, const double* __restrict__ y, const double* __restrict__ z,
-    const double* __restrict__ poly,
-    double logr_min, double dlogr, double inv_dlogr,
-    int n_intervals, int n_lm, int lmax,
-    const int* __restrict__ lm_l, const int* __restrict__ lm_m,
-    int log_scaling, double invPhi0,
-    double inner_s, double inner_U, double inner_W,
-    double outer_s, double outer_U, double outer_W,
-    double* __restrict__ phi_out, double* __restrict__ grad_out,
-    int N)
+multipole_potential_kernel(const double* __restrict__ pos,
+                           const double* __restrict__ poly, MULT_EVAL_PARAMS)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    multipole_eval_device<false>(tid, x,y,z,poly,logr_min,dlogr,inv_dlogr,
-                                 n_intervals,n_lm,lmax,lm_l,lm_m,
-                                 log_scaling,invPhi0,inner_s,inner_U,inner_W,
-                                 outer_s,outer_U,outer_W,
-                                 phi_out,grad_out,N);
+    multipole_eval_device<false, double>(tid, pos, poly, poly, MULT_EVAL_ARGS);
 }
 
 extern "C" __global__ __launch_bounds__(256,2) void
-multipole_force_kernel(
-    const double* __restrict__ x, const double* __restrict__ y, const double* __restrict__ z,
-    const double* __restrict__ poly,
-    double logr_min, double dlogr, double inv_dlogr,
-    int n_intervals, int n_lm, int lmax,
-    const int* __restrict__ lm_l, const int* __restrict__ lm_m,
-    int log_scaling, double invPhi0,
-    double inner_s, double inner_U, double inner_W,
-    double outer_s, double outer_U, double outer_W,
-    double* __restrict__ phi_out, double* __restrict__ grad_out,
-    int N)
+multipole_force_kernel(const double* __restrict__ pos,
+                       const double* __restrict__ poly, MULT_EVAL_PARAMS)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    multipole_eval_device<true>(tid, x,y,z,poly,logr_min,dlogr,inv_dlogr,
-                                n_intervals,n_lm,lmax,lm_l,lm_m,
-                                log_scaling,invPhi0,inner_s,inner_U,inner_W,
-                                outer_s,outer_U,outer_W,
-                                phi_out,grad_out,N);
+    multipole_eval_device<true, double>(tid, pos, poly, poly, MULT_EVAL_ARGS);
 }
+
+extern "C" __global__ __launch_bounds__(256,2) void
+multipole_potential_kernel_f32(const double* __restrict__ pos,
+                               const double* __restrict__ poly,
+                               const float* __restrict__ polyF, MULT_EVAL_PARAMS)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    multipole_eval_device<false, float>(tid, pos, poly, polyF, MULT_EVAL_ARGS);
+}
+
+extern "C" __global__ __launch_bounds__(256,2) void
+multipole_force_kernel_f32(const double* __restrict__ pos,
+                           const double* __restrict__ poly,
+                           const float* __restrict__ polyF, MULT_EVAL_PARAMS)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    multipole_eval_device<true, float>(tid, pos, poly, polyF, MULT_EVAL_ARGS);
+}
+
+#undef MULT_EVAL_PARAMS
+#undef MULT_EVAL_ARGS
 
 
 // ---------------------------------------------------------------------------
@@ -640,7 +685,7 @@ multipole_hess_kernel(
         double _Plm_os;                                                              \
         if (absm == 0)       { _Plm_os = 0.0; }                                     \
         else if (!near_pole) { _Plm_os = _Ylm / sin_theta; }                        \
-        else                 { _Plm_os = (absm==1) ? _dYlm : 0.0; }                 \
+        else                 { _Plm_os = (absm==1) ? (cos_theta >= 0.0 ? _dYlm : -_dYlm) : 0.0; } \
         dPhi_dph_os += _mul*_Cv * _Plm_os * _dTlm;                                  \
     }
 

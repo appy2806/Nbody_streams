@@ -237,7 +237,10 @@ h = get_smoothing_lengths(pos_2d, k_neighbors=32)
 ## `render_cpu` and `render_gpu`
 
 Lower-level entry points for the SPH splatting kernels.  `render_cpu` uses
-Numba `prange` with a per-thread array reduction (no race conditions).
+Numba `prange`: the particles are split into one chunk per thread, each
+chunk is splatted into its own private grid and the grids are summed by rows,
+so no two threads write the same pixel (deterministic for a given thread
+count; the private grids are capped at ~1 GiB).
 `render_gpu` uses a CUDA scatter kernel (one thread per particle) with
 atomic float32 adds.
 

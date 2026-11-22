@@ -97,6 +97,7 @@ def load_agama_potential(
     keep_m_cylspl: Optional[list[int]] = None,
     include_negative_m: bool = True,
     gpu: bool = False,
+    precision: str = 'float64',
 ):
     """
     Load a single-snapshot Agama potential from any coefficient source.
@@ -151,6 +152,9 @@ def load_agama_potential(
         building the GPU potential.  ``center`` is forwarded to
         ``ShiftedPotentialGPU``; supply it as a length-3 array or an (N,4) /
         (N,7) trajectory array.
+    precision : {'float64', 'float32'}, optional
+        GPU only: ``'float32'`` runs the harmonic sums in single precision
+        (mixed precision, see ``MultipolePotentialGPU``).  Default float64.
 
     Returns
     -------
@@ -203,7 +207,7 @@ def load_agama_potential(
         from ._potential import PotentialGPU, ShiftedPotentialGPU
         tmp = _write_tmp_coef(coef_str)
         try:
-            pot = PotentialGPU(file=tmp)
+            pot = PotentialGPU(file=tmp, precision=precision)
         finally:
             _cleanup_tmp_file(tmp)
         if center is not None:
@@ -243,6 +247,7 @@ def load_agama_evolving_potential(
     keep_m_cylspl: Optional[list[int]] = None,
     include_negative_m: bool = True,
     gpu: bool = False,
+    precision: str = 'float64',
 ):
     """
     Build a time-evolving Agama potential from an HDF5 archive or a native
@@ -317,6 +322,9 @@ def load_agama_evolving_potential(
         and interpolated linearly (``interp_linear=True``) or with nearest-
         neighbour (``interp_linear=False``).  ``center`` is forwarded to
         ``ShiftedPotentialGPU``.
+    precision : {'float64', 'float32'}, optional
+        GPU only: ``'float32'`` runs the harmonic sums in single precision
+        (mixed precision, see ``MultipolePotentialGPU``).  Default float64.
 
     Returns
     -------
@@ -550,9 +558,9 @@ def load_agama_evolving_potential(
         gpu_pots: list = []
         for kind, data in built:
             if kind == 'mul':
-                gpu_pots.append(MultipolePotentialGPU._from_data(data))
+                gpu_pots.append(MultipolePotentialGPU._from_data(data, precision))
             else:
-                gpu_pots.append(CylSplinePotentialGPU._from_data(data))
+                gpu_pots.append(CylSplinePotentialGPU._from_data(data, precision))
 
         use_interp = ini_interp_linear if not is_h5 else interp_linear
         pot = EvolvingPotentialGPU(gpu_pots, resolved_times, interpolate=bool(use_interp))

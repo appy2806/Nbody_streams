@@ -972,10 +972,11 @@ def _save_restart(
         step=np.int64(step),
         snapshot_counter=np.int64(snapshot_counter),
     )
-    if mass_arr is not None:
-        save_kwargs["mass_arr"] = np.asarray(mass_arr, dtype=np.float64)
-    if softening_arr is not None:
-        save_kwargs["softening_arr"] = np.asarray(softening_arr, dtype=np.float64)
+    # Mass and softening as in the snapshots: one value when constant, one per
+    # species when each species is constant, else per particle.
+    for key, arr in (("mass_arr", mass_arr), ("softening_arr", softening_arr)):
+        if arr is not None:
+            save_kwargs.update(_compact_per_particle(key, arr, species_N))
     if species_names is not None:
         save_kwargs["species_names"] = np.array(
             [n.encode("utf-8") for n in species_names]
@@ -983,7 +984,64 @@ def _save_restart(
     if species_N is not None:
         save_kwargs["species_N"] = np.array(species_N, dtype=np.int64)
 
-    np.savez_compressed(restart_file, **save_kwargs)
+    # Uncompressed: float64 phase space barely compresses, and zlib on one
+    # core took minutes at N ~ 1e8.  Written to a temporary file and renamed,
+    # so a crash mid-write keeps the previous restart.  (Older compressed
+    # restart files load the same way.)
+    tmp = restart_file.with_name(restart_file.name + ".tmp")
+    with open(tmp, "wb") as f:
+        np.savez(f, **save_kwargs)
+    os.replace(tmp, restart_file)
+
+
+class _IOClock:
+    """Accumulates the wall time spent in output (``with clock: ...``).
+
+    ``sync`` (e.g. ``cupy.cuda.Device().synchronize``) runs before the clock
+    starts, so GPU work still queued is not counted as I/O.
+    """
+
+    def __init__(self, sync=None):
+        self.total = 0.0
+        self._sync = sync
+
+    def __enter__(self):
+        import time
+        if self._sync is not None:
+            self._sync()
+        self._t0 = time.perf_counter()
+        return self
+
+    def __exit__(self, *exc):
+        import time
+        self.total += time.perf_counter() - self._t0
+        return False
+
+
+def _compact_per_particle(key: str, arr, species_N) -> dict:
+    """``{key: value}`` for a constant array, ``{key + "_per_species": values}``
+    when each species block is constant, else ``{key: array}`` (float64)."""
+    arr = np.asarray(arr, dtype=np.float64).ravel()
+    if arr.size and np.all(arr == arr[0]):
+        return {key: np.float64(arr[0])}
+    if species_N is not None and sum(species_N) == arr.size and len(species_N) > 1:
+        edges = np.cumsum([0] + list(species_N))
+        blocks = [arr[a:b] for a, b in zip(edges[:-1], edges[1:])]
+        if all(blk.size == 0 or np.all(blk == blk[0]) for blk in blocks):
+            vals = [blk[0] if blk.size else 0.0 for blk in blocks]
+            return {key + "_per_species": np.asarray(vals, dtype=np.float64)}
+    return {key: arr}
+
+
+def _expand_per_particle(data, key: str, n: int, species_N) -> np.ndarray | None:
+    """Inverse of :func:`_compact_per_particle`: an (n,) float64 array or None."""
+    if key in data.files:
+        v = np.asarray(data[key], dtype=np.float64)
+        return np.full(n, float(v)) if v.ndim == 0 else v
+    if key + "_per_species" in data.files and species_N is not None:
+        return np.repeat(np.asarray(data[key + "_per_species"], dtype=np.float64),
+                         species_N)
+    return None
 
 
 def _load_restart(
@@ -1016,8 +1074,9 @@ def _load_restart(
     step = int(data["step"])
     snapshot_counter = int(data["snapshot_counter"]) if "snapshot_counter" in data.files else 0
 
-    mass_arr = data["mass_arr"] if "mass_arr" in data.files else None
-    softening_arr = data["softening_arr"] if "softening_arr" in data.files else None
+    species_N_raw = [int(n) for n in data["species_N"]] if "species_N" in data.files else None
+    mass_arr = _expand_per_particle(data, "mass_arr", len(phase_space), species_N_raw)
+    softening_arr = _expand_per_particle(data, "softening_arr", len(phase_space), species_N_raw)
 
     species_names: list[str] | None = None
     if "species_names" in data.files:

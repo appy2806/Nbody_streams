@@ -529,7 +529,7 @@ namespace computeForces
       const int NWARP2 = NTHREAD2 - WARP_SIZE2;
       const int sh_offs = (shMemSize >> NWARP2) * warpIdx;
       int *shmem = shmem_pool + sh_offs;
-      int *gmem  =  gmem_pool + CELL_LIST_MEM_PER_WARP*((blockIdx.x<<NWARP2) + warpIdx);
+      int *gmem  =  gmem_pool + (size_t)CELL_LIST_MEM_PER_WARP*((blockIdx.x<<NWARP2) + warpIdx);
 
       int2 top_cells = level_begIdx[start_level];
       top_cells.y++;

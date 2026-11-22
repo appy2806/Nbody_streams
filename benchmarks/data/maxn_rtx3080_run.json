@@ -1,0 +1,42 @@
+{
+ "label": "rtx3080",
+ "mode": "run",
+ "points": [
+  {
+   "n": 10000000,
+   "mode": "run",
+   "gpu_mem_total_gb": 15.99951171875,
+   "gpu_mem_used_before_gb": 1.10791015625,
+   "t_step": 0.3931294286998309,
+   "wall": {
+    "1": 17.161124176993326,
+    "2": 17.028372496002703,
+    "22": 24.89096106999932
+   },
+   "gpu_mem_peak_gb": 5.13525390625,
+   "gpu_bytes_per_particle": 432.2230272,
+   "wall_total": 61.59005715500098
+  },
+  {
+   "n": 20000000,
+   "mode": "run",
+   "gpu_mem_total_gb": 15.99951171875,
+   "gpu_mem_used_before_gb": 1.10791015625,
+   "t_step": 0.7752359660502407,
+   "wall": {
+    "1": 33.697184601005574,
+    "2": 33.91867097999784,
+    "22": 49.423390301002655
+   },
+   "gpu_mem_peak_gb": 8.53173828125,
+   "gpu_bytes_per_particle": 398.45888,
+   "wall_total": 120.7007660790041
+  },
+  {
+   "n": 28000000,
+   "error": "    ...<2 lines>... |            else \"the 29-bit particle index (2^29 particles)\") + \".\") | ValueError: N=28,000,000 exceeds the GPU tree run limit (27,815,662), set by free GPU memory (tree plus integrator arrays).",
+   "returncode": 1,
+   "wall_total": 6.435051556996768
+  }
+ ]
+}

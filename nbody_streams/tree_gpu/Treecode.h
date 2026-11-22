@@ -89,35 +89,43 @@ struct GroupData
     __host__ __device__ int np  () const {return packed_data.y;}
 };
 
+/* One tree cell, 16 bytes (the walk loads it as one uint4):
+ *   x = parent cell index (32 bits)
+ *   y = first child | (nchild-1) << 29 for a node (first: 29 bits);
+ *       0xFFFFFFFF marks a leaf
+ *   z = pbeg, w = pend (particle range, tree order)
+ * The cell's level is not stored here: the build writes it straight into the
+ * level-sort key array (treeBuild::cellLevelList = d_key).  The cell count is
+ * limited by `first` to CELLDATA_MAX_CELLS; below that a node's y can never
+ * be 0xFFFFFFFF (first <= 2^29 - 9 when it has 8 children). */
+#define CELLDATA_FIRST_BITS 29
+#define CELLDATA_MAX_CELLS  ((1 << CELLDATA_FIRST_BITS) - 1)
+
 struct CellData
 {
   private:
-    enum {NLEAF_SHIFT = 29};
+    enum {NLEAF_SHIFT = CELLDATA_FIRST_BITS};
     enum {NLEAF_MASK  = ~(0x7U << NLEAF_SHIFT)};
-    enum {LEVEL_SHIFT = 27};
-    enum {LEVEL_MASK  = ~(0x1FU << LEVEL_SHIFT)};
     uint4 packed_data;
   public:
     __host__ __device__ CellData(
-        const int level,
         const unsigned int parentCell,
         const unsigned int nBeg,
         const unsigned int nEnd,
         const unsigned int first = 0xFFFFFFFF,
         const unsigned int n = 0xFFFFFFFF)
     {
-      int packed_firstleaf_n = 0xFFFFFFFF;
+      unsigned int packed_firstleaf_n = 0xFFFFFFFF;
       if (n != 0xFFFFFFFF)
-        packed_firstleaf_n = first | ((unsigned int)n << NLEAF_SHIFT);
-      packed_data = make_uint4(parentCell | (level << LEVEL_SHIFT), packed_firstleaf_n, nBeg, nEnd);
+        packed_firstleaf_n = first | (n << NLEAF_SHIFT);
+      packed_data = make_uint4(parentCell, packed_firstleaf_n, nBeg, nEnd);
     }
 
     __host__ __device__ CellData(const uint4 data) : packed_data(data) {}
 
     __host__ __device__ int n()      const {return (packed_data.y >> NLEAF_SHIFT)+1;}
     __host__ __device__ int first()  const {return packed_data.y  & NLEAF_MASK;}
-    __host__ __device__ int parent() const {return packed_data.x  & LEVEL_MASK;}
-    __host__ __device__ int level()  const {return packed_data.x >> LEVEL_SHIFT;}
+    __host__ __device__ int parent() const {return packed_data.x;}
     __host__ __device__ int pbeg()   const {return packed_data.z;}
     __host__ __device__ int pend()   const {return packed_data.w;}
 
@@ -126,12 +134,12 @@ struct CellData
 
     __host__ __device__ void update_first(const int first)
     {
-      const int _n = n()-1;
-      packed_data.y = first | ((unsigned int)_n << NLEAF_SHIFT);
+      const unsigned int _n = n()-1;
+      packed_data.y = (unsigned int)first | (_n << NLEAF_SHIFT);
     }
     __host__ __device__ void update_parent(const int parent)
     {
-      packed_data.x = parent | (level() << LEVEL_SHIFT);
+      packed_data.x = parent;
     }
 };
 
@@ -186,6 +194,13 @@ struct Treecode
     int get_nPtcl() const { return nPtcl; }
     int get_nCrit() const { return nCrit; }
     int get_nLeaf() const { return nLeaf; }
+    /* last build's usage and the current capacities: nCells, nNodes, nLeaves,
+     * nLevels, max work items per level, cell_max, node_max, build_max_work */
+    void get_build_stats(long long out[8]) const
+    {
+      out[0] = nCells; out[1] = nNodes; out[2] = nLeaves; out[3] = nLevels;
+      out[4] = last_work_seen; out[5] = cell_max; out[6] = node_max; out[7] = build_max_work;
+    }
 
   std::vector<Particle> ptcl0;
   cuda_mem<Particle> d_ptclPos, d_ptclVel, d_ptclPos_tmp, d_ptclAcc;
@@ -193,9 +208,10 @@ struct Treecode
   cuda_mem<Position<real_t> > d_minmax;
   cuda_mem<int2> d_level_begIdx;
 
-  int node_max, cell_max;
+  int node_max, cell_max;      /* build capacities, grown on overflow (see alloc) */
   size_t stack_size;            /* ints; 96 per node, exceeds INT_MAX above ~110M particles */
   int last_nodes_used = 0;      /* nodes whose memPool slots the last build dirtied */
+  int last_work_seen  = 0;      /* largest per-level work-item count of the last build */
   cuda_mem<int>  d_stack_memory_pool;
   cuda_mem<CellData> d_cellDataList, d_cellDataList_tmp;
   cuda_mem<GroupData> d_groupList;
@@ -227,10 +243,7 @@ struct Treecode
   cuda_mem<float4>  d_cellBoxMin, d_cellBoxMax;
 
   /* Pre-allocated scratch for buildOctreeHost — eliminates 4× cudaMalloc/cudaFree per step.
-   * build_max_work : work-queue depth = max nodes split at any single level.
-   *                  Nodes of one level are disjoint and each holds > nleaf >= 16
-   *                  particles, so N/16 always suffices (was a fixed 262144,
-   *                  which overflowed near ~20M particles).
+   * build_max_work : work-queue depth (see alloc).
    * BUILD_PENDING_WORK_BYTES : must be >= sizeof(PendingWork<real_t>) in buildTree.cu.
    *                  Verified at compile time via static_assert in buildOctreeHost. */
   int build_max_work = 0;
@@ -258,6 +271,9 @@ struct Treecode
     eps2  = _eps*_eps;
     theta = _theta;
     nCrit = _ncrit;
+    nPtcl = nLevels = nCells = nLeaves = nNodes = nGroups = 0;
+    nLeaf = 0;
+    node_max = cell_max = 0;
     verbose = 1;
     d_domain.alloc(1);
     d_minmax.alloc(2048);
@@ -276,9 +292,39 @@ struct Treecode
     /* per-particle softening (float, 4N bytes each) */
     d_ptclEpsTree.alloc(nPtcl);
 
-    /* allocate stack memory */
-    node_max = nPtcl/5;
-    if (node_max < 65536) node_max = 65536;
+    /* Build capacities.  None is a rigorous bound (that would need ~2.7
+     * nPtcl cells and ~1.7 nPtcl nodes, ~65 GB of node pool at 1e8): the
+     * build detects an overflow, writes nothing out of bounds, and
+     * buildTree grows the buffers and rebuilds (growBuildBuffers); they
+     * then stay grown on this handle.  The sizes are >= 1.5x the largest
+     * usage measured over Plummer, Hernquist, Dehnen-1.5 cusps, a cold
+     * stream, a thin disc, a uniform cube, a cubic lattice and a very thin
+     * straight filament (width 1e-4 of its length), N = 1e5 - 5e7 and nleaf
+     * 16/32/64 (docs/tree_gpu.md "GPU memory layout"), so realistic inputs
+     * never grow them; a clump of > nleaf (nearly) coincident particles adds
+     * a chain of ~25 single-child nodes, so many such clumps can.
+     *
+     * node_max : node pool slots (96 ints = 384 B each) for cells being
+     *            split.  Measured <= 0.045 nPtcl in 3-D, 0.067 for the thin
+     *            filament; nPtcl/8.
+     * cell_max : all cells below the root (the root is overwritten).
+     *            Measured <= 0.37 nPtcl (nleaf 16; ~0.06 at nleaf 64); 0.6
+     *            nPtcl also covers the ~0.54 of a uniform distribution with
+     *            ~17 particles in every cell of one level.  The 65536 floor
+     *            (2.6 MB) covers tiny N.
+     * build_max_work : work-queue depth = cells with children to split at
+     *            one level.  Measured <= 0.0174 nPtcl (thin filament, <=
+     *            0.0074 in 3-D); nPtcl/32.
+     * Capped at the CellData index limit (CELLDATA_MAX_CELLS).
+     * TREEGPU_DEBUG_BUILD_CAPACITY=k (testing only) starts all three at k. */
+    const long long n = nPtcl;
+    node_max       = (int)std::min<long long>(std::max(n/8,          16384LL), CELLDATA_MAX_CELLS);
+    cell_max       = (int)std::min<long long>(std::max(3*n/5 + 64,   65536LL), CELLDATA_MAX_CELLS);
+    build_max_work = (int)std::min<long long>(std::max(n/32 + 1,     16384LL), CELLDATA_MAX_CELLS);
+    if (const char *cap = std::getenv("TREEGPU_DEBUG_BUILD_CAPACITY"))
+      if (std::atoi(cap) > 0)
+        node_max = cell_max = build_max_work = std::atoi(cap);
+
     stack_size = (size_t)(8+8+8+64+8)*node_max;
     if (verbose) fprintf(stderr, "stack_size= %g MB \n", sizeof(int)*stack_size/1024.0/1024.0);
     d_stack_memory_pool.alloc(stack_size);
@@ -286,8 +332,6 @@ struct Treecode
     CUDA_SAFE_CALL(cudaMemset(d_stack_memory_pool, 0, stack_size*sizeof(int)));
     last_nodes_used = 0;
 
-    /* allocate celldata memory */
-    cell_max = nPtcl;
     if (verbose) fprintf(stderr, "celldata= %g MB \n", cell_max*sizeof(CellData)/1024.0/1024.0);
     d_cellDataList.alloc(cell_max);
     d_cellDataList_tmp.alloc(cell_max);
@@ -295,20 +339,22 @@ struct Treecode
     d_value.alloc(cell_max);
     d_origIdx.alloc(nPtcl);
 
-    /* Pre-allocate d_leafList so d_leafList.realloc(nLeaves) in buildTree is a no-op.
-     * nLeaves <= nCells <= nPtcl always holds, so nPtcl is a safe upper bound. */
-    d_leafList.alloc(nPtcl);
+    /* Pre-allocate d_leafList so d_leafList.realloc(nLeaves) in buildTree is a no-op:
+     * every leaf is a cell and holds >= 1 particle, so nLeaves <= min(nPtcl, cell_max)
+     * (it grows with the cells, by that realloc, if they ever grow). */
+    d_leafList.alloc(std::min(nPtcl, cell_max));
 
     /* Pre-allocate buildOctreeHost scratch (eliminates per-step GPU malloc/free churn). */
     d_build_octCounter .alloc(16);
     d_build_octCounterN.alloc(96);
-    build_max_work = std::max(262144, nPtcl/16 + 1);
     d_build_workQueue  .alloc(static_cast<size_t>(build_max_work) * BUILD_PENDING_WORK_BYTES);
     d_build_workQueueIn.alloc(static_cast<size_t>(build_max_work) * BUILD_PENDING_WORK_BYTES);
     d_build_workCount  .alloc(1);
   };
 
-  void buildTree(const int nLeaf = 16);
+  /* returns 0, or -1 if the build overflowed and the buffers could not grow */
+  int buildTree(const int nLeaf = 16);
+  bool growBuildBuffers(long long nodes_seen, long long cells_seen, long long work_seen, int attempt);
   void computeMultipoles();
   void makeGroups(int levelSplit = 1, const int nCrit = 64);
   double4 computeForces(const bool INTCOUNT = true);

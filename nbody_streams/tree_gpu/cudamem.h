@@ -18,6 +18,20 @@ struct cuda_mem
     n = size;
     CUDA_SAFE_CALL(cudaMalloc(&ptr, n * sizeof(T)));
   }
+  /* alloc that reports an out-of-memory failure instead of exiting */
+  bool try_alloc(const size_t size)
+  {
+    assert(ptr == NULL);
+    if (cudaMalloc(&ptr, size * sizeof(T)) != cudaSuccess)
+    {
+      (void)cudaGetLastError();   /* clear the (non-sticky) error */
+      ptr = NULL;
+      n = 0;
+      return false;
+    }
+    n = size;
+    return true;
+  }
   void free()
   {
     if (ptr == NULL) return;
@@ -29,21 +43,21 @@ struct cuda_mem
     if (size > n && n > 0) free();
     if (ptr == NULL) alloc(size);
   };
-  void h2d(const T *host_ptr, int n = -1)
+  void h2d(const T *host_ptr, long long n = -1)
   {
     if (n < 0) n = this->n;
     assert(host_ptr != NULL);
     assert( ptr != NULL);
     CUDA_SAFE_CALL(cudaMemcpy(ptr, host_ptr, n * sizeof(T), cudaMemcpyHostToDevice));
   }
-  void d2h(T *host_ptr, int n = -1) const
+  void d2h(T *host_ptr, long long n = -1) const
   {
     if (n < 0) n = this->n;
     assert(host_ptr != NULL);
     assert( ptr != NULL);
     CUDA_SAFE_CALL(cudaMemcpy(host_ptr, ptr, n * sizeof(T), cudaMemcpyDeviceToHost));
   }
-  void d2d(T *host_ptr, int n = -1) const
+  void d2d(T *host_ptr, long long n = -1) const
   {
     if (n < 0) n = this->n;
     assert(host_ptr != NULL);

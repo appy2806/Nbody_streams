@@ -121,7 +121,7 @@ result = run_simulation(
 | `save_snapshots` | `bool` | `True` | Write HDF5 snapshots to disk |
 | `snapshots` | `int` | `100` | Number of evenly-spaced output snapshots. Every backend (`gpu`/`cpu` x `direct`/`tree`) writes exactly this many datasets with 0-based ids `snap.000`..`snap.{snapshots-1:03d}`, the first at `time_start` and the last at `time_end` |
 | `num_files_to_write` | `int` | `1` | Split snapshots across this many HDF5 files |
-| `restart_interval` | `int` | `1000` | Save a restart checkpoint every N steps |
+| `restart_interval` | `int` or `None` | `1000` | Save a restart checkpoint every N steps and at the end; `None` or `0` writes no restart files |
 | `continue_run` | `bool` | `False` | Resume from existing restart file |
 | `overwrite` | `bool` | `False` | Delete existing snapshot files before starting |
 | `verbose` | `bool` | `True` | Print progress information |

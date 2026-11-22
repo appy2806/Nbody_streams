@@ -231,6 +231,7 @@ def run_restricted_nbody(
         time_sat, orbit_sat = agama.orbit(
             ic=prog_init, potential=pot_host_eff,
             time=time_total, timestart=time_end - time_total, trajsize=0,
+            separateTime=True,
         )
 
     # --- Main integration loop ---
@@ -274,14 +275,13 @@ def run_restricted_nbody(
         pot_total = agama.Potential(pot_host_eff, pot_sat_moving)
 
         # Integrate particles
-        traj = agama.orbit(
+        times, traj_phase_space = agama.orbit(
             ic=xv, potential=pot_total, trajsize=trajsize_each_step,
             verbose=verbose, time=time_step, timestart=time_begin,
-            accuracy=accuracy_integ,
-        )
+            accuracy=accuracy_integ, separateTime=True,
+        )  # times (N, S), traj_phase_space (N, S, 6)
 
-        traj_times = traj[0][0]
-        traj_phase_space = np.array([t[1] for t in traj])
+        traj_times = times[0]
 
         phase_space_list.append(traj_phase_space)
         time_list.append(traj_times)

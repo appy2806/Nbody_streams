@@ -210,8 +210,13 @@ _save_restart(
 ```
 
 Save a restart checkpoint to `<output_dir>/restart.npz` for crash recovery.
-Old restart files lacking multi-species keys are loaded gracefully by
-`_load_restart`.
+The file is uncompressed (float64 phase space barely compresses; zlib took
+minutes at N ~ 1e8) and written to a temporary file that is then renamed, so
+a crash mid-write keeps the previous checkpoint.  Mass and softening are
+stored as one value when constant, one value per species when each species is
+constant, and per particle otherwise; `_load_restart` always returns full
+(N,) arrays.  Older restart files (compressed, per-particle arrays, or no
+multi-species keys) load the same way.
 
 ### `_load_restart`
 

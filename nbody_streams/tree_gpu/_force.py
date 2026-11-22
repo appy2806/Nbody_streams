@@ -44,7 +44,7 @@ try:
 except ImportError:
     raise ImportError("CuPy is required for tree_gpu.py")
 
-from .._recentre import to_float32_relative
+from .._recentre import to_float32_relative_soa
 
 __all__ = ["tree_gravity_gpu", "TreeGPU", "cuda_alive"]
 
@@ -84,12 +84,71 @@ def cuda_alive() -> bool:
         return True           # can't check; assume healthy
     return _libcudart.cudaGetLastError() == 0   # 0 == cudaSuccess
 
-_BYTES_PER_PARTICLE = 52  # ~tests reveal roughly 52 floats per particle (pos+mass+eps) with tree overhead
-_IDX_CAP = 0x0FFFFFFF
+# GPU memory model of one TreeGPU handle, measured with cudaMemGetInfo (see
+# docs/tree_gpu.md, "GPU memory layout"):
+#   tree buffers after the first force call: 151 B/particle at allocation
+#   (particle arrays 76, node pool 48, cell list 24, work queues 4) plus the
+#   per-cell multipole arrays (124 B/cell), walk groups (8) and sort scratch;
+#   216 covers trees of up to 0.4 N cells (measured <= 0.37 N, a cubic
+#   lattice at nleaf=16: 208 B/particle).
+_TREE_BYTES_PER_PARTICLE = 216
+#   per tree_gravity_gpu call (CuPy pool): float32 SoA positions (12), SoA
+#   acc + phi (16), the returned (N, 3) acc (12).
+_CALL_BYTES_PER_PARTICLE = 40
+#   N-independent: minimum buffer sizes, Thrust scratch, CuPy kernels ...
+_FIXED_BYTES = 64 << 20
+#   ... and the tree-walk pool, 2 MiB per persistent block x 6 blocks per SM
+#   (capped at 1/4 of the free memory when it is allocated).
+_WALK_POOL_BYTES_PER_SM = 12 << 20
+# Index-packing limit of the tree build: the particle index has 29 bits in
+# Particle4 (= _lib.tree_max_particles()).
+_IDX_CAP = 1 << 29
 
-def _max_n() -> int:
+_n_sm = None
+_MEM_FRACTION = 0.80
+
+
+def set_memory_fraction(fraction: float) -> float:
+    """Set the fraction of free GPU memory the GPU tree may plan for.
+
+    ``TreeGPU`` and ``run_nbody_gpu_tree`` refuse an N whose modelled
+    footprint exceeds this fraction of the free memory (default 0.80; the
+    rest absorbs allocator rounding, fragmentation and CuPy pool growth).
+    The model is sized for the worst distribution measured (a cubic lattice
+    at ``nleaf=16``); smooth distributions use ~10-20% less, so e.g. 0.95
+    admits ~1.2x more particles on a dedicated GPU.  Above the default an
+    unusual distribution can run out of memory inside the build, which ends
+    the process.
+
+    Returns the previous value.
+    """
+    global _MEM_FRACTION
+    f = float(fraction)
+    if not 0.0 < f <= 1.0:
+        raise ValueError(f"fraction must be in (0, 1], got {fraction}")
+    old, _MEM_FRACTION = _MEM_FRACTION, f
+    return old
+
+
+def get_memory_fraction() -> float:
+    """Fraction of free GPU memory the GPU tree may plan for (see
+    :func:`set_memory_fraction`)."""
+    return _MEM_FRACTION
+
+
+def _max_n(extra_bytes_per_particle: int = 0) -> int:
+    """Largest N whose tree (plus ``extra_bytes_per_particle`` that the caller
+    will allocate later) fits in ``get_memory_fraction()`` (default 80%) of
+    the free GPU memory; the rest absorbs allocator rounding, fragmentation
+    and CuPy pool growth."""
+    global _n_sm
+    if _n_sm is None:
+        _n_sm = int(cp.cuda.Device().attributes["MultiProcessorCount"])
     free, _ = cp.cuda.runtime.memGetInfo()
-    return min(int(free * 0.80) // _BYTES_PER_PARTICLE, _IDX_CAP)
+    walk = min(free // 4, _WALK_POOL_BYTES_PER_SM * _n_sm)
+    usable = int(free * _MEM_FRACTION) - _FIXED_BYTES - walk
+    per = _TREE_BYTES_PER_PARTICLE + _CALL_BYTES_PER_PARTICLE + int(extra_bytes_per_particle)
+    return max(0, min(usable // per, _IDX_CAP))
 
 # ---------------------------------------------------------------------------
 # Load shared library
@@ -131,6 +190,7 @@ _lib.tree_set_pos_mass_device.argtypes = [_ptr, _int, _ptr, _ptr, _ptr, _ptr]
 
 # Pipeline
 _lib.tree_build.argtypes              = [_ptr, _int]
+_lib.tree_build.restype               = _int
 _lib.tree_compute_multipoles.argtypes = [_ptr]
 _lib.tree_make_groups.argtypes        = [_ptr, _int, _int]
 _lib.tree_compute_forces.restype      = _ResInteractions
@@ -138,6 +198,12 @@ _lib.tree_compute_forces.argtypes     = [_ptr]
 
 # Output
 _lib.tree_get_acc_device.argtypes = [_ptr, _int, _ptr, _ptr, _ptr, _ptr]
+
+# Diagnostics: last build's usage / capacities, index limits, packing self-test
+_lib.tree_get_build_stats.argtypes = [_ptr, _ptr]
+_lib.tree_max_particles.restype    = _int
+_lib.tree_max_cells.restype        = _int
+_lib.tree_selftest_packing.restype = _int
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -180,7 +246,8 @@ class TreeGPU:
     Parameters
     ----------
     n : int
-        Number of particles.  Must not exceed available VRAM.
+        Number of particles (>= 0; 0 gives empty results).  Must not exceed
+        available VRAM.
     eps : float
         Default (fallback) softening length.  Used only when
         ``tree_set_pos_mass_device`` is called; ignored when
@@ -201,19 +268,43 @@ class TreeGPU:
     def __init__(self, n: int, eps: float = 0.0, theta: float = 0.6,
                  verbose: bool = False):
         self._ptr = None   # so close()/__del__ are safe if the checks below fail
+        if int(n) != n or n < 0:
+            raise ValueError(f"n must be a non-negative integer, got {n}")
+        n = int(n)
         if not 0.0 < theta < 1.15:
             raise ValueError(f"theta must be in (0, 1.15), got {theta}")
         cap = _max_n()
-        assert n <= cap, (
-            f"N={n:,} exceeds GPU cap ({cap:,}); "
-            f"limited by {'VRAM (80% free)' if cap < _IDX_CAP else '28-bit Particle4 index'}."
-        )
+        if n > cap:
+            raise ValueError(
+                f"N={n:,} exceeds the GPU tree limit ({cap:,}), set by "
+                + (f"{_MEM_FRACTION:.0%} of free GPU memory (raise it with "
+                   "nbody_streams.tree_gpu.set_memory_fraction)" if cap < _IDX_CAP
+                   else "the 29-bit particle index (2^29 particles)") + ".")
         self._ptr = _lib.tree_new(_flt(eps), _flt(theta))
         _lib.tree_set_verbose(self._ptr, int(verbose))
-        _lib.tree_alloc(self._ptr, n)
+        if n > 0:   # n = 0: no buffers; tree_gravity_gpu returns empty arrays
+            _lib.tree_alloc(self._ptr, n)
         self.n = n
         self.eps = eps
         self._theta = float(theta)
+        # Softening array validated by the last tree_gravity_gpu call; the
+        # same array object is not re-checked (the check costs a host sync).
+        self._eps_checked = None
+
+    def build_stats(self) -> dict:
+        """Usage of the last tree build and the current build capacities.
+
+        ``cells``, ``nodes`` (cells that were split), ``leaves``, ``levels``,
+        ``work_items`` (largest number of cells split at one level), and
+        ``cell_capacity``, ``node_capacity``, ``work_capacity``: the buffer
+        sizes, which grow (and stay grown) when a build overflows them.
+        """
+        out = (ctypes.c_longlong * 8)()
+        if self._ptr is not None and self.n > 0:
+            _lib.tree_get_build_stats(self._ptr, out)
+        keys = ("cells", "nodes", "leaves", "levels", "work_items",
+                "cell_capacity", "node_capacity", "work_capacity")
+        return dict(zip(keys, (int(v) for v in out)))
 
     @property
     def theta(self) -> float:
@@ -245,6 +336,19 @@ class TreeGPU:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+# One pass after the tree walk: SoA (3, N) -> (N, 3), remove the self term
+# from phi, scale by G.  Same float32 operations, in the same order, as the
+# separate stack / += / *= passes it replaces.
+_finish_kernel = cp.ElementwiseKernel(
+    "raw float32 a, float32 m, float32 e, float32 G, int64 n",
+    "raw float32 acc, float32 phi",
+    """
+    acc[3*i]     = a[i] * G;
+    acc[3*i + 1] = a[n + i] * G;
+    acc[3*i + 2] = a[2*n + i] * G;
+    phi = (phi + m / e) * G;
+    """, "tree_finish")
 
 def tree_gravity_gpu(
     pos: cp.ndarray,
@@ -305,6 +409,10 @@ def tree_gravity_gpu(
         the mass has been stripped and the mean lies far from the bound core.
         Ignored for float32 ``pos``.
 
+    With a ``tree`` handle, an ``eps`` array is checked for positive values
+    only the first time that array object is passed: modify it in place
+    between calls only with positive values.
+
     Returns
     -------
     acc : cp.ndarray, shape (N, 3)
@@ -314,15 +422,19 @@ def tree_gravity_gpu(
         excluding the particle's interaction with itself (same convention as
         the direct-sum backend).
     """
-    # --- float32 positions (relative to a centre for float64 input), F-order
-    #     so the x/y/z columns are contiguous views ---
+    # --- float32 positions (relative to a centre for float64 input) as
+    #     (3, N): the x/y/z rows are the contiguous arrays the tree reads ---
     if not isinstance(pos, cp.ndarray):
         pos = np.asarray(pos)
         pos = cp.asarray(pos, dtype=cp.float32 if pos.dtype == np.float32 else cp.float64)
-    pos_rel, _ = to_float32_relative(pos, mass, center)
-    pos_f = cp.asfortranarray(pos_rel)
+    assert pos.ndim == 2 and pos.shape[1] == 3, f"pos must be (N,3), got {pos.shape}"
+    if pos.shape[0] == 0:
+        if tree is not None:
+            assert tree.n == 0, f"pos has 0 particles but tree was allocated for {tree.n}"
+        return cp.empty((0, 3), dtype=cp.float32), cp.empty(0, dtype=cp.float32)
+    pos_soa, _ = to_float32_relative_soa(pos, mass, center)
 
-    n = pos_f.shape[0]
+    n = pos_soa.shape[1]
 
     # --- coerce mass ---
     if isinstance(mass, (np.ndarray, cp.ndarray)):
@@ -333,17 +445,18 @@ def tree_gravity_gpu(
         mass = cp.full(n, mass, dtype=cp.float32)
 
     # --- coerce eps (scalar or array) ---
-    eps_arr = _coerce_eps(eps, n)
+    if tree is not None and eps is tree._eps_checked:
+        eps_arr = eps
+    else:
+        eps_arr = _coerce_eps(eps, n)
+        if tree is not None:
+            tree._eps_checked = eps if eps_arr is eps else None
 
-    assert pos_f.shape == (n, 3), f"pos must be (N,3), got {pos_f.shape}"
     assert mass.shape == (n,),    f"mass must be (N,), got {mass.shape}"
     assert eps_arr.shape == (n,), f"eps must be scalar or (N,), got {eps_arr.shape}"
     assert nleaf in (16, 24, 32, 48, 64), f"nleaf must be in {{16,24,32,48,64}}"
 
-    # SoA views — F-order columns are contiguous, zero allocation
-    x = pos_f[:, 0]
-    y = pos_f[:, 1]
-    z = pos_f[:, 2]
+    x, y, z = pos_soa       # contiguous rows, zero allocation
 
     owns_tree = tree is None
     if owns_tree:
@@ -363,19 +476,21 @@ def tree_gravity_gpu(
             _gpu_ptr(mass), _gpu_ptr(eps_arr),
         )
 
-        _lib.tree_build(_tree, nleaf)
+        if _lib.tree_build(_tree, nleaf) != 0:
+            raise RuntimeError(
+                "GPU tree build overflowed and its buffers could not grow "
+                "(see stderr); too many (nearly) coincident particles?")
         _lib.tree_compute_multipoles(_tree)
         _lib.tree_make_groups(_tree, level_split, ncrit)
         _lib.tree_compute_forces(_tree)
 
-        ax  = cp.empty(n, dtype=cp.float32)
-        ay  = cp.empty(n, dtype=cp.float32)
-        az  = cp.empty(n, dtype=cp.float32)
-        phi = cp.empty(n, dtype=cp.float32)
+        acc_soa = cp.empty((3, n), dtype=cp.float32)
+        phi     = cp.empty(n, dtype=cp.float32)
 
         _lib.tree_get_acc_device(
             _tree, n,
-            _gpu_ptr(ax), _gpu_ptr(ay), _gpu_ptr(az), _gpu_ptr(phi),
+            _gpu_ptr(acc_soa[0]), _gpu_ptr(acc_soa[1]), _gpu_ptr(acc_soa[2]),
+            _gpu_ptr(phi),
         )
         # cp.cuda.runtime.deviceSynchronize()
 
@@ -383,15 +498,11 @@ def tree_gravity_gpu(
         if owns_tree:
             tree.close()
 
-    acc = cp.stack([ax, ay, az], axis=1)
-
     # The leaf direct sum includes i == j (r = 0, so no force but a potential
     # term -m_i/eps_i under the max-eps convention).  Remove it so phi matches
     # the direct-sum backend; bound-particle criteria (phi + v^2/2 < 0) rely on it.
-    phi += mass / eps_arr
-
-    if G != 1.0:
-        acc *= G
-        phi *= G
+    acc = cp.empty((n, 3), dtype=cp.float32)
+    if n:
+        _finish_kernel(acc_soa, mass, eps_arr, np.float32(G), np.int64(n), acc, phi)
 
     return acc, phi

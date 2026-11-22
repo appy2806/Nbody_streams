@@ -37,6 +37,7 @@ ImportError pointing at ``pip install 'nbody_streams[cuda]'``.
 
 from __future__ import annotations
 
+import inspect
 import math
 from bisect import bisect_right
 from pathlib import Path
@@ -60,6 +61,7 @@ _G       = 4.30091727067736e-06 # kpc (km/s)^2 / Msol
 _INV_4PIG = 1.0 / (4.0 * math.pi * _G)
 
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -77,6 +79,70 @@ def _prep_xyz(xyz) -> Tuple[cp.ndarray, bool]:
 
 def _squeeze(arr, single):
     return arr[0] if single else arr
+
+
+def _precision_dtype(precision: str):
+    if precision not in ('float64', 'float32'):
+        raise ValueError(f"precision must be 'float64' or 'float32', got {precision!r}.")
+    return np.float32 if precision == 'float32' else np.float64
+
+
+# ---------------------------------------------------------------------------
+# Kernel construction
+# ---------------------------------------------------------------------------
+#
+# Every kernel is templated on T (float32 or float64) and has the signature
+#     (raw float64 pos, raw T par) -> raw float64 out,   launched with size=N.
+# ``pos`` is the C-contiguous float64 (N,3) array from _prep_xyz; each thread
+# converts its own x, y, z to T in registers (as the tree code's recentring
+# does), so there is no separate cast pass.  ``par`` holds the model constants
+# in T; being an array it also lets CuPy resolve T.  Outputs are float64.
+#
+# The kernels return what the API returns: the force -grad(Phi) and the force
+# derivatives -d2Phi/dxi dxj, so no negation pass follows.  Literals are
+# wrapped as T(...) so float32 never silently promotes to double arithmetic.
+
+_PREAMBLE = r"""
+template <typename T> __device__ __forceinline__ T tiny_() { return sizeof(T) == 4 ? T(1e-30) : T(1e-300); }
+
+// Spherical model, dPhi/dr = c r:  force = -c x
+#define SPH_FORCE(c)                                                         \
+    out[3*i] = -(c) * x; out[3*i + 1] = -(c) * y; out[3*i + 2] = -(c) * z;
+
+// Spherical model, Hessian H_ij = A x_i x_j + B delta_ij:  writes -H as
+// [xx, yy, zz, xy, yz, xz]
+#define SPH_DERIV(A, B)                                                      \
+    out[6*i]     = -((A)*x*x + (B)); out[6*i + 1] = -((A)*y*y + (B));        \
+    out[6*i + 2] = -((A)*z*z + (B)); out[6*i + 3] = -(A)*x*y;                \
+    out[6*i + 4] = -(A)*y*z;         out[6*i + 5] = -(A)*x*z;
+
+// Same, from d2Phi/dr2 = D2 and (dPhi/dr)/r = B:  H = D2 n n + B (1 - n n).
+// For cusps B >> D2 at small r, and A x x + B would cancel in the radial
+// component; here every diagonal term is a sum of positive weights.
+#define SPH_DERIV_R(D2, B, r)                                                \
+    { T nx = x / (r), ny = y / (r), nz = z / (r), C = (D2) - (B);           \
+      T xx = nx*nx, yy = ny*ny, zz = nz*nz;                                 \
+      out[6*i]     = -((D2)*xx + (B)*(yy + zz));                            \
+      out[6*i + 1] = -((D2)*yy + (B)*(xx + zz));                            \
+      out[6*i + 2] = -((D2)*zz + (B)*(xx + yy));                            \
+      out[6*i + 3] = -C*nx*ny; out[6*i + 4] = -C*ny*nz; out[6*i + 5] = -C*nx*nz; }
+"""
+
+_LOAD = 'T x = (T)pos[3*i], y = (T)pos[3*i + 1], z = (T)pos[3*i + 2];\n'
+
+
+def _make_kernels(name: str, params: str, phi: str, force: str, deriv: str,
+                  rho: str = None, preamble: str = ''):
+    """Build the (phi, force, deriv, rho) kernels of one model.  *params*
+    unpacks ``par`` into named T constants and is shared by all four."""
+    def k(body, suffix):
+        if body is None:
+            return None
+        return cp.ElementwiseKernel(
+            'raw float64 pos, raw T par', 'raw float64 out',
+            _LOAD + params + body, f'{name}_{suffix}',
+            preamble=_PREAMBLE + preamble)
+    return k(phi, 'phi'), k(force, 'force'), k(deriv, 'deriv'), k(rho, 'rho')
 
 
 # ---------------------------------------------------------------------------
@@ -108,48 +174,67 @@ class _AnalyticBase(_GPUPotBase):
     ``isinstance(pot, _GPUPotBase)`` returns True for every GPU potential class —
     analytic or BFE — enabling a single ``_is_gpu_potential()`` check in run.py
     and tree_gpu without needing to enumerate both base classes.
+
+    Subclasses either set ``_kernels = (phi, force, deriv, rho)`` (from
+    ``_make_kernels``) and call ``_set_params``, or override the hooks
+    ``_phi/_force/_deriv/_rho(arr, t)``, which take the float64 (N,3) array
+    from ``_prep_xyz`` and return float64 results.
     """
 
+    _dt = np.float64
+    _kernels = (None, None, None, None)
+
+    @property
+    def precision(self) -> str:
+        """Arithmetic precision of the kernels, ``'float64'`` or ``'float32'``."""
+        return np.dtype(self._dt).name
+
+    def _set_params(self, precision: str, *values):
+        self._dt  = _precision_dtype(precision)
+        self._par = cp.asarray(values, dtype=self._dt)
+
+    def _launch(self, kernel, arr, ncomp: int, par=None):
+        n   = arr.shape[0]
+        out = cp.empty((n,) if ncomp == 1 else (n, ncomp), dtype=cp.float64)
+        if n:
+            kernel(arr, self._par if par is None else par, out, size=n)
+        return out
+
+    # --- kernel hooks -------------------------------------------------------
+    def _phi(self, arr, t: float = 0.0):
+        return self._launch(self._kernels[0], arr, 1)
+
+    def _force(self, arr, t: float = 0.0):     # -grad(Phi)
+        return self._launch(self._kernels[1], arr, 3)
+
+    def _deriv(self, arr, t: float = 0.0):     # -Hessian [xx,yy,zz,xy,yz,xz]
+        return self._launch(self._kernels[2], arr, 6)
+
+    def _rho(self, arr, t: float = 0.0):
+        return self._launch(self._kernels[3], arr, 1)
+
+    # --- public API ---------------------------------------------------------
     def potential(self, xyz, t: float = 0.0) -> cp.ndarray:
         arr, single = _prep_xyz(xyz)
-        phi = self._phi(arr[:, 0], arr[:, 1], arr[:, 2])
-        return _squeeze(phi, single)
+        return _squeeze(self._phi(arr, t), single)
 
     def force(self, xyz, t: float = 0.0) -> cp.ndarray:
         arr, single = _prep_xyz(xyz)
-        # We pass the shape directly to the grad function
-        # and let the subclass return the finished 2D array
-        out = -self._grad(arr[:, 0], arr[:, 1], arr[:, 2]) # force = -grad(Phi)
-        return _squeeze(out, single)
+        return _squeeze(self._force(arr, t), single)
 
     def density(self, xyz, t: float = 0.0) -> cp.ndarray:
         arr, single = _prep_xyz(xyz)
-        rho = self._rho(arr[:, 0], arr[:, 1], arr[:, 2])
-        return _squeeze(rho, single)
+        return _squeeze(self._rho(arr, t), single)
 
-    def forceDeriv(self, xyz, t=0.0):
-            arr, single = _prep_xyz(xyz)
-            x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
-            # Get both in their final stacked forms directly from kernels
-            f = - self._grad(x, y, z)
-            h = self._hess(x, y, z) 
-            if single:
-                return f[0], -h[0]
-            return f, -h
-    
+    def forceDeriv(self, xyz, t: float = 0.0):
+        arr, single = _prep_xyz(xyz)
+        f, d = self._force(arr, t), self._deriv(arr, t)
+        return (f[0], d[0]) if single else (f, d)
+
     def evalDeriv(self, xyz, t: float = 0.0) -> Tuple[cp.ndarray, cp.ndarray, cp.ndarray]:
         arr, single = _prep_xyz(xyz)
-        x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
-        phi = self._phi(x, y, z)
-        grad = self._grad(x, y, z)
-        h = self._hess(x, y, z)
-        # Physics mapping: Force = -Grad, Deriv = -Hessian
-        force = -grad
-        deriv = -h
-
-        if single:
-            return phi[0], force[0], deriv[0]
-        return phi, force, deriv
+        phi, f, d = self._phi(arr, t), self._force(arr, t), self._deriv(arr, t)
+        return (phi[0], f[0], d[0]) if single else (phi, f, d)
 
     def eval(self, xyz, pot: bool = False, acc: bool = False,
              der: bool = False, t: float = 0.0):
@@ -171,108 +256,103 @@ class _AnalyticBase(_GPUPotBase):
         if not (pot or acc or der):
             raise ValueError("eval(): at least one of pot, acc, der must be True.")
         arr, single = _prep_xyz(xyz)
-        x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
         results = []
         if pot:
-            results.append(_squeeze(self._phi(x, y, z), single))
+            results.append(_squeeze(self._phi(arr, t), single))
         if acc:
-            results.append(_squeeze(-self._grad(x, y, z), single))
+            results.append(_squeeze(self._force(arr, t), single))
         if der:
-            results.append(_squeeze(-self._hess(x, y, z), single))
+            results.append(_squeeze(self._deriv(arr, t), single))
         return results[0] if len(results) == 1 else tuple(results)
 
-    # Subclasses must implement:
-    def _phi(self, x, y, z): raise NotImplementedError
-    def _grad(self, x, y, z): raise NotImplementedError   # returns (dPhi/dx, dPhi/dy, dPhi/dz)
-    def _hess(self, x, y, z): raise NotImplementedError   # returns (N,6) [Hxx,Hyy,Hzz,Hxy,Hyz,Hxz]
-    def _rho(self, x, y, z): raise NotImplementedError
+
+_PRECISION_DOC = """\
+precision : {'float64', 'float32'}
+    Arithmetic inside the kernels (default ``'float64'``).  Positions are
+    read and results written as float64 either way.  ``'float32'`` is good
+    to ~1e-7 relative and is much faster on GPUs with slow FP64 (consumer
+    and L40-class cards run it at 1/64 rate)."""
 
 
 # ---------------------------------------------------------------------------
 # NFW
 # ---------------------------------------------------------------------------
 
-# --- Fused Kernels ---
-# We define these outside the class so they are compiled only once.
+# g(s) = [ln(1+s) - s/(1+s)] / s^2 with s = r/rs, so dPhi/dr = GM g / rs^2
+# and d2Phi/dr2 = GM g'(s) / rs^3.  The closed form cancels for small s (both
+# terms of the bracket go as s, and g' = q^2/s - 2g/s with q = 1/(1+s)).
+# There we use w = s/(1+s) = 1 - q, for which ln(1+s) = -ln(1-w) gives
+#     g = q^2 G(w),   g' = q^3 (q G'(w) - 2 G(w)),   G(w) = sum_j w^j / (j+2),
+# a series of positive terms with only a mild (x1.5) cancellation in g'.
+# 24 terms reach rounding level below s0 = 1 (float) / 0.25 (double); above
+# s0 the closed form loses at most ~1.5/s0^2 eps.
+_NFW_PRE = r"""
+// 1/(j+2), j = 0..23, in double and float: converting double -> float runs
+// on the FP64 units, which are slow on consumer GPUs
+__constant__ double nfw_c_[24] = {
+    0.5, 0.3333333333333333, 0.25, 0.2, 0.16666666666666666, 0.14285714285714285,
+    0.125, 0.1111111111111111, 0.1, 0.09090909090909091, 0.08333333333333333, 0.07692307692307693,
+    0.07142857142857142, 0.06666666666666667, 0.0625, 0.058823529411764705, 0.05555555555555555, 0.05263157894736842,
+    0.05, 0.047619047619047616, 0.045454545454545456, 0.043478260869565216, 0.041666666666666664, 0.04};
+__constant__ float nfw_cf_[24] = {
+    0.5f, 0.3333333333333333f, 0.25f, 0.2f, 0.16666666666666666f, 0.14285714285714285f,
+    0.125f, 0.1111111111111111f, 0.1f, 0.09090909090909091f, 0.08333333333333333f, 0.07692307692307693f,
+    0.07142857142857142f, 0.06666666666666667f, 0.0625f, 0.058823529411764705f, 0.05555555555555555f, 0.05263157894736842f,
+    0.05f, 0.047619047619047616f, 0.045454545454545456f, 0.043478260869565216f, 0.041666666666666664f, 0.04f};
+template <typename T> __device__ __forceinline__ T nfw_coef_(int j)
+{ return sizeof(T) == 4 ? T(nfw_cf_[j]) : T(nfw_c_[j]); }
 
-_nfw_phi_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T rs', 'T out',
-    '''
-    T r_raw = sqrt(x*x + y*y + z*z);
-    T r = (r_raw < 1e-300) ? (T)1e-300 : r_raw; 
-    out = -GM * log1p(r / rs) / r;
-    ''', 'nfw_phi'
+template <typename T> __device__ void nfw_g_(T s, T* g, T* dg)
+{
+    T q = T(1) / (T(1) + s);
+    if (s < (sizeof(T) == 4 ? T(1) : T(0.25))) {
+        T w = s * q, G = nfw_coef_<T>(23), dG = T(0);
+        for (int j = 22; j >= 0; --j) { dG = dG * w + G; G = G * w + nfw_coef_<T>(j); }
+        *g  = q * q * G;
+        *dg = q * q * q * (q * dG - T(2) * G);
+    } else {
+        T is = T(1) / s;
+        *g  = (log1p(s) - s * q) * is * is;
+        *dg = q * q * is - T(2) * (*g) * is;
+    }
+}
+"""
+
+_NFW = _make_kernels(
+    'nfw', 'T GM = par[0], rs = par[1], M = par[2];\n'
+           'T r = sqrt(x*x + y*y + z*z); if (r < tiny_<T>()) r = tiny_<T>();\n',
+    phi='out[i] = -GM * log1p(r / rs) / r;',
+    force='''
+    T g, dg; nfw_g_(r / rs, &g, &dg);
+    T c = GM * g / (rs * rs * r);
+    SPH_FORCE(c)
+    ''',
+    deriv='''
+    T g, dg; nfw_g_(r / rs, &g, &dg);
+    T B  = GM * g / (rs * rs * r);                      // (dPhi/dr) / r
+    T D2 = GM * dg / (rs * rs * rs);                    // d2Phi/dr2
+    SPH_DERIV_R(D2, B, r)
+    ''',
+    rho='T rrs = r + rs; out[i] = M / (T(12.566370614359172) * r * rrs * rrs);',
+    preamble=_NFW_PRE,
 )
 
-_nfw_rho_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T M, T rs', 'T out',
-    '''
-    T r_raw = sqrt(x*x + y*y + z*z);
-    // Ternary: (condition) ? value_if_true : value_if_false
-    T r = (r_raw < (T)1e-300) ? (T)1e-300 : r_raw; 
-    
-    T rrs = r + rs;
-    // Using a literal for PI is safer than relying on M_PI being defined
-    out = M / (12.566370614359172 * r * rrs * rrs); 
-    ''', 'nfw_rho'
-)
-
-# 'T gx, T gy, T gz' becomes one 2D array 'T out'
-# We access it using the index 'i' (the point index)
-_nfw_grad_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T rs',
-    'raw T out', # 'raw' allows us to index manually
-    '''
-    T r = sqrt(x*x + y*y + z*z);
-    T r_safe = (r < (T)1e-300) ? (T)1e-300 : r;
-    T dphi_dr = GM * (log1p(r_safe/rs)/(r_safe*r_safe) - 1.0/(r_safe*(r_safe+rs)));
-    
-    T inv_r = 1.0 / r_safe;
-    // We write directly into the final memory block
-    out[i*3 + 0] = dphi_dr * x * inv_r; // Positive dPhi/dx
-    out[i*3 + 1] = dphi_dr * y * inv_r; // Positive dPhi/dy
-    out[i*3 + 2] = dphi_dr * z * inv_r; // Positive dPhi/dz
-    ''', 'nfw_grad'
-)
-
-_nfw_hess_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T rs',
-    'raw T out', 
-    '''
-    T r2_raw = x*x + y*y + z*z;
-    T r2 = (r2_raw < (T)1e-300) ? (T)1e-300 : r2_raw;
-    T r = sqrt(r2);
-    T rrs = r + rs;
-    T ln_term = log1p(r / rs);
-    
-    // Physics: dPhi/dr and d2Phi/dr2
-    T d1 = GM * (ln_term/r2 - 1.0/(r*rrs));
-    T d2 = GM * (-2.0*ln_term/(r2*r) + 1.0/(r2*rrs) + (2.0*r + rs)/(r2*rrs*rrs));
-    
-    // Geometry: Cartesian Hessian components
-    T inv_r2 = 1.0 / r2;
-    T d1_r = d1 / r;
-    T A = (d2 - d1_r) * inv_r2;
-    
-    // Standard Layout: [Hxx, Hyy, Hzz, Hxy, Hyz, Hxz]
-    out[i*6 + 0] = A*x*x + d1_r; // Hxx
-    out[i*6 + 1] = A*y*y + d1_r; // Hyy
-    out[i*6 + 2] = A*z*z + d1_r; // Hzz
-    out[i*6 + 3] = A*x*y;        // Hxy
-    out[i*6 + 4] = A*y*z;        // Hyz
-    out[i*6 + 5] = A*x*z;        // Hxz
-    ''', 'nfw_hess'
-)
 
 class NFWPotentialGPU(_AnalyticBase):
     """
     Navarro-Frenk-White potential optimized with CuPy ElementwiseKernels.
+
+    Constructor: NFWPotentialGPU(mass=1, scaleRadius=1, precision='float64')
     """
 
-    def __init__(self, mass: float = 1.0, scaleRadius: float = 1.0):
+    _kernels = _NFW
+
+    def __init__(self, mass: float = 1.0, scaleRadius: float = 1.0,
+                 precision: str = 'float64'):
         self._M  = float(mass)
         self._GM = _G * self._M
         self._rs = float(scaleRadius)
+        self._set_params(precision, self._GM, self._rs, self._M)
 
     @classmethod
     def from_agama(cls, pot) -> "NFWPotentialGPU":
@@ -282,96 +362,37 @@ class NFWPotentialGPU(_AnalyticBase):
             "Construct directly:  NFWPotentialGPU(mass=..., scaleRadius=...)"
         )
 
-    def _phi(self, x, y, z):
-        return _nfw_phi_kernel(x, y, z, self._GM, self._rs)
-
-    def _rho(self, x, y, z):
-        return _nfw_rho_kernel(x, y, z, self._M, self._rs)
-
-    def _grad(self, x, y, z):
-            # Allocate the memory once
-            out = cp.empty((x.size, 3), dtype=x.dtype)
-            # Kernel writes directly into 'out'
-            _nfw_grad_kernel(x, y, z, self._GM, self._rs, out)
-            return out
-
-    def _hess(self, x, y, z):
-            N = x.size
-            out = cp.empty((N, 6), dtype=x.dtype)
-            # Similar logic for Hessian kernel using 'raw T out'
-            _nfw_hess_kernel(x, y, z, self._GM, self._rs, out)
-            return out
-
 
 # ---------------------------------------------------------------------------
 # Plummer
 # ---------------------------------------------------------------------------
 
-_plummer_phi_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T b2', 'T out',
-    '''
-    T r2 = x*x + y*y + z*z;
-    out = -GM / sqrt(r2 + b2);
-    ''', 'plummer_phi'
+_PLUMMER = _make_kernels(
+    'plummer', 'T GM = par[0], b2 = par[1], M = par[2];\n'
+               'T s2 = x*x + y*y + z*z + b2, s = sqrt(s2);\n',
+    phi='out[i] = -GM / s;',
+    force='T c = GM / (s2 * s); SPH_FORCE(c)',
+    deriv='T B = GM / (s2 * s); T A = T(-3) * B / s2; SPH_DERIV(A, B)',
+    # rho = 3M/(4pi) b^2 / (r^2+b^2)^(5/2)
+    rho='out[i] = (T(3) * M / T(12.566370614359172)) * b2 / (s2 * s2 * s);',
 )
 
-_plummer_rho_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T M, T b2', 'T out',
-    '''
-    T r2 = x*x + y*y + z*z;
-    T s2 = r2 + b2;
-    // rho = 3M/(4pi) * b² / (r²+b²)^(2.5)
-    out = (3.0 * M / 12.566370614359172) * b2 / pow(s2, 2.5);
-    ''', 'plummer_rho'
-)
-
-_plummer_grad_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T b2',
-    'raw T out',
-    '''
-    T r2 = x*x + y*y + z*z;
-    T s2 = r2 + b2;
-    T c = GM / (s2 * sqrt(s2)); // GM/s^3
-    
-    out[i*3 + 0] = c * x; // dPhi/dx
-    out[i*3 + 1] = c * y; // dPhi/dy
-    out[i*3 + 2] = c * z; // dPhi/dz
-    ''', 'plummer_grad'
-)
-
-_plummer_hess_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T b2',
-    'raw T out',
-    '''
-    T r2 = x*x + y*y + z*z;
-    T s2 = r2 + b2;
-    T s  = sqrt(s2);
-    T s3 = s2 * s;
-    T s5 = s3 * s2;
-
-    T A = -3.0 * GM / s5;
-    T B = GM / s3;
-
-    out[i*6 + 0] = A*x*x + B; // Hxx
-    out[i*6 + 1] = A*y*y + B; // Hyy
-    out[i*6 + 2] = A*z*z + B; // Hzz
-    out[i*6 + 3] = A*x*y;     // Hxy
-    out[i*6 + 4] = A*y*z;     // Hyz
-    out[i*6 + 5] = A*x*z;     // Hxz
-    ''', 'plummer_hess'
-)
 
 class PlummerPotentialGPU(_AnalyticBase):
     """
     Plummer sphere: Phi(r) = -GM / sqrt(r^2 + b^2)
 
-    Constructor: PlummerPotentialGPU(mass=1, scaleRadius=1)
+    Constructor: PlummerPotentialGPU(mass=1, scaleRadius=1, precision='float64')
     """
 
-    def __init__(self, mass: float = 1.0, scaleRadius: float = 1.0):
+    _kernels = _PLUMMER
+
+    def __init__(self, mass: float = 1.0, scaleRadius: float = 1.0,
+                 precision: str = 'float64'):
         self._M  = float(mass)
         self._GM = _G * self._M
         self._b2 = float(scaleRadius) * float(scaleRadius)
+        self._set_params(precision, self._GM, self._b2, self._M)
 
     @classmethod
     def from_agama(cls, pot) -> "PlummerPotentialGPU":
@@ -381,101 +402,42 @@ class PlummerPotentialGPU(_AnalyticBase):
             "Construct directly:  PlummerPotentialGPU(mass=..., scaleRadius=...)"
         )
 
-    def _phi(self, x, y, z):
-            return _plummer_phi_kernel(x, y, z, self._GM, self._b2)
-
-    def _rho(self, x, y, z):
-        return _plummer_rho_kernel(x, y, z, self._M, self._b2)
-
-    def _grad(self, x, y, z):
-        # Return -grad(Phi) = Force
-        out = cp.empty((x.size, 3), dtype=x.dtype)
-        _plummer_grad_kernel(x, y, z, self._GM, self._b2, out)
-        return out
-
-    def _hess(self, x, y, z):
-        out = cp.empty((x.size, 6), dtype=x.dtype)
-        _plummer_hess_kernel(x, y, z, self._GM, self._b2, out)
-        return out
 
 # ---------------------------------------------------------------------------
 # Hernquist
 # ---------------------------------------------------------------------------
 
-_hernquist_phi_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T a', 'T out',
-    '''
-    T r = sqrt(x*x + y*y + z*z);
-    out = -GM / (r + a);
-    ''', 'hernquist_phi'
+_HERNQUIST = _make_kernels(
+    'hernquist', 'T GM = par[0], a = par[1], M = par[2];\n'
+                 'T r = sqrt(x*x + y*y + z*z); if (r < tiny_<T>()) r = tiny_<T>();\n'
+                 'T ra = r + a;\n',
+    phi='out[i] = -GM / ra;',
+    # dPhi/dr = GM/(r+a)^2,  d2Phi/dr2 = -2GM/(r+a)^3
+    force='T c = GM / (ra * ra * r); SPH_FORCE(c)',
+    deriv='''
+    T B = GM / (ra * ra * r);
+    SPH_DERIV_R(T(-2) * GM / (ra * ra * ra), B, r)
+    ''',
+    # rho = M a / (2 pi r (r+a)^3)
+    rho='out[i] = (M * a) / (T(6.283185307179586) * r * ra * ra * ra);',
 )
 
-_hernquist_rho_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T M, T a', 'T out',
-    '''
-    T r_raw = sqrt(x*x + y*y + z*z);
-    T r = (r_raw < (T)1e-300) ? (T)1e-300 : r_raw;
-    // rho = M*a / (2*pi * r * (r+a)^3)
-    out = (M * a) / (6.283185307179586 * r * pow(r + a, 3));
-    ''', 'hernquist_rho'
-)
-
-_hernquist_grad_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T a',
-    'raw T out',
-    '''
-    T r_raw = sqrt(x*x + y*y + z*z);
-    T r = (r_raw < (T)1e-300) ? (T)1e-300 : r_raw;
-    
-    // dPhi/dr = GM / (r+a)^2
-    T ra = r + a;
-    T f_coeff = GM / (ra * ra * r); 
-    
-    out[i*3 + 0] = f_coeff * x; // Grad X
-    out[i*3 + 1] = f_coeff * y; // Grad Y
-    out[i*3 + 2] = f_coeff * z; // Grad Z
-    ''', 'hernquist_grad'
-)
-
-_hernquist_hess_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T a',
-    'raw T out',
-    '''
-    T r2_raw = x*x + y*y + z*z;
-    T r2 = (r2_raw < (T)1e-300) ? (T)1e-300 : r2_raw;
-    T r = sqrt(r2);
-    T ra = r + a;
-    
-    // Physics:
-    // d1 = dPhi/dr = GM / (r+a)^2
-    // d2 = d2Phi/dr2 = -2GM / (r+a)^3
-    T d1 = GM / (ra * ra);
-    T d2 = -2.0 * GM / (ra * ra * ra);
-    
-    // Geometry: Cartesian Hessian
-    T d1_r = d1 / r;
-    T A = (d2 - d1_r) / r2;
-    
-    out[i*6 + 0] = A*x*x + d1_r; // Hxx
-    out[i*6 + 1] = A*y*y + d1_r; // Hyy
-    out[i*6 + 2] = A*z*z + d1_r; // Hzz
-    out[i*6 + 3] = A*x*y;        // Hxy
-    out[i*6 + 4] = A*y*z;        // Hyz
-    out[i*6 + 5] = A*x*z;        // Hxz
-    ''', 'hernquist_hess'
-)
 
 class HernquistPotentialGPU(_AnalyticBase):
     """
     Hernquist: Phi(r) = -GM / (r + a)
 
-    Constructor: HernquistPotentialGPU(mass=1, scaleRadius=1)
+    Constructor: HernquistPotentialGPU(mass=1, scaleRadius=1, precision='float64')
     """
 
-    def __init__(self, mass: float = 1.0, scaleRadius: float = 1.0):
+    _kernels = _HERNQUIST
+
+    def __init__(self, mass: float = 1.0, scaleRadius: float = 1.0,
+                 precision: str = 'float64'):
         self._M  = float(mass)
         self._GM = _G * self._M
         self._a  = float(scaleRadius)
+        self._set_params(precision, self._GM, self._a, self._M)
 
     @classmethod
     def from_agama(cls, pot) -> "HernquistPotentialGPU":
@@ -485,114 +447,58 @@ class HernquistPotentialGPU(_AnalyticBase):
             "Construct directly:  HernquistPotentialGPU(mass=..., scaleRadius=...)"
         )
 
-    def _phi(self, x, y, z):
-        return _hernquist_phi_kernel(x, y, z, self._GM, self._a)
-
-    def _rho(self, x, y, z):
-        return _hernquist_rho_kernel(x, y, z, self._M, self._a)
-
-    def _grad(self, x, y, z):
-        out = cp.empty((x.size, 3), dtype=x.dtype)
-        _hernquist_grad_kernel(x, y, z, self._GM, self._a, out)
-        return out
-
-    def _hess(self, x, y, z):
-        out = cp.empty((x.size, 6), dtype=x.dtype)
-        _hernquist_hess_kernel(x, y, z, self._GM, self._a, out)
-        return out
 
 # ---------------------------------------------------------------------------
 # Dehnen (spherical)
 # ---------------------------------------------------------------------------
 
-_dehnen_phi_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T a, T g, T exp', 'T out',
-    '''
-    T r = sqrt(x*x + y*y + z*z);
-    T safe_r = (r < (T)1e-300) ? (T)1e-300 : r;
-    T u = safe_r / (safe_r + a);
-    out = -(GM / a) * (1.0 - pow(u, exp)) / exp;
-    ''', 'dehnen_phi'
+_DEHNEN = _make_kernels(
+    'dehnen', 'T GM = par[0], a = par[1], g = par[2], e = par[3], M = par[4];\n'
+              'T r = sqrt(x*x + y*y + z*z); if (r < tiny_<T>()) r = tiny_<T>();\n'
+              'T ra = r + a;\n',
+    # 1 - (r/(r+a))^e written as -expm1(-e ln(1 + a/r)): no cancellation at r >> a
+    phi='out[i] = (GM / a) * expm1(-e * log1p(a / r)) / e;',
+    # dPhi/dr = GM r^(1-g) (r+a)^(g-3)
+    force='T c = GM * pow(r, T(1) - g) * pow(ra, g - T(3)) / r; SPH_FORCE(c)',
+    deriv='''
+    T d1 = GM * pow(r, T(1) - g) * pow(ra, g - T(3));
+    T d2 = d1 * ((T(1) - g) / r + (g - T(3)) / ra);
+    SPH_DERIV_R(d2, d1 / r, r)
+    ''',
+    # rho = (3-g) M / (4 pi a^3) (r/a)^(-g) (1 + r/a)^(g-4)
+    rho='''
+    out[i] = (T(3) - g) * M / (T(12.566370614359172) * a * a * a)
+             * pow(r / a, -g) * pow(T(1) + r / a, g - T(4));
+    ''',
 )
 
-_dehnen_rho_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T M, T a, T g', 'T out',
-    '''
-    T r = sqrt(x*x + y*y + z*z);
-    T safe_r = (r < (T)1e-300) ? (T)1e-300 : r;
-    // rho = (3-g)*M / (4*pi*a³) * (r/a)^(-g) * (1 + r/a)^(g-4)
-    T term1 = (3.0 - g) * M / (12.566370614359172 * a * a * a);
-    out = term1 * pow(safe_r / a, -g) * pow(1.0 + safe_r / a, g - 4.0);
-    ''', 'dehnen_rho'
-)
-
-_dehnen_grad_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T a, T g',
-    'raw T out',
-    '''
-    T r = sqrt(x*x + y*y + z*z);
-    T safe_r = (r < (T)1e-300) ? (T)1e-300 : r;
-    T ra = safe_r + a;
-    
-    // dPhi/dr = GM * r^(1-g) * (r+a)^(g-3)
-    T d1 = GM * pow(safe_r, 1.0 - g) * pow(ra, g - 3.0);
-    T g_coeff = d1 / safe_r;
-    
-    out[i*3 + 0] = g_coeff * x; // Grad X
-    out[i*3 + 1] = g_coeff * y; // Grad Y
-    out[i*3 + 2] = g_coeff * z; // Grad Z
-    ''', 'dehnen_grad'
-)
-
-_dehnen_hess_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T a, T g',
-    'raw T out',
-    '''
-    T r2 = x*x + y*y + z*z;
-    T r = sqrt(r2);
-    T safe_r = (r < (T)1e-300) ? (T)1e-300 : r;
-    T ra = safe_r + a;
-    
-    // d1 = dPhi/dr
-    T d1 = GM * pow(safe_r, 1.0 - g) * pow(ra, g - 3.0);
-    // d2 = d2Phi/dr2 = d1 * ((1-g)/r + (g-3)/(r+a))
-    T d2 = d1 * ((1.0 - g) / safe_r + (g - 3.0) / ra);
-    
-    T d1_r = d1 / safe_r;
-    T A = (d2 - d1_r) / (safe_r * safe_r);
-    
-    out[i*6 + 0] = A*x*x + d1_r; // Hxx
-    out[i*6 + 1] = A*y*y + d1_r; // Hyy
-    out[i*6 + 2] = A*z*z + d1_r; // Hzz
-    out[i*6 + 3] = A*x*y;        // Hxy
-    out[i*6 + 4] = A*y*z;        // Hyz
-    out[i*6 + 5] = A*x*z;        // Hxz
-    ''', 'dehnen_hess'
-)
 
 class DehnenSphericalPotentialGPU(_AnalyticBase):
     """
     Dehnen spherical: Phi(r) = -(GM/a) * (1 - (r/(r+a))^(2-gamma)) / (2-gamma)
     Special case gamma=2: Phi(r) = -(GM/a) * ln(1 + a/r)
 
-    Constructor: DehnenSphericalPotentialGPU(mass=1, scaleRadius=1, gamma=1)
+    Constructor: DehnenSphericalPotentialGPU(mass=1, scaleRadius=1, gamma=1, precision='float64')
     Note: gamma must be in [0,3). Triaxial Dehnen is NOT implemented (needs quadrature).
     """
 
+    _kernels = _DEHNEN
+
     def __init__(self, mass: float = 1.0, scaleRadius: float = 1.0,
-                 gamma: float = 1.0):
+                 gamma: float = 1.0, precision: str = 'float64'):
         if not 0.0 <= gamma < 2.0:
             raise ValueError(
                 f"gamma must be in [0, 2) for the GPU kernel, got {gamma}. "
                 "gamma=2 or triaxial cases are handled by PotentialGPU(type='Dehnen', ...) "
                 "which routes through Agama CPU."
             )
-        
+
         self._M = float(mass)
         self._GM    = _G * self._M
         self._a     = float(scaleRadius)
         self._gamma = float(gamma)
         self._exp   = 2.0 - self._gamma   # exponent in (r/(r+a))^(2-gamma)
+        self._set_params(precision, self._GM, self._a, self._gamma, self._exp, self._M)
 
     @classmethod
     def from_agama(cls, pot) -> "DehnenSphericalPotentialGPU":
@@ -602,112 +508,43 @@ class DehnenSphericalPotentialGPU(_AnalyticBase):
             "Construct directly:  DehnenSphericalPotentialGPU(mass=..., scaleRadius=..., gamma=...)"
         )
 
-    def _phi(self, x, y, z):
-        return _dehnen_phi_kernel(x, y, z, self._GM, self._a, self._gamma, self._exp)
-
-    def _rho(self, x, y, z):
-        return _dehnen_rho_kernel(x, y, z, self._M, self._a, self._gamma)
-    
-    def _grad(self, x, y, z):
-        out = cp.empty((x.size, 3), dtype=x.dtype)
-        _dehnen_grad_kernel(x, y, z, self._GM, self._a, self._gamma, out)
-        return out
-
-    def _hess(self, x, y, z):
-        out = cp.empty((x.size, 6), dtype=x.dtype)
-        _dehnen_hess_kernel(x, y, z, self._GM, self._a, self._gamma, out)
-        return out
 
 # ---------------------------------------------------------------------------
 # Isochrone
 # ---------------------------------------------------------------------------
 
-_isochrone_phi_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T b', 'T out',
-    '''
-    T r2 = x*x + y*y + z*z;
-    T s = sqrt(r2 + b*b);
-    out = -GM / (b + s);
-    ''', 'isochrone_phi'
+_ISOCHRONE = _make_kernels(
+    'isochrone', 'T GM = par[0], b = par[1], M4pi = par[2];\n'
+                 'T r2 = x*x + y*y + z*z, s = sqrt(r2 + b*b), bs = b + s;\n',
+    phi='out[i] = -GM / bs;',
+    # dPhi/dr / r = GM / (s (b+s)^2)
+    force='T c = GM / (s * bs * bs); SPH_FORCE(c)',
+    deriv='''
+    T B = GM / (s * bs * bs);
+    T A = -GM * (b + T(3) * s) / (s * s * s * bs * bs * bs);
+    SPH_DERIV(A, B)
+    ''',
+    # rho = M [3(b+s)s^2 - r^2(b+3s)] / (4 pi (b+s)^3 s^3); the bracket
+    # simplifies to b (3b^2 + 3sb + 2r^2), which has no cancellation at r >> b
+    rho='out[i] = M4pi * b * (T(3) * b * b + T(3) * s * b + T(2) * r2) / (bs * bs * bs * s * s * s);',
 )
 
-_isochrone_rho_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T b, T INV_4PIG',
-    'T out',
-    '''
-    T r2_raw = x*x + y*y + z*z;
-    T r2 = (r2_raw < (T)1e-300) ? (T)1e-300 : r2_raw;
-    T s = sqrt(r2 + b*b);
-    T bs = b + s;
-    
-    // Identical math to the Hessian kernel
-    T d1_r = GM / (s * bs * bs); 
-    T A = -GM * (b + 3.0*s) / (pow(s, 3) * pow(bs, 3));
-    
-    // Laplacian = Hxx + Hyy + Hzz
-    // Hii = A*xi^2 + d1_r
-    // Sum = A*(x^2 + y^2 + z^2) + 3*d1_r
-    T lap = A * r2 + 3.0 * d1_r;
-    
-    out = lap * INV_4PIG;
-    ''', 'isochrone_rho'
-)
-
-_isochrone_grad_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T b',
-    'raw T out',
-    '''
-    T r2 = x*x + y*y + z*z;
-    T s = sqrt(r2 + b*b);
-    T bs = b + s;
-    
-    // dPhi/dr = GM / (s * (b+s)^2)
-    // Grad = (dPhi/dr) * (x/r). Note: r in dPhi/dr and r in denominator cancel.
-    T g_coeff = GM / (s * bs * bs);
-    
-    out[i*3 + 0] = g_coeff * x; // Grad X
-    out[i*3 + 1] = g_coeff * y; // Grad Y
-    out[i*3 + 2] = g_coeff * z; // Grad Z
-    ''', 'isochrone_grad'
-)
-
-_isochrone_hess_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T b',
-    'raw T out',
-    '''
-    T r2_raw = x*x + y*y + z*z;
-    T r2 = (r2_raw < (T)1e-300) ? (T)1e-300 : r2_raw;
-    T s = sqrt(r2 + b*b);
-    T bs = b + s;
-    
-    // d1 = dPhi/dr / r
-    T d1_r = GM / (s * bs * bs); 
-    
-    // d2 = d2Phi/dr2
-    // d/dr [GM*r / (s*bs^2)] = GM * [ (s*bs + r^2/s + 2r^2/bs) ] ... 
-    // Simplified Cartesian A = (d2 - d1/r)/r^2:
-    T A = -GM * (b + 3.0*s) / (s*s*s * bs * bs * bs);
-    
-    out[i*6 + 0] = A*x*x + d1_r; // Hxx
-    out[i*6 + 1] = A*y*y + d1_r; // Hyy
-    out[i*6 + 2] = A*z*z + d1_r; // Hzz
-    out[i*6 + 3] = A*x*y;        // Hxy
-    out[i*6 + 4] = A*y*z;        // Hyz
-    out[i*6 + 5] = A*x*z;        // Hxz
-    ''', 'isochrone_hess'
-)
 
 class IsochronePotentialGPU(_AnalyticBase):
     """
     Isochrone: Phi(r) = -GM / (b + sqrt(r^2 + b^2))
 
-    Constructor: IsochronePotentialGPU(mass=1, scaleRadius=1)
+    Constructor: IsochronePotentialGPU(mass=1, scaleRadius=1, precision='float64')
     """
 
-    def __init__(self, mass: float = 1.0, scaleRadius: float = 1.0):
+    _kernels = _ISOCHRONE
+
+    def __init__(self, mass: float = 1.0, scaleRadius: float = 1.0,
+                 precision: str = 'float64'):
         self._M  = float(mass)
         self._GM = _G * self._M
         self._b  = float(scaleRadius)
+        self._set_params(precision, self._GM, self._b, self._M / (4.0 * math.pi))
 
     @classmethod
     def from_agama(cls, pot) -> "IsochronePotentialGPU":
@@ -717,119 +554,56 @@ class IsochronePotentialGPU(_AnalyticBase):
             "Construct directly:  IsochronePotentialGPU(mass=..., scaleRadius=...)"
         )
 
-    def _phi(self, x, y, z):
-        return _isochrone_phi_kernel(x, y, z, self._GM, self._b)
-
-    def _rho(self, x, y, z):
-        # Using the trace of the Hessian for perfect self-consistency
-        return _isochrone_rho_kernel(x, y, z, self._GM, self._b, _INV_4PIG)
-
-    def _grad(self, x, y, z):
-        out = cp.empty((x.size, 3), dtype=x.dtype)
-        _isochrone_grad_kernel(x, y, z, self._GM, self._b, out)
-        return out
-
-    def _hess(self, x, y, z):
-        out = cp.empty((x.size, 6), dtype=x.dtype)
-        _isochrone_hess_kernel(x, y, z, self._GM, self._b, out)
-        return out
-
 
 # ---------------------------------------------------------------------------
 # MiyamotoNagai
 # ---------------------------------------------------------------------------
 
-_mn_phi_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T a, T b', 'T out',
-    '''
-    T D = sqrt(z*z + b*b);
-    T aD = a + D;
-    out = -GM / sqrt(x*x + y*y + aD*aD);
-    ''', 'mn_phi'
-)
-
-_mn_rho_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T a, T b, T INV_4PI', 'T out',
-    '''
-    T R2 = x*x + y*y;
-    T D = sqrt(z*z + b*b);
-    T D3 = D*D*D;
-    T aD = a + D;
-    T S2 = R2 + aD*aD;
-    T S5 = pow(S2, 2.5);
-    
-    // Laplacian (nabla^2 Phi) from your closed form:
-    // b^2 * (a*R^2 + (a+3D)*(a+D)^2) / (D^3 * S^5)
-    // rho = (GM*b^2 / 4pi) * (a*R2 + (a+3D)*aD^2) / (D^3 * S^5)
-    out = (GM * b*b * INV_4PI) * (a*R2 + (a + 3.0*D)*aD*aD) / (D3 * S5);
-    ''', 'mn_rho'
-)
-
-_mn_grad_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T a, T b',
-    'raw T out',
-    '''
-    T D = sqrt(z*z + b*b);
-    T aD = a + D;
-    T S2 = x*x + y*y + aD*aD;
-    T S3 = S2 * sqrt(S2);
-    
-    T common = GM / S3;
-    out[i*3 + 0] = common * x;                // dPhi/dx
-    out[i*3 + 1] = common * y;                // dPhi/dy
-    out[i*3 + 2] = common * aD * z / D;       // dPhi/dz
-    ''', 'mn_grad'
-)
-
-_mn_hess_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T GM, T a, T b',
-    'raw T out',
-    '''
-    T R2 = x*x + y*y;
-    T D = sqrt(z*z + b*b);
-    T D2 = D*D;
-    T aD = a + D;
-    T S2 = R2 + aD*aD;
-    T S = sqrt(S2);
-    T S3 = S2 * S;
+_MN = _make_kernels(
+    'mn', 'T GM = par[0], a = par[1], b = par[2], rho_n = par[3];\n'
+          'T R2 = x*x + y*y, D = sqrt(z*z + b*b), aD = a + D;\n'
+          'T S2 = R2 + aD*aD, S = sqrt(S2), S3 = S2 * S;\n',
+    phi='out[i] = -GM / S;',
+    force='''
+    T c = GM / S3;
+    out[3*i] = -c * x; out[3*i + 1] = -c * y; out[3*i + 2] = -c * aD * z / D;
+    ''',
+    deriv='''
     T S5 = S3 * S2;
-
-    // Hxx, Hyy, Hxy
-    out[i*6 + 0] = GM * (1.0/S3 - 3.0*x*x/S5); // Hxx
-    out[i*6 + 1] = GM * (1.0/S3 - 3.0*y*y/S5); // Hyy
-    out[i*6 + 3] = -3.0 * GM * x * y / S5;     // Hxy
-
-    // Hzz logic matching your explicit terms:
-    T daD_dz = z / D;
-    // term1 = ((daD_dz*D - aD*z/D) * z + aD*D) / (D2 * S3)
-    T term1 = ((daD_dz * D - aD * z / D) * z + aD * D) / (D2 * S3);
-    // term2 = 3.0*aD*z * (aD*z/D) / (D * S5)
-    T term2 = 3.0 * aD * z * (aD * z / D) / (D * S5);
-    out[i*6 + 2] = GM * (term1 - term2);       // Hzz
-
-    // Hxz, Hyz
-    T off_z = -3.0 * GM * aD * z / (D * S5);
-    out[i*6 + 5] = off_z * x;                  // Hxz
-    out[i*6 + 4] = off_z * y;                  // Hyz
-    ''', 'mn_hess'
+    out[6*i]     = -GM * (T(1) / S3 - T(3) * x * x / S5);           // -Hxx
+    out[6*i + 1] = -GM * (T(1) / S3 - T(3) * y * y / S5);           // -Hyy
+    // Hzz = GM [ (aD D - a z^2/D) / (D^2 S^3) - 3 (aD z / D)^2 / S^5 ]
+    T zD = aD * z / D;
+    out[6*i + 2] = -GM * ((aD * D - a * z * z / D) / (D * D * S3) - T(3) * zD * zD / S5);
+    out[6*i + 3] = T(3) * GM * x * y / S5;                          // -Hxy
+    T off_z = T(3) * GM * zD / S5;
+    out[6*i + 4] = off_z * y;                                       // -Hyz
+    out[6*i + 5] = off_z * x;                                       // -Hxz
+    ''',
+    # rho = (M b^2 / 4pi) (a R^2 + (a+3D)(a+D)^2) / (D^3 S^5)
+    rho='out[i] = rho_n * (a * R2 + (a + T(3) * D) * aD * aD) / (D * D * D * S3 * S2);',
 )
+
 
 class MiyamotoNagaiPotentialGPU(_AnalyticBase):
     """
     Miyamoto-Nagai disk: Phi = -GM / sqrt(R^2 + (sqrt(z^2+b^2)+a)^2)
     where R^2 = x^2+y^2.
 
-    Constructor: MiyamotoNagaiPotentialGPU(mass=1, scaleRadius=1, scaleHeight=0.1)
+    Constructor: MiyamotoNagaiPotentialGPU(mass=1, scaleRadius=1, scaleHeight=0.1,
+                                           precision='float64')
     """
 
+    _kernels = _MN
+
     def __init__(self, mass: float = 1.0, scaleRadius: float = 1.0,
-                 scaleHeight: float = 0.1):
+                 scaleHeight: float = 0.1, precision: str = 'float64'):
         self._M  = float(mass)
         self._GM = _G * self._M
         self._a  = float(scaleRadius)
         self._b  = float(scaleHeight)
-        # Using 1/(4*pi) for the density kernel
-        self._inv4pi = 1.0 / (4.0 * math.pi)
+        self._set_params(precision, self._GM, self._a, self._b,
+                         self._M * self._b ** 2 / (4.0 * math.pi))
 
     @classmethod
     def from_agama(cls, pot) -> "MiyamotoNagaiPotentialGPU":
@@ -839,91 +613,52 @@ class MiyamotoNagaiPotentialGPU(_AnalyticBase):
             "Construct directly:  MiyamotoNagaiPotentialGPU(mass=..., scaleRadius=..., scaleHeight=...)"
         )
 
-    def _phi(self, x, y, z):
-        return _mn_phi_kernel(x, y, z, self._GM, self._a, self._b)
-
-    def _rho(self, x, y, z):
-        # Using the global _INV_4PIG for unit consistency
-        return _mn_rho_kernel(x, y, z, self._GM, self._a, self._b, _INV_4PIG)
-
-    def _grad(self, x, y, z):
-        out = cp.empty((x.size, 3), dtype=x.dtype)
-        _mn_grad_kernel(x, y, z, self._GM, self._a, self._b, out)
-        return out
-
-    def _hess(self, x, y, z):
-        out = cp.empty((x.size, 6), dtype=x.dtype)
-        _mn_hess_kernel(x, y, z, self._GM, self._a, self._b, out)
-        return out
-
 
 # ---------------------------------------------------------------------------
 # Logarithmic halo
 # ---------------------------------------------------------------------------
 
-_log_phi_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T v02, T rc2, T p2, T q2', 'T out',
-    '''
-    T m2 = rc2 + x*x + y*y/p2 + z*z/q2;
-    out = (v02 * 0.5) * log(m2);
-    ''', 'log_phi'
+_LOG = _make_kernels(
+    'log', 'T v02 = par[0], rc2 = par[1], ip2 = par[2], iq2 = par[3], rho_n = par[4];\n'
+           'T m2 = rc2 + x*x + y*y*ip2 + z*z*iq2;\n',
+    phi='out[i] = T(0.5) * v02 * log(m2);',
+    force='''
+    T c = v02 / m2;
+    out[3*i] = -c * x; out[3*i + 1] = -c * y * ip2; out[3*i + 2] = -c * z * iq2;
+    ''',
+    deriv='''
+    T im2 = T(1) / m2, im4 = im2 * im2;
+    T X = x, Y = y * ip2, Z = z * iq2;                  // grad(m2) / 2
+    out[6*i]     = -v02 * (im2       - T(2) * X * X * im4);
+    out[6*i + 1] = -v02 * (im2 * ip2 - T(2) * Y * Y * im4);
+    out[6*i + 2] = -v02 * (im2 * iq2 - T(2) * Z * Z * im4);
+    T c = T(2) * v02 * im4;
+    out[6*i + 3] = c * X * Y;
+    out[6*i + 4] = c * Y * Z;
+    out[6*i + 5] = c * X * Z;
+    ''',
+    # nabla^2 Phi = v0^2 ((1 + 1/p^2 + 1/q^2)/m^2 - 2 (x^2 + y^2/p^4 + z^2/q^4)/m^4)
+    rho='''
+    out[i] = rho_n * ((T(1) + ip2 + iq2) / m2
+                      - T(2) * (x*x + y*y*ip2*ip2 + z*z*iq2*iq2) / (m2 * m2));
+    ''',
 )
 
-_log_rho_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T v02, T rc2, T p2, T q2, T INV_4PIG', 'T out',
-    '''
-    T m2 = rc2 + x*x + y*y/p2 + z*z/q2;
-    T m4 = m2 * m2;
-    // nabla²Phi = v0² * ((1 + 1/p² + 1/q²)/m² - 2*(x² + y²/p⁴ + z²/q⁴)/m⁴)
-    T term1 = (1.0 + 1.0/p2 + 1.0/q2) / m2;
-    T term2 = 2.0 * (x*x + y*y/(p2*p2) + z*z/(q2*q2)) / m4;
-    out = v02 * (term1 - term2) * INV_4PIG;
-    ''', 'log_rho'
-)
-
-_log_grad_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T v02, T rc2, T p2, T q2',
-    'raw T out',
-    '''
-    T m2 = rc2 + x*x + y*y/p2 + z*z/q2;
-    T coeff = v02 / m2;
-    out[i*3 + 0] = coeff * x;           // dPhi/dx
-    out[i*3 + 1] = coeff * y / p2;      // dPhi/dy
-    out[i*3 + 2] = coeff * z / q2;      // dPhi/dz
-    ''', 'log_grad'
-)
-
-_log_hess_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T v02, T rc2, T p2, T q2',
-    'raw T out',
-    '''
-    T m2 = rc2 + x*x + y*y/p2 + z*z/q2;
-    T m4 = m2 * m2;
-    
-    // Diagonal components
-    out[i*6 + 0] = v02 * (1.0/m2 - 2.0*x*x/m4);            // Hxx
-    out[i*6 + 1] = v02 * (1.0/(m2*p2) - 2.0*y*y/(m4*p2*p2)); // Hyy
-    out[i*6 + 2] = v02 * (1.0/(m2*q2) - 2.0*z*z/(m4*q2*q2)); // Hzz
-    
-    // Off-diagonal components
-    T common = -2.0 * v02 / m4;
-    out[i*6 + 3] = common * x * y / p2;      // Hxy
-    out[i*6 + 4] = common * y * z / (p2*q2); // Hyz
-    out[i*6 + 5] = common * x * z / q2;      // Hxz
-    ''', 'log_hess'
-)
 
 class LogHaloPotentialGPU(_AnalyticBase):
     """
     LogHalo: Phi = (v0^2/2) * ln(rc^2 + x^2 + y^2/p^2 + z^2/q^2)
 
     Constructor matches Agama:
-        LogHaloPotentialGPU(velocity=1, coreRadius=0.01, axisRatioY=1, axisRatioZ=1)
+        LogHaloPotentialGPU(velocity=1, coreRadius=0.01, axisRatioY=1, axisRatioZ=1,
+                            precision='float64')
     """
+
+    _kernels = _LOG
 
     def __init__(self, velocity: float = 1.0, coreRadius: float = 0.01,
                  axisRatioY: float = 1.0, axisRatioZ: float = 1.0,
-                 scaleRadius: float | None = None):
+                 scaleRadius: float | None = None, precision: str = 'float64'):
         # Agama names its core-radius param 'scaleRadius' for the Logarithmic type;
         # accept it as an alias so INI files and PotentialGPU(type='Logarithmic', ...)
         # work with both names.
@@ -933,6 +668,8 @@ class LogHaloPotentialGPU(_AnalyticBase):
         self._rc2  = float(coreRadius)**2
         self._p2   = float(axisRatioY)**2
         self._q2   = float(axisRatioZ)**2
+        self._set_params(precision, self._v02, self._rc2, 1.0 / self._p2, 1.0 / self._q2,
+                         self._v02 * _INV_4PIG)
 
     @classmethod
     def from_agama(cls, pot) -> "LogHaloPotentialGPU":
@@ -942,141 +679,95 @@ class LogHaloPotentialGPU(_AnalyticBase):
             "Construct directly:  LogHaloPotentialGPU(velocity=..., coreRadius=..., axisRatioY=..., axisRatioZ=...)"
         )
 
-    def _phi(self, x, y, z):
-        return _log_phi_kernel(x, y, z, self._v02, self._rc2, self._p2, self._q2)
-
-    def _rho(self, x, y, z):
-        return _log_rho_kernel(x, y, z, self._v02, self._rc2, self._p2, self._q2, _INV_4PIG)
-
-    def _grad(self, x, y, z):
-        out = cp.empty((x.size, 3), dtype=x.dtype)
-        _log_grad_kernel(x, y, z, self._v02, self._rc2, self._p2, self._q2, out)
-        return out
-
-    def _hess(self, x, y, z):
-        out = cp.empty((x.size, 6), dtype=x.dtype)
-        _log_hess_kernel(x, y, z, self._v02, self._rc2, self._p2, self._q2, out)
-        return out
 
 # ---------------------------------------------------------------------------
-# DiskAnsatz  (formulas from CLAUD.md Q2)
+# DiskAnsatz
 # ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# DiskAnsatz kernels --- accept innerCutoffRadius (hin >= 0).
 #
-# Radial function with inner exponential cutoff:
-#   f(r) = 4*pi*Sigma * exp(-r/hr - hin/r)
+# Phi(R,z) = f(r) H(z), r = sqrt(R^2+z^2), with an inner exponential cutoff:
+#   f(r) = 4*pi*G*Sigma * exp(-r/hr - hin/r)
 #   f'/f = -1/hr + hin/r^2          (fdo_f)
 #   f'   = f * fdo_f
 #   f''  = f * (fdo_f^2 - 2*hin/r^3)
-#
-# When hin=0 these reduce exactly to the original exponential-only formulas.
-# H(z) vertical function (exponential scaleHeight > 0 here; sech2/thin not yet split).
-# ---------------------------------------------------------------------------
+# When hin=0 these reduce exactly to the exponential-only formulas.
+# H(z) is the exponential vertical function (scaleHeight > 0; sech2/thin not
+# yet split):
+#   H   = (hz/2) (e^-u - 1 + u),  u = |z|/hz
+#   H'  = sign(z)/2 (1 - e^-u)
+#   H'' = e^-u / (2 hz)
+# e^-u - 1 + u ~ u^2/2 near the midplane, so it is summed as a series there.
 
-_disk_ansatz_phi_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T Sigma, T hr, T hz, T hin', 'T out',
-    '''
-    T r     = sqrt(x*x + y*y + z*z);
-    T safe_r = (r < (T)1e-300) ? (T)1e-300 : r;
-    T fval  = 12.566370614359172 * Sigma * exp(-safe_r / hr - hin / safe_r);
+_DISK_PRE = r"""
+// 1/(j+2)!, j = 0..16, in double and float (see nfw_c_)
+__constant__ double disk_ifact_[17] = {
+    0.5, 0.16666666666666666, 0.041666666666666664, 0.008333333333333333,
+    0.001388888888888889, 0.0001984126984126984, 2.48015873015873e-05,
+    2.7557319223985893e-06, 2.755731922398589e-07, 2.505210838544172e-08,
+    2.08767569878681e-09, 1.6059043836821613e-10, 1.1470745597729725e-11,
+    7.647163731819816e-13, 4.779477332387385e-14, 2.8114572543455206e-15,
+    1.5619206968586225e-16};
+__constant__ float disk_ifactf_[17] = {
+    0.5f, 0.16666666666666666f, 0.041666666666666664f, 0.008333333333333333f,
+    0.001388888888888889f, 0.0001984126984126984f, 2.48015873015873e-05f,
+    2.7557319223985893e-06f, 2.755731922398589e-07f, 2.505210838544172e-08f,
+    2.08767569878681e-09f, 1.6059043836821613e-10f, 1.1470745597729725e-11f,
+    7.647163731819816e-13f, 4.779477332387385e-14f, 2.8114572543455206e-15f,
+    1.5619206968586225e-16f};
+template <typename T> __device__ __forceinline__ T disk_coef_(int j)
+{ return sizeof(T) == 4 ? T(disk_ifactf_[j]) : T(disk_ifact_[j]); }
 
-    T abz = abs(z);
-    T u   = abz / hz;
-    T Hval = (hz / 2.0) * (exp(-u) - 1.0 + u);
+template <typename T> __device__ void disk_h_(T z, T hz, T* H, T* dH, T* d2H)
+{
+    T u = fabs(z) / hz, em1 = expm1(-u), h;
+    if (u < T(1)) {
+        T p = disk_coef_<T>(16);
+        for (int j = 15; j >= 0; --j) p = p * (-u) + disk_coef_<T>(j);
+        h = u * u * p;
+    } else h = em1 + u;
+    *H   = T(0.5) * hz * h;
+    *dH  = T(-0.5) * T((z > T(0)) - (z < T(0))) * em1;
+    *d2H = T(0.5) * (em1 + T(1)) / hz;
+}
+"""
 
-    out = fval * Hval;
-    ''', 'disk_ansatz_phi'
-)
+_DISK_PARAMS = ('T Sigma4pi = par[0], hr = par[1], hz = par[2], hin = par[3], inv4piG = par[4];\n'
+                'T r = sqrt(x*x + y*y + z*z); if (r < tiny_<T>()) r = tiny_<T>();\n'
+                'T inv_r = T(1) / r;\n'
+                'T fval = Sigma4pi * exp(-r / hr - hin * inv_r);\n'
+                'T fdo_f = -T(1) / hr + hin * inv_r * inv_r;\n'
+                'T fder1 = fval * fdo_f;\n'
+                'T Hval, Hder1, Hder2; disk_h_(z, hz, &Hval, &Hder1, &Hder2);\n')
 
-_disk_ansatz_grad_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T Sigma, T hr, T hz, T hin', 'raw T out',
-    '''
-    T r      = sqrt(x*x + y*y + z*z);
-    T safe_r = (r < (T)1e-300) ? (T)1e-300 : r;
-    T inv_r  = 1.0 / safe_r;
-
-    T fval  = 12.566370614359172 * Sigma * exp(-safe_r / hr - hin / safe_r);
-    T fdo_f = -1.0 / hr + hin * inv_r * inv_r;
-    T fder1 = fval * fdo_f;
-
-    T abz  = abs(z);
-    T u    = abz / hz;
-    T eu   = exp(-u);
-    T Hval  = (hz / 2.0) * (eu - 1.0 + u);
-    T Hder1 = 0.5 * ((z > 0) - (z < 0)) * (1.0 - eu);
-
+_DISK = _make_kernels(
+    'disk_ansatz', _DISK_PARAMS,
+    phi='out[i] = fval * Hval;',
+    force='''
     T common = Hval * fder1 * inv_r;
-    out[i*3 + 0] = common * x;
-    out[i*3 + 1] = common * y;
-    out[i*3 + 2] = common * z + Hder1 * fval;
-    ''', 'disk_ansatz_grad'
-)
-
-_disk_ansatz_hess_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T Sigma, T hr, T hz, T hin', 'raw T out',
-    '''
-    T r2     = x*x + y*y + z*z;
-    T r      = sqrt(r2);
-    T safe_r = (r < (T)1e-300) ? (T)1e-300 : r;
-    T inv_r  = 1.0 / safe_r;
-
-    T fval  = 12.566370614359172 * Sigma * exp(-safe_r / hr - hin / safe_r);
-    T fdo_f = -1.0 / hr + hin * inv_r * inv_r;
-    T fder1 = fval * fdo_f;
-    T fder2 = fval * (fdo_f * fdo_f - 2.0 * hin * inv_r * inv_r * inv_r);
-
-    T abz   = abs(z);
-    T u     = abz / hz;
-    T eu    = exp(-u);
-    T Hval  = (hz / 2.0) * (eu - 1.0 + u);
-    T Hder1 = 0.5 * ((z > 0) - (z < 0)) * (1.0 - eu);
-    T Hder2 = 0.5 * eu / hz;
-
-    T xr = x * inv_r; T yr = y * inv_r; T zr = z * inv_r;
+    out[3*i]     = -common * x;
+    out[3*i + 1] = -common * y;
+    out[3*i + 2] = -(common * z + Hder1 * fval);
+    ''',
+    deriv='''
+    T fder2 = fval * (fdo_f * fdo_f - T(2) * hin * inv_r * inv_r * inv_r);
+    T xr = x * inv_r, yr = y * inv_r, zr = z * inv_r;
     T A  = Hval * (fder2 - fder1 * inv_r);
     T B  = Hval * fder1 * inv_r;
-
-    out[i*6 + 0] = A * xr * xr + B;                                              // Hxx
-    out[i*6 + 1] = A * yr * yr + B;                                              // Hyy
-    out[i*6 + 2] = (Hval * (fder2 * zr * zr + fder1 * (1.0 - zr * zr) * inv_r)
-                    + 2.0 * fder1 * Hder1 * zr + fval * Hder2);                 // Hzz
-    out[i*6 + 3] = A * xr * yr;                                                  // Hxy
-    out[i*6 + 4] = A * yr * zr + fder1 * Hder1 * yr;                            // Hyz
-    out[i*6 + 5] = A * xr * zr + fder1 * Hder1 * xr;                            // Hxz
-    ''', 'disk_ansatz_hess'
-)
-
-# Density = Laplacian(Phi) / (4*pi*G).
-# Laplacian = Hxx + Hyy + Hzz
-#           = Hval*(f'' + 2*f'*inv_r) + 2*f'*H'*z/r + f*H''
-_disk_ansatz_rho_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T Sigma, T hr, T hz, T hin, T INV_4PIG', 'T out',
-    '''
-    T r2     = x*x + y*y + z*z;
-    T r      = sqrt(r2);
-    T safe_r = (r < (T)1e-300) ? (T)1e-300 : r;
-    T inv_r  = 1.0 / safe_r;
-
-    T fval  = 12.566370614359172 * Sigma * exp(-safe_r / hr - hin / safe_r);
-    T fdo_f = -1.0 / hr + hin * inv_r * inv_r;
-    T fder1 = fval * fdo_f;
-    T fder2 = fval * (fdo_f * fdo_f - 2.0 * hin * inv_r * inv_r * inv_r);
-
-    T abz   = abs(z);
-    T u     = abz / hz;
-    T eu    = exp(-u);
-    T Hval  = (hz / 2.0) * (eu - 1.0 + u);
-    T Hder1 = 0.5 * ((z > 0) - (z < 0)) * (1.0 - eu);
-    T Hder2 = 0.5 * eu / hz;
-
-    T zr  = z * inv_r;
-    T lap = Hval * (fder2 + 2.0 * fder1 * inv_r)
-            + 2.0 * fder1 * Hder1 * zr
-            + fval * Hder2;
-    out = lap * INV_4PIG;
-    ''', 'disk_ansatz_rho'
+    out[6*i]     = -(A * xr * xr + B);
+    out[6*i + 1] = -(A * yr * yr + B);
+    out[6*i + 2] = -(Hval * (fder2 * zr * zr + fder1 * (T(1) - zr * zr) * inv_r)
+                     + T(2) * fder1 * Hder1 * zr + fval * Hder2);
+    out[6*i + 3] = -(A * xr * yr);
+    out[6*i + 4] = -(A * yr * zr + fder1 * Hder1 * yr);
+    out[6*i + 5] = -(A * xr * zr + fder1 * Hder1 * xr);
+    ''',
+    # Density = Laplacian(Phi) / (4 pi G)
+    #         = [H (f'' + 2 f'/r) + 2 f' H' z/r + f H''] / (4 pi G)
+    rho='''
+    T fder2 = fval * (fdo_f * fdo_f - T(2) * hin * inv_r * inv_r * inv_r);
+    out[i] = (Hval * (fder2 + T(2) * fder1 * inv_r) + T(2) * fder1 * Hder1 * z * inv_r
+              + fval * Hder2) * inv4piG;
+    ''',
+    preamble=_DISK_PRE,
 )
 
 
@@ -1090,11 +781,13 @@ class DiskAnsatzPotentialGPU(_AnalyticBase):
 
     Constructor:
         DiskAnsatzPotentialGPU(surfaceDensity=1, scaleRadius=1, scaleHeight=0.1,
-                               innerCutoffRadius=0)
+                               innerCutoffRadius=0, precision='float64')
     """
 
+    _kernels = _DISK
+
     def __init__(self, surfaceDensity=1.0, scaleRadius=1.0, scaleHeight=0.1,
-                 innerCutoffRadius=0.0):
+                 innerCutoffRadius=0.0, precision: str = 'float64'):
         self._Sigma = float(surfaceDensity) * _G  # absorb G so kernel output is in (km/s)^2
         self._hr    = float(scaleRadius)
         self._hz    = float(abs(scaleHeight))   # kernels use |hz|; sign handled below
@@ -1106,6 +799,8 @@ class DiskAnsatzPotentialGPU(_AnalyticBase):
             self._mode = "exp"
         else:
             self._mode = "sech2"
+        self._set_params(precision, 4.0 * math.pi * self._Sigma, self._hr, self._hz,
+                         self._hin, _INV_4PIG)
 
     @classmethod
     def from_agama(cls, pot) -> "DiskAnsatzPotentialGPU":
@@ -1115,23 +810,6 @@ class DiskAnsatzPotentialGPU(_AnalyticBase):
             "Construct directly:  DiskAnsatzPotentialGPU(surfaceDensity=..., scaleRadius=..., "
             "scaleHeight=..., innerCutoffRadius=...)"
         )
-
-    def _phi(self, x, y, z):
-        return _disk_ansatz_phi_kernel(x, y, z, self._Sigma, self._hr, self._hz, self._hin)
-
-    def _grad(self, x, y, z):
-        out = cp.empty((x.size, 3), dtype=x.dtype)
-        _disk_ansatz_grad_kernel(x, y, z, self._Sigma, self._hr, self._hz, self._hin, out)
-        return out
-
-    def _hess(self, x, y, z):
-        out = cp.empty((x.size, 6), dtype=x.dtype)
-        _disk_ansatz_hess_kernel(x, y, z, self._Sigma, self._hr, self._hz, self._hin, out)
-        return out
-
-    def _rho(self, x, y, z):
-        return _disk_ansatz_rho_kernel(
-            x, y, z, self._Sigma, self._hr, self._hz, self._hin, _INV_4PIG)
 
 # ---------------------------------------------------------------------------
 # UniformAcceleration
@@ -1167,21 +845,15 @@ def _read_accel_table(src) -> _AgamaTimeSpline:
     return _AgamaTimeSpline(arr[:, 0], arr[:, 1:4])
 
 
-_uniform_phi_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T ax, T ay, T az', 'T out',
-    'out = -(ax*x + ay*y + az*z);', 
-    'uniform_phi'
+
+# Phi = -a.x;  force = +a everywhere
+_UNIFORM = _make_kernels(
+    'uniform', 'T ax = par[0], ay = par[1], az = par[2];\n',
+    phi='out[i] = -(ax * x + ay * y + az * z);',
+    force='out[3*i] = ax; out[3*i + 1] = ay; out[3*i + 2] = az;',
+    deriv=None,
 )
 
-_uniform_grad_kernel = cp.ElementwiseKernel(
-    'T x, T y, T z, T ax, T ay, T az',
-    'raw T out',
-    '''
-    out[i*3 + 0] = -ax; // dPhi/dx
-    out[i*3 + 1] = -ay; // dPhi/dy
-    out[i*3 + 2] = -az; // dPhi/dz
-    ''', 'uniform_grad'
-)
 
 class UniformAccelerationGPU(_AnalyticBase):
     """
@@ -1231,8 +903,10 @@ class UniformAccelerationGPU(_AnalyticBase):
     per particle as a constant one.
     """
 
+    _kernels = _UNIFORM
+
     def __init__(self, ax: float = 0.0, ay: float = 0.0, az: float = 0.0,
-                 file=None):
+                 file=None, precision: str = 'float64'):
         if file is not None:
             self._spline = _read_accel_table(file)
             a0 = self._spline(float(self._spline.times[0]))
@@ -1242,6 +916,8 @@ class UniformAccelerationGPU(_AnalyticBase):
             self._ax = float(ax)
             self._ay = float(ay)
             self._az = float(az)
+        self._set_params(precision, self._ax, self._ay, self._az)
+        self._par_key = (self._ax, self._ay, self._az)
 
     @property
     def is_time_dependent(self) -> bool:
@@ -1264,68 +940,27 @@ class UniformAccelerationGPU(_AnalyticBase):
         a = self._spline(float(t))
         return float(a[0]), float(a[1]), float(a[2])
 
+    def _par_at(self, t: float):
+        """Device copy of a(t), re-uploaded only when the value changes."""
+        a = self._a_at(t)
+        if a != self._par_key:
+            self._par, self._par_key = cp.asarray(a, dtype=self._dt), a
+        return self._par
+
     # --- kernel hooks -------------------------------------------------------
-    # The base class calls these without a time; the public methods below
-    # override that so the requested time actually reaches the kernels.
+    def _phi(self, arr, t: float = 0.0):
+        return self._launch(self._kernels[0], arr, 1, self._par_at(t))
 
-    def _phi(self, x, y, z, t: float = 0.0):
-        ax, ay, az = self._a_at(t)
-        return _uniform_phi_kernel(x, y, z, ax, ay, az)
+    def _force(self, arr, t: float = 0.0):
+        return self._launch(self._kernels[1], arr, 3, self._par_at(t))
 
-    def _grad(self, x, y, z, t: float = 0.0):
-        # dPhi/dx = -ax, etc. (uniform in space)
-        ax, ay, az = self._a_at(t)
-        out = cp.empty((x.size, 3), dtype=x.dtype)
-        _uniform_grad_kernel(x, y, z, ax, ay, az, out)
-        return out
-
-    def _hess(self, x, y, z, t: float = 0.0):
+    def _deriv(self, arr, t: float = 0.0):
         # Always zero for a potential linear in x --- no time dependence
-        return cp.zeros((x.size, 6), dtype=x.dtype)
+        return cp.zeros((arr.shape[0], 6), dtype=cp.float64)
 
-    def _rho(self, x, y, z, t: float = 0.0):
+    def _rho(self, arr, t: float = 0.0):
         # Laplacian of a linear function = 0 (Agama returns 0 here too)
-        return cp.zeros(x.size, dtype=x.dtype)
-
-    # --- public API: identical to _AnalyticBase but threading *t* through ----
-
-    def potential(self, xyz, t: float = 0.0) -> cp.ndarray:
-        arr, single = _prep_xyz(xyz)
-        return _squeeze(self._phi(arr[:, 0], arr[:, 1], arr[:, 2], t), single)
-
-    def force(self, xyz, t: float = 0.0) -> cp.ndarray:
-        arr, single = _prep_xyz(xyz)
-        return _squeeze(-self._grad(arr[:, 0], arr[:, 1], arr[:, 2], t), single)
-
-    def forceDeriv(self, xyz, t: float = 0.0):
-        arr, single = _prep_xyz(xyz)
-        x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
-        f = -self._grad(x, y, z, t)
-        h = self._hess(x, y, z, t)
-        return (f[0], -h[0]) if single else (f, -h)
-
-    def evalDeriv(self, xyz, t: float = 0.0):
-        arr, single = _prep_xyz(xyz)
-        x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
-        phi  = self._phi(x, y, z, t)
-        f    = -self._grad(x, y, z, t)
-        d    = -self._hess(x, y, z, t)
-        return (phi[0], f[0], d[0]) if single else (phi, f, d)
-
-    def eval(self, xyz, pot: bool = False, acc: bool = False,
-             der: bool = False, t: float = 0.0):
-        if not (pot or acc or der):
-            raise ValueError("eval(): at least one of pot, acc, der must be True.")
-        arr, single = _prep_xyz(xyz)
-        x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
-        results = []
-        if pot:
-            results.append(_squeeze(self._phi(x, y, z, t), single))
-        if acc:
-            results.append(_squeeze(-self._grad(x, y, z, t), single))
-        if der:
-            results.append(_squeeze(-self._hess(x, y, z, t), single))
-        return results[0] if len(results) == 1 else tuple(results)
+        return cp.zeros(arr.shape[0], dtype=cp.float64)
 
     def __repr__(self) -> str:
         if self.is_time_dependent:
@@ -1335,6 +970,14 @@ class UniformAccelerationGPU(_AnalyticBase):
         return (f"UniformAccelerationGPU(ax={self._ax:g}, "
                 f"ay={self._ay:g}, az={self._az:g})")
 
+
+# Append the shared ``precision`` entry to each class docstring.
+for _cls in (NFWPotentialGPU, PlummerPotentialGPU, HernquistPotentialGPU,
+             DehnenSphericalPotentialGPU, IsochronePotentialGPU,
+             MiyamotoNagaiPotentialGPU, LogHaloPotentialGPU, DiskAnsatzPotentialGPU):
+    _cls.__doc__ = inspect.cleandoc(_cls.__doc__) + "\n\n" + _PRECISION_DOC
+_doc = inspect.cleandoc(UniformAccelerationGPU.__doc__)
+UniformAccelerationGPU.__doc__ = _doc.replace("\n\nNotes\n", "\n" + _PRECISION_DOC + "\n\nNotes\n", 1)
 
 
 # ---------------------------------------------------------------------------

@@ -70,7 +70,7 @@ GPU-accelerated N-body simulation using KDK (kick-drift-kick) leapfrog integrati
 | `save_snapshots` | `bool` | `True` | Write HDF5 snapshots to disk |
 | `snapshots` | `int` | `10` | Number of evenly-spaced output snapshots |
 | `num_files_to_write` | `int` | `1` | Split snapshots across this many HDF5 files |
-| `restart_interval` | `int` | `1000` | Save restart checkpoint every N steps |
+| `restart_interval` | `int` or `None` | `1000` | Save restart checkpoint every N steps and at the end; `None` or `0` writes no restart files |
 | `continue_run` | `bool` | `False` | Resume from existing restart file |
 | `overwrite` | `bool` | `False` | Delete existing snapshots before starting |
 | `verbose` | `bool` | `True` | Print progress information |
@@ -107,7 +107,9 @@ Positions and velocities are kept in float64 on the GPU throughout.  Force calls
 
 ### Snapshot and restart behaviour
 
-Snapshots are written as HDF5 files in `output_dir`.  Restart files (`restart.npz`) are written every `restart_interval` steps.  Setting `continue_run=True` loads the most recent restart file and resumes from that step.
+Snapshots are written as HDF5 files in `output_dir`.  Restart files (`restart.npz`) are written every `restart_interval` steps and at the end of the run (`restart_interval=None` turns them off; at N ~ 1e8 each is several GB).  Setting `continue_run=True` loads the most recent restart file and resumes from that step.
+
+With `verbose=True` the closing summary splits the wall time into integration and output: the ms/step and steps/s figures exclude snapshot and restart writes.
 
 ### Example: basic self-gravity
 
@@ -173,7 +175,7 @@ final_xv = run_nbody_cpu(
     G=4.302e-6,               # float
     method='direct',          # 'direct' | 'tree'
     theta=0.6,                # float
-    kernel=1,                 # int or str
+    kernel=None,              # int or str; None: 'spline' (direct) / 1 (tree)
     nthreads=None,            # int or None
     external_potential=None,  # agama.Potential or None
     output_dir='./',          # str
@@ -204,7 +206,7 @@ CPU-based N-body simulation using KDK leapfrog.  Gravity solver is either Numba 
 | `G` | `float` | `4.302e-6` | Gravitational constant |
 | `method` | `'direct'` or `'tree'` | `'direct'` | Gravity solver: `'direct'` = Numba O(N^2); `'tree'` = pyfalcon falcON O(N) |
 | `theta` | `float` | `0.6` | Opening angle for tree method |
-| `kernel` | `int` or `str` | `1` | Softening kernel. For `method='tree'`: integer (`0`=Plummer, `1`=dehnen_k1, `2`=dehnen_k2). For `method='direct'`: string (`'newtonian'`, `'plummer'`, `'spline'`, `'dehnen_k1'`, `'dehnen_k2'`) |
+| `kernel` | `int`, `str` or `None` | `None` | Softening kernel; `None` picks `'spline'` for `method='direct'` and `1` (dehnen_k1) for `method='tree'`. For `method='tree'`: integer (`0`=Plummer, `1`=dehnen_k1, `2`=dehnen_k2). For `method='direct'`: string (`'newtonian'`, `'plummer'`, `'spline'`, `'dehnen_k1'`, `'dehnen_k2'`) |
 | `nthreads` | `int` or `None` | `None` | Numba thread count for direct method. `None` = auto |
 | `external_potential` | `agama.Potential` or `None` | `None` | Optional external time-varying potential. Dynamical friction is not included |
 | `force_extra` | `callable` or `None` | `None` | Extra acceleration after gravity + external. Signature: `force_extra(pos, vel, masses, t) -> (N,3)`. `pos`/`vel` are NumPy arrays on CPU path |
@@ -212,7 +214,7 @@ CPU-based N-body simulation using KDK leapfrog.  Gravity solver is either Numba 
 | `save_snapshots` | `bool` | `True` | Write HDF5 snapshots |
 | `snapshots` | `int` | `1` | Number of evenly-spaced output snapshots |
 | `num_files_to_write` | `int` | `1` | Split snapshots across N HDF5 files |
-| `restart_interval` | `int` | `1000` | Checkpoint interval in steps |
+| `restart_interval` | `int` or `None` | `1000` | Checkpoint interval in steps; `None` or `0` writes no restart files |
 | `continue_run` | `bool` | `False` | Resume from restart file |
 | `overwrite` | `bool` | `False` | Delete existing snapshots |
 | `verbose` | `bool` | `True` | Print progress |

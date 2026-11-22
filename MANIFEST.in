@@ -2,4 +2,4 @@
 include README.md
 recursive-include nbody_streams/data *
 recursive-include nbody_streams/tree_gpu *.cu *.h Makefile
-
+recursive-include nbody_streams/cuda *.cu *.cuh

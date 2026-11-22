@@ -34,17 +34,26 @@ pip install cupy-cuda12x   # CUDA 12.x
 pip install cupy-cuda13x   # CUDA 13.x
 ```
 
-### GPU tree code (one-time build)
+### GPU tree code
 
-The GPU Barnes-Hut tree code is a C++/CUDA shared library and must be compiled once before use.  Requires `nvcc` in `PATH`:
+The GPU Barnes-Hut tree code is a C++/CUDA shared library
+(`nbody_streams/tree_gpu/libtreeGPU.so`).  `pip install` compiles it
+automatically when `nvcc` (CUDA 12+) and `make` are in `PATH`, for the GPUs
+it finds with `nvidia-smi`.  Without `nvcc` the install still succeeds and
+prints a warning; the CPU and CuPy direct-sum backends do not need the
+library.  Set `NBODY_STREAMS_BUILD_TREE=1` to make the build mandatory (the
+install fails instead of warning) or `0` to skip it.
+
+Rebuild it later with:
 
 ```bash
-cd nbody_streams/tree_gpu
-make -j$(nproc)
-cd ../..
+nbody-build-tree
 ```
 
-This produces `nbody_streams/tree_gpu/libtreeGPU.so`.  Re-run `make` after pulling updates that touch the `.cu` source files.
+Do this after installing on a machine without a GPU (for example a cluster
+login node, where the build falls back to `sm_80` code), after changing GPU
+or CUDA version, or after pulling updates that touch the `.cu` sources.
+`pip install -v` shows the compiler output.
 
 ---
 
@@ -161,9 +170,9 @@ print(result['star'].shape)   # (1000, 6)
 
 | Particle count | Recommended | Notes |
 |---|---|---|
-| N < ~1e3 | `cpu`, `direct` | Lowest latency; no GPU kernel-launch overhead |
-| ~1e3 – ~1.5e4 | `gpu`, `direct` | Exact pairwise forces |
-| N > ~1.5e4 | `gpu`, `tree` | Barnes-Hut, theta = 0.6: median force error ~1e-4; scales to ~1e8 particles on an 80 GB+ GPU; requires `make` in `tree_gpu/` |
+| N < ~750 | `cpu`, `direct` | Lowest latency; no GPU kernel-launch overhead |
+| ~750 – ~3e4 | `gpu`, `direct` | Exact pairwise forces (crossover to the tree ~3e4 on an RTX 3080, ~4e4 on an L40 / H200) |
+| N > ~3e4 | `gpu`, `tree` | Barnes-Hut, theta = 0.6: median force error ~1e-4; ~215 B per particle per call (~375 in `run_nbody_gpu_tree`): ~4.2e8 particles on a 141 GB H200 (~4.9e8 with `set_memory_fraction(0.95)`); requires `make` in `tree_gpu/` |
 | No GPU, large N | `cpu`, `tree` (falcON) | O(N) FMM, ~1.5e-6 s per particle on one core |
 
 Crossovers measured on an RTX 3080 Laptop; see the README Performance section for timings.

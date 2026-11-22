@@ -1,0 +1,27 @@
+{
+ "label": "l40",
+ "mode": "run",
+ "points": [
+  {
+   "n": 20000000,
+   "mode": "run",
+   "gpu_mem_total_gb": 44.4202880859375,
+   "gpu_mem_used_before_gb": 19.429931640625,
+   "t_step": 0.29046868965087924,
+   "wall": {
+    "1": 28.133732441987377,
+    "2": 24.809248842997476,
+    "22": 30.61862263601506
+   },
+   "gpu_mem_peak_gb": 28.002197265625,
+   "gpu_bytes_per_particle": 460.2200064,
+   "wall_total": 85.72466845298186
+  },
+  {
+   "n": 40000000,
+   "error": "  File \"/astro/users/arora125/shire/claude_bench/nbs_bench/repo/nbody_streams/tree_gpu/run_gpu_tree.py\", line 432, in run_nbody_gpu_tree |     raise ValueError( | ValueError: N=40,000,000 exceeds the GPU tree run limit (34,555,221), set by free GPU memory (tree plus integrator arrays).",
+   "returncode": 1,
+   "wall_total": 52.88631269498728
+  }
+ ]
+}

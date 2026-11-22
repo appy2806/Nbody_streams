@@ -7,7 +7,7 @@
  * when they hold more than NLEAF particles: particles closer than the float
  * resolution of the box (e.g. exact duplicates) can never be separated, and
  * without the cap the split recursion ran past level 31, the limit of the
- * host level loop and of CellData's 5-bit level field, leaving cells unwritten
+ * host level loop and of d_level_begIdx (32 levels), leaving cells unwritten
  * and corrupting every force.  An oversized leaf is handled exactly by the
  * walk (direct sum over its particles in warp-sized chunks) and by
  * leafMultipoles.  Balanced trees are ~15-20 levels deep. */
@@ -28,7 +28,7 @@ namespace treeBuild
     int cellParentIndex;
     int cellFirstChildIndex;
     int octant_mask;
-    int mempool_offset;   /* offset into memPool for octCounterNbase */
+    int mempool_node;     /* node index of octCounterNbase in memPool (x96 ints) */
     int nCellmax;
     int nSubNodes_y;
     int level;
@@ -48,14 +48,20 @@ namespace treeBuild
   __constant__ int d_max_work;     /* capacity of the pending-work queue */
   __constant__ int d_cell_max;
 
-  __device__ unsigned int nnodes = 0;
-  __device__ unsigned int nleaves = 0;
-  __device__ unsigned int nlevels = 0;
-  __device__ unsigned int nbodies_leaf = 0;
-  __device__ unsigned int ncells = 0;
+  /* Build counters, zeroed and read back in one copy each.  The node, cell
+   * and work-queue allocations of buildOctant keep counting after they pass
+   * the capacity, so on overflow the host learns a lower bound on the size
+   * it needs (the subtrees below a failed allocation are never visited). */
+  struct BuildCounters
+  {
+    unsigned int nnodes, nleaves, nlevels, nbodies_leaf, ncells;
+    unsigned int overflow;   /* != 0: some allocation exceeded its capacity */
+  };
+  __device__ BuildCounters buildCounters;
 
   __device__   int *memPool;
   __device__   CellData *cellDataList;
+  __device__   int      *cellLevelList;   /* level of each cell (d_key: the level-sort key) */
   __device__   void *ptclVel_tmp;
   __device__   int *origIdx_buf;
 
@@ -191,6 +197,54 @@ namespace treeBuild
     }
 
   /*******************/
+
+  /* Finalise the particles [nBeg1, nEnd1) of one child cell (one warp):
+   * after the split at `level` they sit in buff; the position (mass from the
+   * velocity record) goes to the caller's position array and the velocity
+   * record to the other one, whichever of ptcl/buff that is at this level
+   * parity, and the original index to origIdx_buf. */
+  template<typename T>
+    static __device__ __forceinline__ void finalizeParticles(
+        const int nBeg1, const int nEnd1, const int laneIdx, const int level,
+        Particle4<T> *ptcl, Particle4<T> *buff)
+    {
+      if (!(level&1))
+      {
+        for (int i = nBeg1+laneIdx; i < nEnd1; i += WARP_SIZE)
+          if (i < nEnd1)
+          {
+            Particle4<T> pos = buff[i];
+            const int oidx = pos.get_idx();
+            Particle4<T> vel = ((Particle4<T>*)ptclVel_tmp)[oidx];
+#ifdef PSHFL_SANITY_CHECK
+            pos.mass() = T(oidx);
+#else
+            pos.mass() = vel.mass();
+#endif
+            ptcl[i] = pos;
+            buff[i] = vel;
+            origIdx_buf[i] = oidx;
+          }
+      }
+      else
+      {
+        for (int i = nBeg1+laneIdx; i < nEnd1; i += WARP_SIZE)
+          if (i < nEnd1)
+          {
+            Particle4<T> pos = buff[i];
+            const int oidx = pos.get_idx();
+            Particle4<T> vel = ((Particle4<T>*)ptclVel_tmp)[oidx];
+#ifdef PSHFL_SANITY_CHECK
+            pos.mass() = T(oidx);
+#else
+            pos.mass() = vel.mass();
+#endif
+            buff[i] = pos;
+            ptcl[i] = vel;
+            origIdx_buf[i] = oidx;
+          }
+      }
+    }
 
   /* Body of one octant-split step.  Called by buildOctant (root level, one
    * launch) and buildOctantBatch (all work items of a level in one launch).
@@ -404,7 +458,7 @@ namespace treeBuild
         shmem[laneIdx] = 0;
 
       if (threadIdx.x == 0)
-        atomicCAS(&nlevels, level, level+1);
+        atomicCAS(&buildCounters.nlevels, level, level+1);
 
       __syncthreads();
 
@@ -436,38 +490,77 @@ namespace treeBuild
       for (int i = 2; i >= 0; i--)
         nCellmax = max(nCellmax, __shfl_xor_sync(FULL_MASK, nCellmax, 1<<i, WARP_SIZE));
 
-      /* if there is at least one cell to split, increment nuumber of the nodes */
-      if (threadIdx.x == 0 && nSubNodes.y > 0)
-      {
-        shmem[16+8] = atomicAdd(&nnodes,nSubNodes.y);
-#if 1   /* temp solution, a better one is to use RingBuffer */
-        assert(shmem[16+8] < d_node_max);
-#endif
-      }
-
-      /* writing linking info, parent, child and particle's list */
+      /* Allocate, in thread 0: node slots for the children to split, cells
+       * for all children, and (only if both fit) one work-queue slot.  If any
+       * allocation exceeds its capacity the block writes nothing derived from
+       * them (no cell data, node slots, work item or leaf cells), sets the
+       * global overflow flag and finalises all its particles instead (see
+       * below); the host then grows the buffers and rebuilds.  The counters
+       * keep counting, giving the host a lower bound on the size needed.
+       * shmem[16+8..16+11] (node, first cell, overflow, work slot) are
+       * broadcast by the barrier below, so the overflow branch is
+       * block-uniform. */
       const int nChildrenCell = warpBinReduce(npCell > 0);
-      if (threadIdx.x == 0 && nChildrenCell > 0)
+      if (threadIdx.x == 0)
       {
-        const int cellFirstChildIndex = atomicAdd(&ncells, nChildrenCell);
-#if 1
-        assert(cellFirstChildIndex + nChildrenCell < d_cell_max);
-#endif
-        /*** keep in mind, the 0-level will be overwritten ***/
-        assert(nChildrenCell > 0);
-        assert(nChildrenCell <= 8);
-        const CellData cellData(level,cellParentIndex, nBeg, nEnd, cellFirstChildIndex, nChildrenCell-1);
-        assert(cellData.first() < ncells);
-        assert(cellData.isNode());
-        cellDataList[cellIndexBase + blockIdx.y] = cellData;
-        shmem[16+9] = cellFirstChildIndex;
+        bool overflow = false;
+        if (nSubNodes.y > 0)
+        {
+          const unsigned int node = atomicAdd(&buildCounters.nnodes, nSubNodes.y);
+          shmem[16+8] = node;
+          overflow |= (long long)node + nSubNodes.y > d_node_max;
+        }
+        if (nChildrenCell > 0)
+        {
+          const unsigned int first = atomicAdd(&buildCounters.ncells, nChildrenCell);
+          shmem[16+9] = first;
+          overflow |= (long long)first + nChildrenCell > d_cell_max;
+        }
+        if (!overflow && nSubNodes.y > 0)
+        {
+          /* claimed only when it will be written: every slot below the
+           * capacity holds a valid item */
+          const int wi = atomicAdd(pendingWorkCount, 1);
+          shmem[16+11] = wi;
+          overflow = wi >= d_max_work;
+        }
+        if (overflow)
+        {
+          shmem[16+10] = 1;
+          buildCounters.overflow = 1;
+        }
+        else if (nChildrenCell > 0)
+        {
+          /* writing linking info, parent, child and particle's list */
+          /*** keep in mind, the 0-level will be overwritten ***/
+          assert(nChildrenCell <= 8);
+          const CellData cellData(cellParentIndex, nBeg, nEnd, shmem[16+9], nChildrenCell-1);
+          assert(cellData.isNode());
+          cellDataList [cellIndexBase + blockIdx.y] = cellData;
+          cellLevelList[cellIndexBase + blockIdx.y] = level;
+        }
       }
 
       __syncthreads();
+
+      if (shmem[16+10])
+      {
+        /* Overflow: the subtree below this cell is abandoned.  Finalise every
+         * child's particles exactly as a leaf would (position to the
+         * caller's position array, original index to origIdx_buf), so that
+         * after the build each particle has been finalised once and the
+         * host can restore the input order for the rebuild.  Writes only
+         * particle arrays, inside this cell's range [nBeg, nEnd).  No
+         * barrier follows. */
+        if (nCell > 0)
+          finalizeParticles<T>(nBeg1, nEnd1, laneIdx, level, ptcl, buff);
+        return;
+      }
+
       const int cellFirstChildIndex = shmem[16+9];
       /* compute atomic data offset for cell that need to be split */
       const int next_node = shmem[16+8];
-      int *octCounterNbase = &memPool[next_node*(8+8+8+64+8)];
+      int *octCounterNbase = &memPool[(size_t)next_node*(8+8+8+64+8)];
 
       const int nodeOffset = shmem[8 +warpIdx];
       const int leafOffset = shmem[16+warpIdx];
@@ -506,8 +599,8 @@ namespace treeBuild
       /*  enqueue child work     */
       /***************************/
 
-      /* warps cooperate to build octant mask, then thread 0 writes a work item
-       * to the host-driven pending work queue (replaces CDP1 child kernel launch) */
+      /* warps cooperate to build octant mask, then thread 0 writes the work
+       * item to the slot it claimed above (replaces CDP1 child kernel launch) */
       if (nSubNodes.y > 0 && warpIdx == 0)
       {
         /* build octant mask */
@@ -518,17 +611,12 @@ namespace treeBuild
 
         if (threadIdx.x == 0)
         {
-          const int wi = atomicAdd(pendingWorkCount, 1);
-          if (wi >= d_max_work)
-          {
-            printf("Error: pending work queue overflow (capacity %d)\n", d_max_work);
-            assert(0);
-          }
+          const int wi = shmem[16+11];
           pendingWork[wi].box                = box;
           pendingWork[wi].cellParentIndex     = cellIndexBase + blockIdx.y;
           pendingWork[wi].cellFirstChildIndex = cellFirstChildIndex;
           pendingWork[wi].octant_mask         = octant_mask;
-          pendingWork[wi].mempool_offset      = static_cast<int>(octCounterNbase - memPool);
+          pendingWork[wi].mempool_node        = next_node;
           pendingWork[wi].nCellmax            = nCellmax;
           pendingWork[wi].nSubNodes_y         = nSubNodes.y;
           pendingWork[wi].level               = level + 1;
@@ -543,48 +631,14 @@ namespace treeBuild
       {
         if (laneIdx == 0)
         {
-          atomicAdd(&nleaves,1);
-          atomicAdd(&nbodies_leaf, nEnd1-nBeg1);
-          const CellData leafData(level+1, cellIndexBase+blockIdx.y, nBeg1, nEnd1);
+          atomicAdd(&buildCounters.nleaves,1);
+          atomicAdd(&buildCounters.nbodies_leaf, nEnd1-nBeg1);
+          const CellData leafData(cellIndexBase+blockIdx.y, nBeg1, nEnd1);
           assert(!leafData.isNode());
-          cellDataList[cellFirstChildIndex + nSubNodes.y + leafOffset] = leafData;
+          cellDataList [cellFirstChildIndex + nSubNodes.y + leafOffset] = leafData;
+          cellLevelList[cellFirstChildIndex + nSubNodes.y + leafOffset] = level+1;
         }
-        if (!(level&1))
-        {
-          for (int i = nBeg1+laneIdx; i < nEnd1; i += WARP_SIZE)
-            if (i < nEnd1)
-            {
-              Particle4<T> pos = buff[i];
-              const int oidx = pos.get_idx();
-              Particle4<T> vel = ((Particle4<T>*)ptclVel_tmp)[oidx];
-#ifdef PSHFL_SANITY_CHECK
-              pos.mass() = T(oidx);
-#else
-              pos.mass() = vel.mass();
-#endif
-              ptcl[i] = pos;
-              buff[i] = vel;
-              origIdx_buf[i] = oidx;
-            }
-        }
-        else
-        {
-          for (int i = nBeg1+laneIdx; i < nEnd1; i += WARP_SIZE)
-            if (i < nEnd1)
-            {
-              Particle4<T> pos = buff[i];
-              const int oidx = pos.get_idx();
-              Particle4<T> vel = ((Particle4<T>*)ptclVel_tmp)[oidx];
-#ifdef PSHFL_SANITY_CHECK
-              pos.mass() = T(oidx);
-#else
-              pos.mass() = vel.mass();
-#endif
-              buff[i] = pos;
-              ptcl[i] = vel;
-              origIdx_buf[i] = oidx;
-            }
-        }
+        finalizeParticles<T>(nBeg1, nEnd1, laneIdx, level, ptcl, buff);
       }
     }
 
@@ -625,7 +679,7 @@ namespace treeBuild
       const PendingWork<T> w = items[blockIdx.z];
       if ((int)blockIdx.y >= w.nSubNodes_y) return;
       buildOctantBody<NLEAF,T,false>(w.box, w.cellParentIndex, w.cellFirstChildIndex,
-          w.octant_mask, memPoolBase + w.mempool_offset,
+          w.octant_mask, memPoolBase + (size_t)w.mempool_node*(8+8+8+64+8),
           ptcl, buff, w.level, pendingWork, pendingWorkCount);
     }
 
@@ -720,6 +774,18 @@ namespace treeBuild
     }
   }
 
+  /* After an overflowed build: pos[i] holds the particle of input index
+   * origIdx[i]; scatter it back to input order. */
+  static __global__ void restoreInputOrder(
+      const int n, const int *origIdx, const float4 *pos, float4 *out)
+  {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    const int o = origIdx[i];
+    if (o >= 0 && o < n)
+      out[o] = pos[i];
+  }
+
   static __global__ void extract_eps(const int n, const float4 *d_vel, float *d_epsTree)
   {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -732,6 +798,7 @@ namespace treeBuild
         const int n,
         const Box<T> *d_domain_ptr,
         CellData *d_cellDataList_ptr,
+        int *d_cellLevel_ptr,      /* per-cell level out (cell_max ints; d_key) */
         int *d_stack_memory_pool,
         Particle4<T> *ptcl,
         Particle4<T> *buff,
@@ -743,7 +810,8 @@ namespace treeBuild
         void *d_workQueue_pre,     /* max_work × sizeof(PendingWork<T>) bytes (written by kernels) */
         void *d_workQueueIn_pre,   /* max_work × sizeof(PendingWork<T>) bytes (read by kernels) */
         int  *d_workCount_pre,     /* 1 int */
-        int   max_work)            /* capacity of d_workQueue_pre in PendingWork<T> units */
+        int   max_work,            /* capacity of d_workQueue_pre in PendingWork<T> units */
+        int  *max_work_seen)       /* out: largest per-level work count claimed */
     {
       static_assert(sizeof(PendingWork<T>) <= 64,
           "PendingWork<T> exceeds BUILD_PENDING_WORK_BYTES=64; increase it in Treecode.h");
@@ -751,6 +819,10 @@ namespace treeBuild
       {
         CellData *tmp = d_cellDataList_ptr;
         CUDA_SAFE_CALL(cudaMemcpyToSymbol(cellDataList, &tmp, sizeof(CellData*)));
+      }
+      {
+        int *tmp = d_cellLevel_ptr;
+        CUDA_SAFE_CALL(cudaMemcpyToSymbol(cellLevelList, &tmp, sizeof(int*)));
       }
       {
         void *tmp = (void*)d_ptclVel;
@@ -765,14 +837,10 @@ namespace treeBuild
         CUDA_SAFE_CALL(cudaMemcpyToSymbol(memPool, &tmp, sizeof(int*)));
       }
 
-      /* --- zero counters --- */
+      /* --- zero counters and the overflow flag (one copy) --- */
       {
-        unsigned int zero = 0;
-        CUDA_SAFE_CALL(cudaMemcpyToSymbol(nnodes,       &zero, sizeof(unsigned int)));
-        CUDA_SAFE_CALL(cudaMemcpyToSymbol(nleaves,      &zero, sizeof(unsigned int)));
-        CUDA_SAFE_CALL(cudaMemcpyToSymbol(nlevels,      &zero, sizeof(unsigned int)));
-        CUDA_SAFE_CALL(cudaMemcpyToSymbol(ncells,        &zero, sizeof(unsigned int)));
-        CUDA_SAFE_CALL(cudaMemcpyToSymbol(nbodies_leaf, &zero, sizeof(unsigned int)));
+        const BuildCounters zero = {};
+        CUDA_SAFE_CALL(cudaMemcpyToSymbol(buildCounters, &zero, sizeof(BuildCounters)));
       }
 
       /* --- read domain box from device --- */
@@ -848,17 +916,17 @@ namespace treeBuild
       const int NBUCKET = 10;                 /* grid.x in {1,2,4,...,512} */
       const int MAX_GRID_Z = 65535;
 
+      *max_work_seen = 0;
       for (int level = 1; level < 32; level++)
       {
         int h_workCount = 0;
         CUDA_SAFE_CALL(cudaMemcpy(&h_workCount, d_workCount, sizeof(int), cudaMemcpyDeviceToHost));
 
-        if (h_workCount > max_work) {
-            fprintf(stderr, "FATAL: work queue overflow (h_workCount=%d, capacity=%d).\n"
-                            "       (sized N/16 in Treecode::alloc; please report this.)\n",
-                            h_workCount, max_work);
-            exit(1);
-          }
+        /* Past the capacity buildOctant claims slots without writing them
+         * (and sets the overflow flag): only the first max_work are items.
+         * The host grows the queue after the build. */
+        *max_work_seen = std::max(*max_work_seen, h_workCount);
+        h_workCount = std::min(h_workCount, max_work);
 
         if (h_workCount == 0) break;
 
@@ -914,16 +982,16 @@ namespace treeBuild
     }
 
 
+  /* The sort keys (cell levels) were written by the build into key[]
+   * (cellLevelList); this sets the values and copies the cells. */
   static __global__ void
-    get_cell_levels(const int n, const CellData cellList[], CellData cellListOut[], int key[], int value[])
+    get_cell_levels(const int n, const CellData cellList[], CellData cellListOut[], int value[])
     {
       const int idx = blockIdx.x*blockDim.x + threadIdx.x;
       if (idx >= n) return;
 
-      const CellData cell = cellList[idx];
-      key  [idx] = cell.level();
       value[idx] = idx;
-      cellListOut[idx] = cell;
+      cellListOut[idx] = cellList[idx];
     }
 
   static __global__ void
@@ -1040,8 +1108,97 @@ namespace treeBuild
 }
 
 
+/* Grow the overflowed build buffers: to at least twice the capacity, or
+ * 1.5x the count the failed build reached (a lower bound, as the subtrees
+ * below a failed allocation were not built), capped where the index
+ * packing ends.  They stay grown on the handle.  Returns false, with a
+ * message, if a buffer is already at its cap or cannot be allocated. */
+template<typename real_t>
+bool Treecode<real_t>::growBuildBuffers(const long long nodes_seen, const long long cells_seen,
+                                        const long long work_seen, const int attempt)
+{
+  /* CellData's 29-bit `first` limits the cells; nodes (cells that split)
+   * and work items (nodes of one level) never outnumber the cells */
+  const int  CELL_CAP = CELLDATA_MAX_CELLS;
+  const int  NODE_CAP = CELL_CAP;
+  const int  WORK_CAP = CELL_CAP;
+  const bool grow_nodes = nodes_seen > node_max;
+  const bool grow_cells = cells_seen > cell_max;
+  const bool grow_work  = work_seen  > build_max_work;
+  assert(grow_nodes || grow_cells || grow_work);
+
+  const auto target = [](const int cur, const long long seen, const int cap) {
+    /* never below cur: a buffer already at (or past) its cap cannot grow */
+    return (int)std::max<long long>(cur, std::min<long long>(cap, std::max(2LL*cur, (3*seen)/2 + 1)));
+  };
+  const int new_node = grow_nodes ? target(node_max,       nodes_seen, NODE_CAP) : node_max;
+  const int new_cell = grow_cells ? target(cell_max,       cells_seen, CELL_CAP) : cell_max;
+  const int new_work = grow_work  ? target(build_max_work, work_seen,  WORK_CAP) : build_max_work;
+
+  if (verbose || (grow_nodes && new_node == node_max) || (grow_cells && new_cell == cell_max)
+              || (grow_work && new_work == build_max_work))
+    fprintf(stderr, "treeGPU: tree build overflowed (attempt %d; nodes >= %lld of %d, cells >= %lld of %d,"
+        " work items >= %lld of %d); growing to %d / %d / %d and rebuilding\n",
+        attempt + 1, nodes_seen, node_max, cells_seen, cell_max, work_seen, build_max_work,
+        new_node, new_cell, new_work);
+  if ((grow_nodes && new_node == node_max) || (grow_cells && new_cell == cell_max)
+      || (grow_work && new_work == build_max_work) || attempt >= 64)
+  {
+    fprintf(stderr, "treeGPU: ERROR: tree buffers cannot grow further (caps: %d nodes, %d cells,"
+        " %d work items); too many (nearly) coincident particle clumps?\n", NODE_CAP, CELL_CAP, WORK_CAP);
+    return false;
+  }
+
+  /* free first (the old contents are dead) so the new size can reuse the memory;
+   * on failure fall back to the old size, which then must fit again */
+  bool ok = true;
+  if (grow_nodes)
+  {
+    d_stack_memory_pool.free();
+    size_t want = (size_t)(8+8+8+64+8)*new_node;
+    if (d_stack_memory_pool.try_alloc(want)) node_max = new_node;
+    else { ok = false; want = stack_size; d_stack_memory_pool.alloc(want); }
+    stack_size = want;
+    /* zeroed whole, as at alloc; each build then clears only what it used */
+    CUDA_SAFE_CALL(cudaMemset(d_stack_memory_pool, 0, stack_size*sizeof(int)));
+    last_nodes_used = 0;
+  }
+  if (ok && grow_cells)
+  {
+    d_cellDataList.free(); d_cellDataList_tmp.free(); d_key.free(); d_value.free();
+    if (d_cellDataList.try_alloc(new_cell) && d_cellDataList_tmp.try_alloc(new_cell)
+        && d_key.try_alloc(new_cell) && d_value.try_alloc(new_cell))
+      cell_max = new_cell;
+    else
+    {
+      ok = false;
+      d_cellDataList.free(); d_cellDataList_tmp.free(); d_key.free(); d_value.free();
+      d_cellDataList.alloc(cell_max); d_cellDataList_tmp.alloc(cell_max);
+      d_key.alloc(cell_max); d_value.alloc(cell_max);
+    }
+  }
+  if (ok && grow_work)
+  {
+    const size_t bytes = (size_t)new_work * BUILD_PENDING_WORK_BYTES;
+    d_build_workQueue.free(); d_build_workQueueIn.free();
+    if (d_build_workQueue.try_alloc(bytes) && d_build_workQueueIn.try_alloc(bytes))
+      build_max_work = new_work;
+    else
+    {
+      ok = false;
+      const size_t old = (size_t)build_max_work * BUILD_PENDING_WORK_BYTES;
+      d_build_workQueue.free(); d_build_workQueueIn.free();
+      d_build_workQueue.alloc(old); d_build_workQueueIn.alloc(old);
+    }
+  }
+  if (!ok)
+    fprintf(stderr, "treeGPU: ERROR: out of GPU memory growing the tree buffers"
+        " (wanted %d nodes, %d cells, %d work items)\n", new_node, new_cell, new_work);
+  return ok;
+}
+
   template<typename real_t>
-void Treecode<real_t>::buildTree(const int nLeaf)
+int Treecode<real_t>::buildTree(const int nLeaf)
 {
   this->nLeaf = nLeaf;
   assert(nLeaf == 16 || nLeaf == 24 || nLeaf == 32 || nLeaf == 48 || nLeaf == 64);
@@ -1066,9 +1223,6 @@ void Treecode<real_t>::buildTree(const int nLeaf)
 
   /*** build tree ***/
 
-  CUDA_SAFE_CALL(cudaMemcpyToSymbol(treeBuild::d_node_max, &node_max, sizeof(int), 0, cudaMemcpyHostToDevice));
-  CUDA_SAFE_CALL(cudaMemcpyToSymbol(treeBuild::d_cell_max, &cell_max, sizeof(int), 0, cudaMemcpyHostToDevice));
-
 //  cudaDeviceSetLimit(cudaLimitDevRuntimePendingLaunchCount,16384);
 
   CUDA_SAFE_CALL(cudaFuncSetCacheConfig(&treeBuild::buildOctant<16,real_t,true>,  cudaFuncCachePreferShared));
@@ -1088,44 +1242,52 @@ void Treecode<real_t>::buildTree(const int nLeaf)
 
   CUDA_SAFE_CALL(cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte));
 
+  /* Build; if an allocation overflowed (the build then writes no tree data
+   * out of bounds, see buildOctantBody), restore the input particle order,
+   * grow the buffers and build again.  The overflow flag comes back with the
+   * counters in the one readback the build always did. */
+  for (int attempt = 0; ; attempt++)
   {
+    CUDA_SAFE_CALL(cudaMemcpyToSymbol(treeBuild::d_node_max, &node_max, sizeof(int), 0, cudaMemcpyHostToDevice));
+    CUDA_SAFE_CALL(cudaMemcpyToSymbol(treeBuild::d_cell_max, &cell_max, sizeof(int), 0, cudaMemcpyHostToDevice));
     /* clear the node slots the previous build used (the pool was zeroed at alloc) */
     if (last_nodes_used > 0)
       CUDA_SAFE_CALL(cudaMemset(d_stack_memory_pool, 0,
             std::min(stack_size, (size_t)(last_nodes_used + 1)*(8+8+8+64+8))*sizeof(int)));
     const double t0 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
     /* Pass pre-allocated scratch to eliminate 4× cudaMalloc/cudaFree per step. */
+    int max_work_seen = 0;
     #define _BONSAI_SCRATCH \
         d_build_octCounter.ptr, d_build_octCounterN.ptr, \
         d_build_workQueue.ptr,  d_build_workQueueIn.ptr, \
         d_build_workCount.ptr,                           \
-        build_max_work
+        build_max_work, &max_work_seen
     CUDA_SAFE_CALL(cudaMemcpyToSymbol(treeBuild::d_max_work, &build_max_work, sizeof(int)));
     switch(nLeaf)
     {
       case 16:
         treeBuild::buildOctreeHost<16,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_key, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       case 24:
         treeBuild::buildOctreeHost<24,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_key, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       case 32:
         treeBuild::buildOctreeHost<32,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_key, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       case 48:
         treeBuild::buildOctreeHost<48,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_key, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       case 64:
         treeBuild::buildOctreeHost<64,real_t>(
-            nPtcl, d_domain, d_cellDataList, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
+            nPtcl, d_domain, d_cellDataList, d_key, d_stack_memory_pool, d_ptclPos, d_ptclPos_tmp, d_ptclVel, d_origIdx,
             _BONSAI_SCRATCH);
         break;
       default:
@@ -1135,25 +1297,42 @@ void Treecode<real_t>::buildTree(const int nLeaf)
     kernelSuccess("buildOctree");
     const double t1 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
     const double dt = t1 - t0;
-    CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&nLevels, treeBuild::nlevels, sizeof(int)));
-    CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&nCells,  treeBuild::ncells, sizeof(int)));
-    CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&nNodes,  treeBuild::nnodes, sizeof(int)));
-    CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&nLeaves, treeBuild::nleaves, sizeof(int)));
-    last_nodes_used = nNodes;
+    treeBuild::BuildCounters cnt;
+    CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&cnt, treeBuild::buildCounters, sizeof(cnt)));
+    nLevels = cnt.nlevels;
+    nCells  = cnt.ncells;
+    nNodes  = cnt.nnodes;
+    nLeaves = cnt.nleaves;
+    last_nodes_used = nNodes;   /* clamped to the pool by the clearing memset */
+    last_work_seen  = max_work_seen;
     if (verbose){
       fprintf(stderr, " buildOctree done in %g sec : %g Mptcl/sec\n",  dt, nPtcl/1e6/dt);
     }
-      std::swap(d_ptclPos_tmp.ptr, d_ptclVel.ptr);
-      /* After the swap, d_ptclVel is the tree-sorted vel buffer with eps in .x;
-       * eps is extracted at the end of buildTree, after the leaf sort. */
+    if (!cnt.overflow)
+      break;
+
+    /* Every particle was finalised once (as a leaf, or by an overflowed
+     * block): d_ptclPos holds the positions in build order and d_origIdx
+     * their input index.  Scatter them back to input order; d_ptclVel was
+     * only read. */
+    treeBuild::restoreInputOrder<<<(nPtcl - 1)/256 + 1, 256>>>(
+        nPtcl, d_origIdx, (const float4*)d_ptclPos.ptr, (float4*)d_ptclPos_tmp.ptr);
+    kernelSuccess("restoreInputOrder");
+    std::swap(d_ptclPos.ptr, d_ptclPos_tmp.ptr);
+
+    if (!growBuildBuffers(cnt.nnodes, cnt.ncells, max_work_seen, attempt))
+      return -1;
   }
+  std::swap(d_ptclPos_tmp.ptr, d_ptclVel.ptr);
+  /* After the swap, d_ptclVel is the tree-sorted vel buffer with eps in .x;
+   * eps is extracted at the end of buildTree, after the leaf sort. */
 
   /* sort nodes by level */
   {
     const double t0 = verbose ? (cudaDeviceSynchronize(), rtc()) : 0.0;
     const int nthread = 256;
     const int nblock  = (nCells-1)/nthread  + 1;
-    treeBuild::get_cell_levels<<<nblock,nthread>>>(nCells, d_cellDataList, d_cellDataList_tmp, d_key, d_value);
+    treeBuild::get_cell_levels<<<nblock,nthread>>>(nCells, d_cellDataList, d_cellDataList_tmp, d_value);
 
     thrust::device_ptr<int> keys_beg(d_key.ptr);
     thrust::device_ptr<int> keys_end(d_key.ptr + nCells);
@@ -1291,8 +1470,6 @@ void Treecode<real_t>::buildTree(const int nLeaf)
     for (int i = 0; i < nCells; i++)
     {
       const CellData cell = cells[i];
-      assert(cell.level() >= 0);
-      assert(cell.level() < 32);
 
       if (cell.isNode())
         assert(cell.first() + cell.n() <= nCells);
@@ -1322,8 +1499,8 @@ void Treecode<real_t>::buildTree(const int nLeaf)
 #if 0
     for (int i = 0; i < nCells; i++)
     {
-      printf("cellIdx= %d  isNode= %s: lev= %d first= %d  n= %d  pbeg= %d  pend =%d\n",
-          i, cells[i].isNode() ? "true ":"false", cells[i].level(),
+      printf("cellIdx= %d  isNode= %s: first= %d  n= %d  pbeg= %d  pend =%d\n",
+          i, cells[i].isNode() ? "true ":"false",
           cells[i].first(), cells[i].n(), cells[i].pbeg(), cells[i].pend());
     }
     fflush(stdout);
@@ -1332,6 +1509,7 @@ void Treecode<real_t>::buildTree(const int nLeaf)
 
   }
 #endif
+  return 0;
 }
 
 #include "TreecodeInstances.h"
