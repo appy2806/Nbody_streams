@@ -89,8 +89,9 @@ def cuda_alive() -> bool:
 #   tree buffers after the first force call: 151 B/particle at allocation
 #   (particle arrays 76, node pool 48, cell list 24, work queues 4) plus the
 #   per-cell multipole arrays (124 B/cell), walk groups (8) and sort scratch;
-#   210 covers the worst realistic tree (nleaf=16, 0.36 N cells).
-_TREE_BYTES_PER_PARTICLE = 210
+#   216 covers trees of up to 0.4 N cells (measured <= 0.37 N, a cubic
+#   lattice at nleaf=16: 208 B/particle).
+_TREE_BYTES_PER_PARTICLE = 216
 #   per tree_gravity_gpu call (CuPy pool): float32 SoA positions (12), SoA
 #   acc + phi (16), the returned (N, 3) acc (12).
 _CALL_BYTES_PER_PARTICLE = 40

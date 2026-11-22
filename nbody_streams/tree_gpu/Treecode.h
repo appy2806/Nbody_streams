@@ -299,7 +299,7 @@ struct Treecode
      * then stay grown on this handle.  The sizes are >= 1.5x the largest
      * usage measured over Plummer, Hernquist, Dehnen-1.5 cusps, a cold
      * stream, a thin disc, a uniform cube, a cubic lattice and a very thin
-     * straight filament (width 1e-4 of its length), N = 1e5 - 1e7 and nleaf
+     * straight filament (width 1e-4 of its length), N = 1e5 - 5e7 and nleaf
      * 16/32/64 (docs/tree_gpu.md "GPU memory layout"), so realistic inputs
      * never grow them; a clump of > nleaf (nearly) coincident particles adds
      * a chain of ~25 single-child nodes, so many such clumps can.
@@ -308,7 +308,7 @@ struct Treecode
      *            split.  Measured <= 0.045 nPtcl in 3-D, 0.067 for the thin
      *            filament; nPtcl/8.
      * cell_max : all cells below the root (the root is overwritten).
-     *            Measured <= 0.36 nPtcl (nleaf 16; ~0.06 at nleaf 64); 0.6
+     *            Measured <= 0.37 nPtcl (nleaf 16; ~0.06 at nleaf 64); 0.6
      *            nPtcl also covers the ~0.54 of a uniform distribution with
      *            ~17 particles in every cell of one level.  The 65536 floor
      *            (2.6 MB) covers tiny N.

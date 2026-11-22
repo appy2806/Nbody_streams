@@ -71,14 +71,17 @@ except ImportError:
 
 from ._force import tree_gravity_gpu, TreeGPU, G_DEFAULT, _max_n, _IDX_CAP
 
-# GPU memory the integrator allocates per particle after its TreeGPU handle
-# (the float64 pos/vel, float32/float64 masses and float32 softening, 64 B,
-# already exist then and are seen as used memory): the float64 total
-# acceleration (24), the (N, 6) float64 concatenation of pos and vel for each
-# snapshot / restart (48, kept by the CuPy pool) and the float64 external
-# acceleration (24, only with external_potential or force_extra; the
-# potential's own scratch is not counted).
-_RUN_BYTES_PER_PARTICLE     = 24 + 48
+# GPU memory the integrator allocates per particle beyond what the TreeGPU
+# guard counts (the float64 pos/vel, float32/float64 masses and float32
+# softening, 64 B, already exist when it checks and count as used): the
+# float64 total acceleration (24), the previous step's float32 acc and phi,
+# alive during the next tree call (16), the (N, 6) float64 pos/vel
+# concatenation for snapshots and restarts (48), and CuPy pool fragmentation
+# between them (~40: measured, the pool peaks at 232 B/particle with
+# snapshots, 196 without).  Plus the float64 external acceleration (24, only
+# with external_potential or force_extra; the potential's own scratch is not
+# counted).
+_RUN_BYTES_PER_PARTICLE     = 128
 _RUN_EXT_BYTES_PER_PARTICLE = 24
 
 if TYPE_CHECKING:
