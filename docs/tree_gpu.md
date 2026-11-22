@@ -564,16 +564,36 @@ grow (never shrink) with the number of cells.  The main allocations:
 |--------|------|---------|
 | `d_ptclPos`, `d_ptclAcc` | N × 16 bytes (float4) | Particle positions, accelerations |
 | `d_ptclEpsTree` | N × 4 bytes | Per-particle softening (tree order) |
-| `d_stack_memory_pool` | `max(N/5, 65536) × 96 × 4` bytes | Build-tree stack (≈ 24 MB for N=1M) |
-| `d_cellDataList` (+ `_tmp`, `d_key`, `d_value`) | `max(N + 9, 65536)` × (16+16+4+4) bytes | Cell metadata and level-sort scratch |
+| `d_stack_memory_pool` | `max(N/5, 65536) × 96 × 4` bytes initially (grown on overflow) | Build-tree node pool (≈ 77 MB for N=1M) |
+| `d_cellDataList` (+ `_tmp`, `d_key`, `d_value`) | `max(N + 9, 65536)` × (16+16+4+4) bytes initially (grown on overflow) | Cell metadata and level-sort scratch |
 | `d_cellMonopole`, `d_cellQuad0/1` | N × 16 + 8 bytes | Monopole + quadrupole moments |
 | `d_cellEpsMax` | N × 4 bytes | Per-cell max softening |
 | `d_cellComD`, `d_cellBoxMin/Max` | nCells × 64 bytes | Bottom-up multipole scratch |
-| Build scratch (`d_build_workQueue`, `d_build_workQueueIn`) | 2 × `max(262144, N/16) × 64` bytes (32 MB up to N = 4M; 8 bytes/particle above) | Host-driven build queues |
+| Build scratch (`d_build_workQueue`, `d_build_workQueueIn`) | 2 × `max(262144, N/16) × 64` bytes (32 MB up to N = 4M; 8 bytes/particle above; grown on overflow) | Host-driven build queues |
 | Walk pool (`d_gmem_pool`) | 2 MB per persistent block | e.g. 384 blocks ≈ 768 MB on a 48-SM GPU; capped at 1/4 of free memory |
 
 Total VRAM for N = 1M particles: approximately **700 MB** before quadrupole
 storage.  `TreeGPU` checks that 80% of free VRAM is available before allocating.
+
+The node pool, cell list and work queues are sized for typical trees, not
+for the worst case: a rigorous bound would need ~2.7 N cells and ~1.7 N node
+slots (~65 GB of node pool at N = 1e8), because a clump of more than `nleaf`
+(nearly) coincident particles becomes a chain of ~25 single-child nodes down
+to the depth cap.  Inputs with thousands of such clumps (e.g. 4000 clusters of
+17 identical positions, N = 68k) exceed them.  The build then recovers: a
+block whose allocation would exceed a capacity writes no tree data (no cell,
+node-pool slot, work item or leaf), finalises its particles as leaves would,
+and sets an overflow flag; the counters keep counting.  `buildTree` reads the
+flag with the counters it always reads back (no extra synchronisation),
+restores the input particle order, grows each overflowed buffer to
+`max(2 × capacity, 1.5 × count reached)` and builds again.  The buffers stay
+grown on the handle, so a `TreeGPU` reused across steps pays this once; the
+rebuilt tree is bitwise the one a big-enough handle builds.  With
+`verbose=True` each round prints a `treeGPU: tree build overflowed` line to
+stderr.  If a buffer cannot grow (index-packing caps: 2^27 cells, 2^30 nodes
+and work items; or out of GPU memory) `tree_gravity_gpu` raises
+`RuntimeError`.  For testing, `TREEGPU_DEBUG_BUILD_CAPACITY=k` (read when a
+handle is allocated) starts all three buffers at k entries.
 
 ---
 
@@ -646,6 +666,6 @@ argument marshalling and the two-sort permutation to restore user order.
 
 - **Single GPU only** — the ctypes interface always operates on device 0.  Multi-GPU support would require per-device `Tree*` instances and explicit `cudaSetDevice` calls in the C interface.
 - **float32 tree** — the tree itself works in float32; see [Precision](#precision) for how `run_nbody_gpu_tree` keeps this from limiting compact structure far from the origin, and what direct callers of `tree_gravity_gpu` should do.
-- **Device-side failures terminate the process** — device-side checks call `assert` / `exit`, which kills the Python process rather than raising an exception.  Pipeline phases are not synchronised individually; set the environment variable `TREE_SYNC_CHECK=1` to synchronise after each phase so an execution error is reported at the kernel that caused it.
+- **Device-side failures terminate the process** — device-side checks call `assert` / `exit`, which kills the Python process rather than raising an exception.  (Build-buffer overflow is not one of them: it is detected and the buffers grow, see [GPU memory layout](#gpu-memory-layout).)  Pipeline phases are not synchronised individually; set the environment variable `TREE_SYNC_CHECK=1` to synchronise after each phase so an execution error is reported at the kernel that caused it.
 - **Fixed timestep only** — `run_nbody_gpu_tree` uses a global fixed dt (KDK leapfrog).  Individual/block timesteps are not implemented.
 - **No periodic boundary conditions** — the bounding box is recomputed from actual particle positions each step.
