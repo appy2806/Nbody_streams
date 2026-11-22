@@ -583,5 +583,20 @@
     "mtime": 1795133286.853408,
     "ast_hash": "ea8754182334636bd10c8648f82ae572",
     "semantic_hash": ""
+  },
+  "local_notes/kernel_fixes/checks/check_consistency.py": {
+    "mtime": 1795200236.1252732,
+    "ast_hash": "7d0b41e491dd34f687f8df3b90fa9c5a",
+    "semantic_hash": ""
+  },
+  "local_notes/kernel_fixes/checks/check_gpu.py": {
+    "mtime": 1795200236.1253054,
+    "ast_hash": "028219370d7f64f03c94f457c010f4f7",
+    "semantic_hash": ""
+  },
+  "local_notes/kernel_fixes/README.md": {
+    "mtime": 1795200268.747937,
+    "ast_hash": "fdb3d33ac37f7e880bf116589ed98f23",
+    "semantic_hash": ""
   }
 }
