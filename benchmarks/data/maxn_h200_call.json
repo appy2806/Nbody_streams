@@ -1,0 +1,72 @@
+{
+ "label": "h200",
+ "mode": "call",
+ "points": [
+  {
+   "n": 100000000,
+   "mode": "call",
+   "gpu_mem_total_gb": 139.81341552734375,
+   "gpu_mem_used_before_gb": 0.51446533203125,
+   "input_bytes_per_particle": 28.83584,
+   "t_first_call_incl_alloc": 1.2457434829557315,
+   "t_call_min": 1.2239565099589527,
+   "gpu_mem_peak_gb": 24.43634033203125,
+   "gpu_bytes_per_particle": 228.02333696,
+   "wall_total": 7.075412704027258
+  },
+  {
+   "n": 200000000,
+   "mode": "call",
+   "gpu_mem_total_gb": 139.81341552734375,
+   "gpu_mem_used_before_gb": 0.51446533203125,
+   "input_bytes_per_particle": 28.01795072,
+   "t_first_call_incl_alloc": 2.487217101966962,
+   "t_call_min": 2.4577180159976706,
+   "gpu_mem_peak_gb": 46.62384033203125,
+   "gpu_bytes_per_particle": 219.52987136,
+   "wall_total": 12.143290897947736
+  },
+  {
+   "n": 300000000,
+   "mode": "call",
+   "gpu_mem_total_gb": 139.81341552734375,
+   "gpu_mem_used_before_gb": 0.51446533203125,
+   "input_bytes_per_particle": 28.01795072,
+   "t_first_call_incl_alloc": 3.7333464480470866,
+   "t_call_min": 3.7017401449847966,
+   "gpu_mem_peak_gb": 68.83282470703125,
+   "gpu_bytes_per_particle": 216.50298197333333,
+   "wall_total": 17.149924719007686
+  },
+  {
+   "n": 400000000,
+   "mode": "call",
+   "gpu_mem_total_gb": 139.81341552734375,
+   "gpu_mem_used_before_gb": 0.51446533203125,
+   "input_bytes_per_particle": 28.00746496,
+   "t_first_call_incl_alloc": 4.996150524006225,
+   "t_call_min": 4.969190056086518,
+   "gpu_mem_peak_gb": 90.95391845703125,
+   "gpu_bytes_per_particle": 214.76409344,
+   "wall_total": 22.358248277101666
+  },
+  {
+   "n": 420000000,
+   "mode": "call",
+   "gpu_mem_total_gb": 139.81341552734375,
+   "gpu_mem_used_before_gb": 0.51446533203125,
+   "input_bytes_per_particle": 28.011958857142858,
+   "t_first_call_incl_alloc": 5.251402521971613,
+   "t_call_min": 5.220832108985633,
+   "gpu_mem_peak_gb": 95.38946533203125,
+   "gpu_bytes_per_particle": 214.5386496,
+   "wall_total": 23.337358273915015
+  },
+  {
+   "n": 450000000,
+   "error": "    ...<2 lines>... |            else \"the 29-bit particle index (2^29 particles)\") + \".\") | ValueError: N=450,000,000 exceeds the GPU tree limit (421,272,371), set by free GPU memory (see _max_n).",
+   "returncode": 1,
+   "wall_total": 2.3949985539074987
+  }
+ ]
+}

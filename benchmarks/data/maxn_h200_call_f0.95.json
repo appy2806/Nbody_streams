@@ -1,0 +1,31 @@
+{
+ "label": "h200",
+ "mode": "call",
+ "points": [
+  {
+   "n": 480000000,
+   "mode": "call",
+   "mem_fraction": 0.95,
+   "gpu_mem_total_gb": 139.81341552734375,
+   "gpu_mem_used_before_gb": 0.51446533203125,
+   "input_bytes_per_particle": 28.0100864,
+   "t_first_call_incl_alloc": 6.029159320052713,
+   "t_call_min": 5.995198835036717,
+   "gpu_mem_peak_gb": 108.63751220703125,
+   "gpu_bytes_per_particle": 213.8570752,
+   "wall_total": 26.444223102997057
+  },
+  {
+   "n": 520000000,
+   "error": "    ...<3 lines>... |            else \"the 29-bit particle index (2^29 particles)\") + \".\") | ValueError: N=520,000,000 exceeds the GPU tree limit (494,257,843), set by 95% of free GPU memory (raise it with nbody_streams.tree_gpu.set_memory_fraction).",
+   "returncode": 1,
+   "wall_total": 2.38740712008439
+  },
+  {
+   "n": 536000000,
+   "error": "    ...<3 lines>... |            else \"the 29-bit particle index (2^29 particles)\") + \".\") | ValueError: N=536,000,000 exceeds the GPU tree limit (492,584,627), set by 95% of free GPU memory (raise it with nbody_streams.tree_gpu.set_memory_fraction).",
+   "returncode": 1,
+   "wall_total": 2.3571786989923567
+  }
+ ]
+}

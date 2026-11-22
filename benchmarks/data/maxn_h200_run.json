@@ -1,0 +1,42 @@
+{
+ "label": "h200",
+ "mode": "run",
+ "points": [
+  {
+   "n": 100000000,
+   "mode": "run",
+   "gpu_mem_total_gb": 139.81341552734375,
+   "gpu_mem_used_before_gb": 0.51446533203125,
+   "t_step": 1.2370693123026286,
+   "wall": {
+    "1": 169.02736838103738,
+    "2": 165.8198595199501,
+    "22": 190.56124576600268
+   },
+   "gpu_mem_peak_gb": 36.01446533203125,
+   "gpu_bytes_per_particle": 381.157376,
+   "wall_total": 534.2253326490754
+  },
+  {
+   "n": 200000000,
+   "mode": "run",
+   "gpu_mem_total_gb": 139.81341552734375,
+   "gpu_mem_used_before_gb": 0.51446533203125,
+   "t_step": 2.4684669553476852,
+   "wall": {
+    "1": 335.6590650200378,
+    "2": 334.6015719190473,
+    "22": 383.970911026001
+   },
+   "gpu_mem_peak_gb": 69.93438720703125,
+   "gpu_bytes_per_particle": 372.68488192,
+   "wall_total": 1069.7267880070722
+  },
+  {
+   "n": 270000000,
+   "error": "    ...<3 lines>... |            else \"the 29-bit particle index (2^29 particles)\") + \".\") | ValueError: N=270,000,000 exceeds the GPU tree run limit (196,573,320), set by 80% of free GPU memory (tree plus integrator arrays; raise it with nbody_streams.tree_gpu.set_memory_fraction).",
+   "returncode": 1,
+   "wall_total": 481.4238657329697
+  }
+ ]
+}

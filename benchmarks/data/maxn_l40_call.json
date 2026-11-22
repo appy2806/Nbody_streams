@@ -1,0 +1,40 @@
+{
+ "label": "l40",
+ "mode": "call",
+ "points": [
+  {
+   "n": 20000000,
+   "mode": "call",
+   "gpu_mem_total_gb": 44.4202880859375,
+   "gpu_mem_used_before_gb": 19.429931640625,
+   "t_first_call_incl_alloc": 0.3038581470027566,
+   "t_call_min": 0.29303123702993616,
+   "gpu_mem_peak_gb": 26.531494140625,
+   "gpu_bytes_per_particle": 381.2622336,
+   "wall_total": 2.6214372409740463
+  },
+  {
+   "n": 50000000,
+   "mode": "call",
+   "gpu_mem_total_gb": 44.4202880859375,
+   "gpu_mem_used_before_gb": 19.429931640625,
+   "t_first_call_incl_alloc": 0.8052526619867422,
+   "t_call_min": 0.7882796800113283,
+   "gpu_mem_peak_gb": 33.523681640625,
+   "gpu_bytes_per_particle": 302.66097664,
+   "wall_total": 4.6425998019985855
+  },
+  {
+   "n": 70000000,
+   "error": "  File \"/astro/users/arora125/shire/claude_bench/nbs_bench/repo/nbody_streams/tree_gpu/_force.py\", line 247, in __init__ |     raise ValueError( | ValueError: N=70,000,000 exceeds the GPU tree limit (65,333,248), set by free GPU memory (see _max_n).",
+   "returncode": 1,
+   "wall_total": 1.3806043860386126
+  },
+  {
+   "n": 90000000,
+   "error": "  File \"/astro/users/arora125/shire/claude_bench/nbs_bench/repo/nbody_streams/tree_gpu/_force.py\", line 247, in __init__ |     raise ValueError( | ValueError: N=90,000,000 exceeds the GPU tree limit (63,839,027), set by free GPU memory (see _max_n).",
+   "returncode": 1,
+   "wall_total": 1.41870157700032
+  }
+ ]
+}

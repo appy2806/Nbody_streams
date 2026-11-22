@@ -1,0 +1,60 @@
+{
+ "label": "rtx3080",
+ "mode": "call",
+ "points": [
+  {
+   "n": 10000000,
+   "mode": "call",
+   "gpu_mem_total_gb": 15.99951171875,
+   "gpu_mem_used_before_gb": 1.10791015625,
+   "input_bytes_per_particle": 32.505856,
+   "t_first_call_incl_alloc": 0.4883164470011252,
+   "t_call_min": 0.38680039099563146,
+   "gpu_mem_peak_gb": 3.99072265625,
+   "gpu_bytes_per_particle": 277.0337792,
+   "wall_total": 3.8200343920034356
+  },
+  {
+   "n": 20000000,
+   "mode": "call",
+   "gpu_mem_total_gb": 15.99951171875,
+   "gpu_mem_used_before_gb": 1.10791015625,
+   "input_bytes_per_particle": 32.1912832,
+   "t_first_call_incl_alloc": 0.8851030350051587,
+   "t_call_min": 0.7535947080032201,
+   "gpu_mem_peak_gb": 6.24658203125,
+   "gpu_bytes_per_particle": 243.6890624,
+   "wall_total": 5.062870797999494
+  },
+  {
+   "n": 30000000,
+   "mode": "call",
+   "gpu_mem_total_gb": 15.99951171875,
+   "gpu_mem_used_before_gb": 1.10791015625,
+   "input_bytes_per_particle": 29.499938133333334,
+   "t_first_call_incl_alloc": 1.3103209390028496,
+   "t_call_min": 1.135027557000285,
+   "gpu_mem_peak_gb": 8.43603515625,
+   "gpu_bytes_per_particle": 232.783872,
+   "wall_total": 6.652900686000066
+  },
+  {
+   "n": 40000000,
+   "mode": "call",
+   "gpu_mem_total_gb": 15.99951171875,
+   "gpu_mem_used_before_gb": 1.10791015625,
+   "input_bytes_per_particle": 28.1018368,
+   "t_first_call_incl_alloc": 1.7512560179966385,
+   "t_call_min": 1.5313093200020376,
+   "gpu_mem_peak_gb": 10.61376953125,
+   "gpu_bytes_per_particle": 227.0691328,
+   "wall_total": 8.376212044000567
+  },
+  {
+   "n": 45000000,
+   "error": "    ...<2 lines>... |            else \"the 29-bit particle index (2^29 particles)\") + \".\") | ValueError: N=45,000,000 exceeds the GPU tree limit (42,464,051), set by free GPU memory (see _max_n).",
+   "returncode": 1,
+   "wall_total": 1.9791641359988716
+  }
+ ]
+}
