@@ -130,8 +130,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/fields.py": {
-    "mtime": 1795133286.8542626,
-    "ast_hash": "3bed847a618623344a053cc5d802b723",
+    "mtime": 1795313841.5020914,
+    "ast_hash": "a2d583fd4b474d3fd25c4a9dedcadf4f",
     "semantic_hash": ""
   },
   "nbody_streams/nbody_io.py": {
@@ -160,8 +160,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/Treecode.h": {
-    "mtime": 1794204944.30187,
-    "ast_hash": "4b2a89d15f7e6e71401a9a63a2ccf9de",
+    "mtime": 1795315296.73212,
+    "ast_hash": "b6bdbc6dfd90554c5be3a42ca1105e8a",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/TreecodeInstances.h": {
@@ -180,13 +180,13 @@
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/_force.py": {
-    "mtime": 1794728519.7859833,
-    "ast_hash": "9106ce4dbdfc7b5560518e58f8ed6980",
+    "mtime": 1795315296.7322764,
+    "ast_hash": "508abe63ff03248071a3f49add8897db",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/buildTree.cu": {
-    "mtime": 1794204944.302422,
-    "ast_hash": "ea37fe7fcfc9f60afdcd3bba7d2c2717",
+    "mtime": 1795315296.7326586,
+    "ast_hash": "2e26127f87253986d0cf6ffeaf2cb459",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/computeForces.cu": {
@@ -205,8 +205,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/cudamem.h": {
-    "mtime": 1773127094.4956322,
-    "ast_hash": "2814ea5c4fba30213df1dcaf8806e9bf",
+    "mtime": 1795315296.7343996,
+    "ast_hash": "47f4bd16272b8b8f0643a0befa02999b",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/cutil.h": {
@@ -265,8 +265,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/treeGPU_interface.cu": {
-    "mtime": 1794204944.3031669,
-    "ast_hash": "4432c123cef3d13b414eafcfaf456ac3",
+    "mtime": 1795315296.7426624,
+    "ast_hash": "e216fe503746a978190f5bded53de344",
     "semantic_hash": ""
   },
   "nbody_streams/tree_gpu/vector3.h": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1795133295.8491788,
-    "ast_hash": "efa7ae8384f68757b263d89df81ca585",
+    "mtime": 1795315296.791566,
+    "ast_hash": "4ca5f77fffed9bd09a10981003f1c8de",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
@@ -375,8 +375,8 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1794204944.2868226,
-    "ast_hash": "25fab2007d86bac06ed7394fbacdea11",
+    "mtime": 1795310359.821459,
+    "ast_hash": "8278c65a5855d28816d3081efa26b4f2",
     "semantic_hash": ""
   },
   "docs/agama_helper.md": {
@@ -400,8 +400,8 @@
     "semantic_hash": ""
   },
   "docs/fields.md": {
-    "mtime": 1794204944.2869544,
-    "ast_hash": "b321065e365b5b34b1f91ddffb144ebb",
+    "mtime": 1795313841.4999578,
+    "ast_hash": "6dfdefa3787deaa00360cb1f3362bd4e",
     "semantic_hash": ""
   },
   "docs/index.md": {
@@ -430,8 +430,8 @@
     "semantic_hash": ""
   },
   "docs/tree_gpu.md": {
-    "mtime": 1794728519.7739835,
-    "ast_hash": "f87293d84ea5e5a5acd253d87180de1d",
+    "mtime": 1795315296.731877,
+    "ast_hash": "2707fb3afc3c76a29f018a7016bf193b",
     "semantic_hash": ""
   },
   "docs/utils.md": {
@@ -575,8 +575,8 @@
     "semantic_hash": ""
   },
   "nbody_streams/cuda/direct.cu": {
-    "mtime": 1795133286.8499727,
-    "ast_hash": "ac80295f140ad3c1edd5c0fe521fceeb",
+    "mtime": 1795313841.4886107,
+    "ast_hash": "86d72f8b4c05d0bbf6bb73dd73efc7f4",
     "semantic_hash": ""
   },
   "nbody_streams/cuda/softening.cuh": {
@@ -597,6 +597,21 @@
   "local_notes/kernel_fixes/README.md": {
     "mtime": 1795200268.747937,
     "ast_hash": "fdb3d33ac37f7e880bf116589ed98f23",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/tests/test_overflow.py": {
+    "mtime": 1795315296.7421427,
+    "ast_hash": "2b8f59fdd1ab747a37ece907e2902583",
+    "semantic_hash": ""
+  },
+  "nbody_streams/tree_gpu/tests/test_small_n.py": {
+    "mtime": 1795313841.4660785,
+    "ast_hash": "059ef2f0e85f9ac7b6f6367d8078619c",
+    "semantic_hash": ""
+  },
+  "tests/test_direct_split.py": {
+    "mtime": 1795313841.4891255,
+    "ast_hash": "6e670595c8c2d388f3a17b154d794ba5",
     "semantic_hash": ""
   }
 }
