@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **GPU tree: 2^29 particles and cells, smaller buffers, an accurate memory
+  guard.** The particle index has 29 bits (was 28) and the cell level moved
+  out of `CellData` (cells 2^27 -> 2^29 - 1). Initial build buffers are sized
+  from measured usage (200 -> 151 B/particle at allocation, ~238 -> 188 after
+  a call); `TreeGPU` and `run_nbody_gpu_tree` raise `ValueError` when N would
+  not fit in 80% of free GPU memory (the old 52 B/particle estimate admitted
+  ~5x too many particles). Forces bitwise unchanged; new `TreeGPU.build_stats()`.
 - **GPU direct sum: source loop split across blocks at small N.** When the
   grid cannot fill the GPU, up to 16 slices each sum part of the sources and a
   reduction kernel adds them in a fixed order (deterministic, no atomics); S is
