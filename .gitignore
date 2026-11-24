@@ -55,6 +55,9 @@ graphify-out/manifest.json
 # local token tracking, not useful to share
 graphify-out/cost.json
 
+# dated backups of the previous graph, written by every `graphify update`
+graphify-out/20*/
+
 # Compiled C/CUDA build artifacts
 *.o
 *.so

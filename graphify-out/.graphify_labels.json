@@ -303,10 +303,7 @@
   "301": "GroupData",
   "302": "__init__.py",
   "303": "_validate_species",
-  "304": "computeMultipoles.cu",
-  "305": "TestParticleReaderBackwardCompat",
   "306": "README.md",
   "307": "._init_from_data",
-  "308": "Species dataclass",
-  "309": "compute_nbody_forces_gpu"
+  "308": "Species dataclass"
 }

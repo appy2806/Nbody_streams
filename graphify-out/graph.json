@@ -40,7 +40,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "benchmarks_max_n",
-      "community": 65,
+      "community": 91,
       "norm_label": "max_n.py"
     },
     {
@@ -50,7 +50,7 @@
       "source_location": "L33",
       "_origin": "ast",
       "id": "benchmarks_max_n_child",
-      "community": 65,
+      "community": 91,
       "norm_label": "child()"
     },
     {
@@ -60,7 +60,7 @@
       "source_location": "L111",
       "_origin": "ast",
       "id": "benchmarks_max_n_main",
-      "community": 65,
+      "community": 91,
       "norm_label": "main()"
     },
     {
@@ -70,7 +70,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "benchmarks_max_n_rationale_1",
-      "community": 65,
+      "community": 91,
       "norm_label": "how many particles fit on one gpu, and how fast: gpu tree at large n.      pytho"
     },
     {
@@ -266,7 +266,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "benchmarks_timing_sweep",
-      "community": 91,
+      "community": 299,
       "norm_label": "timing_sweep.py"
     },
     {
@@ -276,7 +276,7 @@
       "source_location": "L29",
       "_origin": "ast",
       "id": "benchmarks_timing_sweep_plummer",
-      "community": 91,
+      "community": 299,
       "norm_label": "plummer()"
     },
     {
@@ -286,7 +286,7 @@
       "source_location": "L42",
       "_origin": "ast",
       "id": "benchmarks_timing_sweep_device_info",
-      "community": 91,
+      "community": 299,
       "norm_label": "device_info()"
     },
     {
@@ -296,7 +296,7 @@
       "source_location": "L60",
       "_origin": "ast",
       "id": "benchmarks_timing_sweep_make_call",
-      "community": 91,
+      "community": 299,
       "norm_label": "make_call()"
     },
     {
@@ -306,7 +306,7 @@
       "source_location": "L86",
       "_origin": "ast",
       "id": "benchmarks_timing_sweep_main",
-      "community": 91,
+      "community": 299,
       "norm_label": "main()"
     },
     {
@@ -316,7 +316,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "benchmarks_timing_sweep_rationale_1",
-      "community": 91,
+      "community": 299,
       "norm_label": "time per force evaluation against n (data for ``plot_timings.py``).      python"
     },
     {
@@ -326,7 +326,7 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "benchmarks_timing_sweep_rationale_30",
-      "community": 91,
+      "community": 299,
       "norm_label": "plummer positions (a = 1, radii capped at 100 a), float64, chunked."
     },
     {
@@ -646,7 +646,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_recentre",
-      "community": 81,
+      "community": 54,
       "norm_label": "_recentre.py"
     },
     {
@@ -656,7 +656,7 @@
       "source_location": "L87",
       "_origin": "ast",
       "id": "nbody_streams_recentre_gpu_sub_cast",
-      "community": 81,
+      "community": 54,
       "norm_label": "_gpu_sub_cast()"
     },
     {
@@ -666,7 +666,7 @@
       "source_location": "L97",
       "_origin": "ast",
       "id": "nbody_streams_recentre_gpu_sub_cast_soa",
-      "community": 81,
+      "community": 54,
       "norm_label": "_gpu_sub_cast_soa()"
     },
     {
@@ -676,7 +676,7 @@
       "source_location": "L116",
       "_origin": "ast",
       "id": "nbody_streams_recentre_gpu_centre",
-      "community": 81,
+      "community": 54,
       "norm_label": "_gpu_centre()"
     },
     {
@@ -686,7 +686,7 @@
       "source_location": "L141",
       "_origin": "ast",
       "id": "nbody_streams_recentre_estimate_centre",
-      "community": 81,
+      "community": 6,
       "norm_label": "estimate_centre()"
     },
     {
@@ -696,7 +696,7 @@
       "source_location": "L164",
       "_origin": "ast",
       "id": "nbody_streams_recentre_to_float32_relative",
-      "community": 81,
+      "community": 6,
       "norm_label": "to_float32_relative()"
     },
     {
@@ -706,7 +706,7 @@
       "source_location": "L198",
       "_origin": "ast",
       "id": "nbody_streams_recentre_to_float32_relative_soa",
-      "community": 81,
+      "community": 54,
       "norm_label": "to_float32_relative_soa()"
     },
     {
@@ -716,7 +716,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_recentre_rationale_1",
-      "community": 81,
+      "community": 54,
       "norm_label": "float64 -> float32 position conversion relative to a nearby centre.  float32 kee"
     },
     {
@@ -726,7 +726,7 @@
       "source_location": "L88",
       "_origin": "ast",
       "id": "nbody_streams_recentre_rationale_88",
-      "community": 81,
+      "community": 54,
       "norm_label": "fused (pos - centre).astype(float32) for a c-contiguous (n, 3) float64 array."
     },
     {
@@ -736,7 +736,7 @@
       "source_location": "L98",
       "_origin": "ast",
       "id": "nbody_streams_recentre_rationale_98",
-      "community": 81,
+      "community": 54,
       "norm_label": "fused (pos - centre).astype(float32), written as a (3, n) array whose     rows a"
     },
     {
@@ -746,7 +746,7 @@
       "source_location": "L117",
       "_origin": "ast",
       "id": "nbody_streams_recentre_rationale_117",
-      "community": 81,
+      "community": 54,
       "norm_label": "single-launch subsample centre for a c-contiguous (n, 3) float64 cupy array."
     },
     {
@@ -756,7 +756,7 @@
       "source_location": "L142",
       "_origin": "ast",
       "id": "nbody_streams_recentre_rationale_142",
-      "community": 81,
+      "community": 6,
       "norm_label": "mass-weighted mean of a strided subsample of ``pos`` (float64, shape (3,))."
     },
     {
@@ -766,7 +766,7 @@
       "source_location": "L165",
       "_origin": "ast",
       "id": "nbody_streams_recentre_rationale_165",
-      "community": 81,
+      "community": 6,
       "norm_label": "return float32 positions relative to a centre, and that centre.      parameters"
     },
     {
@@ -776,7 +776,7 @@
       "source_location": "L199",
       "_origin": "ast",
       "id": "nbody_streams_recentre_rationale_199",
-      "community": 81,
+      "community": 54,
       "norm_label": "gpu variant of :func:`to_float32_relative` returning the (3, n) layout.      row"
     },
     {
@@ -786,7 +786,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_init",
-      "community": 45,
+      "community": 89,
       "norm_label": "__init__.py"
     },
     {
@@ -796,7 +796,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_init_rationale_1",
-      "community": 45,
+      "community": 89,
       "norm_label": "nbody_streams.agama_helper ~~~~~~~~~~~~~~~~~~~~~~~~~~ secondary utilities for fi"
     },
     {
@@ -996,7 +996,7 @@
       "source_location": "L341",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_nfwpotentialgpu",
-      "community": 59,
+      "community": 296,
       "norm_label": "nfwpotentialgpu"
     },
     {
@@ -1016,7 +1016,7 @@
       "source_location": "L358",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_nfwpotentialgpu_from_agama",
-      "community": 59,
+      "community": 296,
       "norm_label": ".from_agama()"
     },
     {
@@ -1206,7 +1206,7 @@
       "source_location": "L774",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_diskansatzpotentialgpu",
-      "community": 296,
+      "community": 59,
       "norm_label": "diskansatzpotentialgpu"
     },
     {
@@ -1226,7 +1226,7 @@
       "source_location": "L806",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_diskansatzpotentialgpu_from_agama",
-      "community": 296,
+      "community": 59,
       "norm_label": ".from_agama()"
     },
     {
@@ -1256,7 +1256,7 @@
       "source_location": "L908",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_uniformaccelerationgpu_init",
-      "community": 296,
+      "community": 107,
       "norm_label": ".__init__()"
     },
     {
@@ -1416,7 +1416,7 @@
       "source_location": "L342",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_rationale_342",
-      "community": 59,
+      "community": 296,
       "norm_label": "navarro-frenk-white potential optimized with cupy elementwisekernels.      const"
     },
     {
@@ -1486,7 +1486,7 @@
       "source_location": "L775",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_analytic_potentials_rationale_775",
-      "community": 296,
+      "community": 59,
       "norm_label": "diskansatz separable disk potential: phi(r,z) = f(r) * h(z)     where r = sqrt(r"
     },
     {
@@ -1566,7 +1566,7 @@
       "source_location": "L77",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_add_negative_m",
-      "community": 45,
+      "community": 89,
       "norm_label": "_add_negative_m()"
     },
     {
@@ -1616,7 +1616,7 @@
       "source_location": "L170",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_as_times",
-      "community": 299,
+      "community": 88,
       "norm_label": "_as_times()"
     },
     {
@@ -1626,7 +1626,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_py_ndarray",
-      "community": 299,
+      "community": 88,
       "norm_label": "ndarray"
     },
     {
@@ -1826,7 +1826,7 @@
       "source_location": "L540",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_multipolecoefs_radial_power",
-      "community": 299,
+      "community": 88,
       "norm_label": ".radial_power()"
     },
     {
@@ -1836,7 +1836,7 @@
       "source_location": "L568",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_multipolecoefs_total_power",
-      "community": 299,
+      "community": 88,
       "norm_label": ".total_power()"
     },
     {
@@ -1846,7 +1846,7 @@
       "source_location": "L591",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_multipolecoefs_zeroed",
-      "community": 45,
+      "community": 88,
       "norm_label": ".zeroed()"
     },
     {
@@ -1886,7 +1886,7 @@
       "source_location": "L716",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_multipolecoefs_with_times",
-      "community": 299,
+      "community": 88,
       "norm_label": ".with_times()"
     },
     {
@@ -1956,7 +1956,7 @@
       "source_location": "L1088",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_cylsplinecoefs_with_times",
-      "community": 299,
+      "community": 88,
       "norm_label": ".with_times()"
     },
     {
@@ -2036,7 +2036,7 @@
       "source_location": "L1483",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_stack_coefs",
-      "community": 122,
+      "community": 24,
       "norm_label": "stack_coefs()"
     },
     {
@@ -2086,7 +2086,7 @@
       "source_location": "L1900",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_read_mult_coefs",
-      "community": 37,
+      "community": 24,
       "norm_label": "read_mult_coefs()"
     },
     {
@@ -2106,7 +2106,7 @@
       "source_location": "L1958",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_read_coefs",
-      "community": 78,
+      "community": 24,
       "norm_label": "read_coefs()"
     },
     {
@@ -2136,7 +2136,7 @@
       "source_location": "L78",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_rationale_78",
-      "community": 45,
+      "community": 89,
       "norm_label": "expand (l, m) pairs to include their negative-m counterparts.      each (l, m) w"
     },
     {
@@ -2176,7 +2176,7 @@
       "source_location": "L171",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_rationale_171",
-      "community": 299,
+      "community": 88,
       "norm_label": "coerce *times* to a 1-d float64 array, rejecting anything else."
     },
     {
@@ -2376,7 +2376,7 @@
       "source_location": "L541",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_rationale_541",
-      "community": 299,
+      "community": 88,
       "norm_label": "radial power spectrum for harmonic order *l*.          parameters         ------"
     },
     {
@@ -2386,7 +2386,7 @@
       "source_location": "L569",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_rationale_569",
-      "community": 299,
+      "community": 88,
       "norm_label": "total power for harmonic order *l* summed over all radial bins.          paramet"
     },
     {
@@ -2396,7 +2396,7 @@
       "source_location": "L592",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_rationale_592",
-      "community": 45,
+      "community": 88,
       "norm_label": "return a copy with all (l, m) terms **not** in *keep_lm* zeroed out.          ne"
     },
     {
@@ -2436,7 +2436,7 @@
       "source_location": "L723",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_rationale_723",
-      "community": 299,
+      "community": 88,
       "norm_label": "attach or relabel the time axis.          this is the hand-off point for user-co"
     },
     {
@@ -2506,7 +2506,7 @@
       "source_location": "L1096",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_rationale_1096",
-      "community": 299,
+      "community": 88,
       "norm_label": "attach or relabel the time axis.          nothing is interpolated, smoothed or r"
     },
     {
@@ -2566,7 +2566,7 @@
       "source_location": "L1487",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_rationale_1487",
-      "community": 122,
+      "community": 24,
       "norm_label": "stack time-less coefficient snapshots into one object with a time axis.      gri"
     },
     {
@@ -2616,7 +2616,7 @@
       "source_location": "L1906",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_rationale_1906",
-      "community": 37,
+      "community": 24,
       "norm_label": "read one or many agama multipole snapshots into a :class:`multipolecoefs`."
     },
     {
@@ -2636,7 +2636,7 @@
       "source_location": "L1964",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_coefs_rationale_1964",
-      "community": 78,
+      "community": 24,
       "norm_label": "read an agama expansion into a structured dataclass \u2014 one snapshot or many."
     },
     {
@@ -2656,7 +2656,7 @@
       "source_location": "L46",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_error",
-      "community": 54,
+      "community": 81,
       "norm_label": "_error()"
     },
     {
@@ -2676,7 +2676,7 @@
       "source_location": "L51",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_missingkernel",
-      "community": 54,
+      "community": 81,
       "norm_label": "_missingkernel"
     },
     {
@@ -2686,7 +2686,7 @@
       "source_location": "L56",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_missingkernel_init",
-      "community": 54,
+      "community": 81,
       "norm_label": ".__init__()"
     },
     {
@@ -2696,7 +2696,7 @@
       "source_location": "L59",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_missingkernel_call",
-      "community": 54,
+      "community": 81,
       "norm_label": ".__call__()"
     },
     {
@@ -2706,7 +2706,7 @@
       "source_location": "L62",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_missingkernel_get_function",
-      "community": 54,
+      "community": 81,
       "norm_label": ".get_function()"
     },
     {
@@ -2716,7 +2716,7 @@
       "source_location": "L65",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_missingkernel_repr",
-      "community": 54,
+      "community": 81,
       "norm_label": ".__repr__()"
     },
     {
@@ -2726,7 +2726,7 @@
       "source_location": "L77",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_missingcupy",
-      "community": 54,
+      "community": 81,
       "norm_label": "_missingcupy"
     },
     {
@@ -2736,7 +2736,7 @@
       "source_location": "L82",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_missingcupy_getattr",
-      "community": 54,
+      "community": 81,
       "norm_label": ".__getattr__()"
     },
     {
@@ -2746,7 +2746,7 @@
       "source_location": "L95",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_missingcupy_bool",
-      "community": 54,
+      "community": 81,
       "norm_label": ".__bool__()"
     },
     {
@@ -2756,7 +2756,7 @@
       "source_location": "L98",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_missingcupy_repr",
-      "community": 54,
+      "community": 81,
       "norm_label": ".__repr__()"
     },
     {
@@ -2786,7 +2786,7 @@
       "source_location": "L52",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_rationale_52",
-      "community": 54,
+      "community": 81,
       "norm_label": "stand-in for a cupy kernel constructed while cupy is unavailable."
     },
     {
@@ -2796,7 +2796,7 @@
       "source_location": "L78",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_cupy_rationale_78",
-      "community": 54,
+      "community": 81,
       "norm_label": "stub standing in for the ``cupy`` module when it is not installed."
     },
     {
@@ -3126,7 +3126,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire",
-      "community": 45,
+      "community": 89,
       "norm_label": "_fire.py"
     },
     {
@@ -3136,7 +3136,7 @@
       "source_location": "L42",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_read_snapshot_times",
-      "community": 45,
+      "community": 89,
       "norm_label": "read_snapshot_times()"
     },
     {
@@ -3146,7 +3146,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_py_path",
-      "community": 45,
+      "community": 89,
       "norm_label": "path"
     },
     {
@@ -3156,7 +3156,7 @@
       "source_location": "L204",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_create_fire_evolving_ini",
-      "community": 45,
+      "community": 89,
       "norm_label": "create_fire_evolving_ini()"
     },
     {
@@ -3166,7 +3166,7 @@
       "source_location": "L280",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_load_fire_pot",
-      "community": 45,
+      "community": 89,
       "norm_label": "load_fire_pot()"
     },
     {
@@ -3186,7 +3186,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_py_ndarray",
-      "community": 45,
+      "community": 42,
       "norm_label": "ndarray"
     },
     {
@@ -3196,7 +3196,7 @@
       "source_location": "L493",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_spline_block",
-      "community": 45,
+      "community": 42,
       "norm_label": "_spline_block()"
     },
     {
@@ -3216,7 +3216,7 @@
       "source_location": "L630",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_read_rotation",
-      "community": 45,
+      "community": 42,
       "norm_label": "read_rotation()"
     },
     {
@@ -3256,7 +3256,7 @@
       "source_location": "L880",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_write_center_acceleration",
-      "community": 45,
+      "community": 42,
       "norm_label": "write_center_acceleration()"
     },
     {
@@ -3276,7 +3276,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_rationale_1",
-      "community": 45,
+      "community": 89,
       "norm_label": "agama_helper._fire ~~~~~~~~~~~~~~~~~~ fire-simulation-specific convenience wrapp"
     },
     {
@@ -3286,7 +3286,7 @@
       "source_location": "L46",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_rationale_46",
-      "community": 45,
+      "community": 89,
       "norm_label": "r\"\"\"     read ``snapshot_times.txt`` from a fire simulation directory.      retu"
     },
     {
@@ -3296,7 +3296,7 @@
       "source_location": "L211",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_rationale_211",
-      "community": 45,
+      "community": 89,
       "norm_label": "write an agama ``evolving`` ``.ini`` file from a fire simulation directory."
     },
     {
@@ -3306,7 +3306,7 @@
       "source_location": "L297",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_rationale_297",
-      "community": 45,
+      "community": 89,
       "norm_label": "load a fire potential snapshot as an agama potential object.      reads pre-comp"
     },
     {
@@ -3326,7 +3326,7 @@
       "source_location": "L494",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_rationale_494",
-      "community": 45,
+      "community": 42,
       "norm_label": "cubic-spline every coefficient series along the trailing time axis."
     },
     {
@@ -3346,7 +3346,7 @@
       "source_location": "L636",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_rationale_636",
-      "community": 45,
+      "community": 42,
       "norm_label": "read the (3, 3) rotation into the present-day principal-axis frame.      paramet"
     },
     {
@@ -3386,7 +3386,7 @@
       "source_location": "L889",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_fire_rationale_889",
-      "community": 45,
+      "community": 42,
       "norm_label": "write the centre-acceleration table, to reload without the splines.      reload"
     },
     {
@@ -3566,7 +3566,7 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_io_cleanup_tmp_file",
-      "community": 45,
+      "community": 89,
       "norm_label": "_cleanup_tmp_file()"
     },
     {
@@ -3686,7 +3686,7 @@
       "source_location": "L49",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_io_rationale_49",
-      "community": 45,
+      "community": 89,
       "norm_label": "remove a temp coef file, ignoring missing-file errors."
     },
     {
@@ -3796,7 +3796,7 @@
       "source_location": "L91",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_load_load_agama_potential",
-      "community": 59,
+      "community": 89,
       "norm_label": "load_agama_potential()"
     },
     {
@@ -3816,7 +3816,7 @@
       "source_location": "L613",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_load_create_evolving_ini",
-      "community": 45,
+      "community": 89,
       "norm_label": "create_evolving_ini()"
     },
     {
@@ -3846,7 +3846,7 @@
       "source_location": "L102",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_load_rationale_102",
-      "community": 59,
+      "community": 89,
       "norm_label": "load a single-snapshot agama potential from any coefficient source.      accepts"
     },
     {
@@ -3866,7 +3866,7 @@
       "source_location": "L619",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_load_rationale_619",
-      "community": 45,
+      "community": 89,
       "norm_label": "write an agama ``evolving`` potential ``.ini`` config from explicit file paths."
     },
     {
@@ -4226,7 +4226,7 @@
       "source_location": "L726",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_multipolepotentialgpu_from_file",
-      "community": 116,
+      "community": 78,
       "norm_label": ".from_file()"
     },
     {
@@ -4326,7 +4326,7 @@
       "source_location": "L893",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_multipolepotentialgpu_desort",
-      "community": 48,
+      "community": 79,
       "norm_label": "._desort()"
     },
     {
@@ -4356,7 +4356,7 @@
       "source_location": "L917",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_multipolepotentialgpu_density",
-      "community": 10,
+      "community": 79,
       "norm_label": ".density()"
     },
     {
@@ -4446,7 +4446,7 @@
       "source_location": "L1320",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_agamatimespline",
-      "community": 296,
+      "community": 74,
       "norm_label": "_agamatimespline"
     },
     {
@@ -4476,7 +4476,7 @@
       "source_location": "L1382",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_agamatimespline_call",
-      "community": 296,
+      "community": 74,
       "norm_label": ".__call__()"
     },
     {
@@ -4906,7 +4906,7 @@
       "source_location": "L2067",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_shiftedpotentialgpu_init",
-      "community": 296,
+      "community": 74,
       "norm_label": ".__init__()"
     },
     {
@@ -5006,7 +5006,7 @@
       "source_location": "L2145",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_scaledpotentialgpu_init",
-      "community": 296,
+      "community": 74,
       "norm_label": ".__init__()"
     },
     {
@@ -5086,7 +5086,7 @@
       "source_location": "L2244",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rot_z",
-      "community": 12,
+      "community": 15,
       "norm_label": "_rot_z()"
     },
     {
@@ -5146,7 +5146,7 @@
       "source_location": "L2296",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rotatedbase_matrix",
-      "community": 12,
+      "community": 11,
       "norm_label": ".matrix()"
     },
     {
@@ -5296,7 +5296,7 @@
       "source_location": "L2425",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rotatingpotentialgpu_own_matrix",
-      "community": 12,
+      "community": 15,
       "norm_label": "._own_matrix()"
     },
     {
@@ -5346,7 +5346,7 @@
       "source_location": "L2497",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_build_disk_gpu",
-      "community": 116,
+      "community": 59,
       "norm_label": "_build_disk_gpu()"
     },
     {
@@ -5376,7 +5376,7 @@
       "source_location": "L2618",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_get_analytic_map",
-      "community": 116,
+      "community": 59,
       "norm_label": "_get_analytic_map()"
     },
     {
@@ -5456,7 +5456,7 @@
       "source_location": "L3049",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_potentialgpu",
-      "community": 116,
+      "community": 45,
       "norm_label": "potentialgpu()"
     },
     {
@@ -5556,7 +5556,7 @@
       "source_location": "L727",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rationale_727",
-      "community": 116,
+      "community": 78,
       "norm_label": "load from an agama .coef_mul_dr file or hdf5 archive."
     },
     {
@@ -5636,7 +5636,7 @@
       "source_location": "L894",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rationale_894",
-      "community": 48,
+      "community": 79,
       "norm_label": "scatter sorted output back to the original particle order."
     },
     {
@@ -5666,7 +5666,7 @@
       "source_location": "L918",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rationale_918",
-      "community": 10,
+      "community": 79,
       "norm_label": "evaluate rho = div(grad(phi))/(4pig).  returns (n,) or scalar cupy float64 in ms"
     },
     {
@@ -5756,7 +5756,7 @@
       "source_location": "L1321",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rationale_1321",
-      "community": 296,
+      "community": 74,
       "norm_label": "time interpolation of a k-vector, bit-compatible with agama.      reproduces ``p"
     },
     {
@@ -5766,7 +5766,7 @@
       "source_location": "L1383",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rationale_1383",
-      "community": 296,
+      "community": 74,
       "norm_label": "value of the k-vector at scalar time *t*, as a tuple of k floats."
     },
     {
@@ -5986,7 +5986,7 @@
       "source_location": "L2297",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rationale_2297",
-      "community": 12,
+      "community": 11,
       "norm_label": "total rotation r(t) (3, 3): ``phi(x, t) = phi_base(r(t)^t x, t)``."
     },
     {
@@ -6066,7 +6066,7 @@
       "source_location": "L2498",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rationale_2498",
-      "community": 116,
+      "community": 59,
       "norm_label": "full disk potential via agama cpu: diskansatz + axisymmetric multipole(lmax=32)."
     },
     {
@@ -6166,7 +6166,7 @@
       "source_location": "L3058",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_potential_rationale_3058",
-      "community": 116,
+      "community": 45,
       "norm_label": "gpu potential factory : mirrors the ``agama.potential`` api.      usage     ----"
     },
     {
@@ -6386,7 +6386,7 @@
       "source_location": "L506",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_spheroid_spheroidpotentialgpu_repr",
-      "community": 18,
+      "community": 65,
       "norm_label": ".__repr__()"
     },
     {
@@ -6626,7 +6626,7 @@
       "source_location": "L206",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_analytic_precision_test_precision_via_potentialgpu",
-      "community": 116,
+      "community": 296,
       "norm_label": "test_precision_via_potentialgpu()"
     },
     {
@@ -6756,7 +6756,7 @@
       "source_location": "L92",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_comoving_host_test_read_rotation_rejects_a_short_file",
-      "community": 45,
+      "community": 42,
       "norm_label": "test_read_rotation_rejects_a_short_file()"
     },
     {
@@ -7596,7 +7596,7 @@
       "source_location": "L148",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testloadpotentialgpu_test_gpu_false_returns_agama",
-      "community": 59,
+      "community": 89,
       "norm_label": ".test_gpu_false_returns_agama()"
     },
     {
@@ -7626,7 +7626,7 @@
       "source_location": "L182",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testloadevolvinggpu_test_evolving_gpu_with_center",
-      "community": 11,
+      "community": 89,
       "norm_label": ".test_evolving_gpu_with_center()"
     },
     {
@@ -7636,7 +7636,7 @@
       "source_location": "L201",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testmultisectionini",
-      "community": 59,
+      "community": 45,
       "norm_label": "testmultisectionini"
     },
     {
@@ -7646,7 +7646,7 @@
       "source_location": "L203",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testmultisectionini_write_pot",
-      "community": 59,
+      "community": 45,
       "norm_label": "._write_pot()"
     },
     {
@@ -7656,7 +7656,7 @@
       "source_location": "L209",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testmultisectionini_test_content_detection_arbitrary_extension",
-      "community": 59,
+      "community": 45,
       "norm_label": ".test_content_detection_arbitrary_extension()"
     },
     {
@@ -7666,7 +7666,7 @@
       "source_location": "L221",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testmultisectionini_test_two_section_arbitrary_headers",
-      "community": 59,
+      "community": 45,
       "norm_label": ".test_two_section_arbitrary_headers()"
     },
     {
@@ -7676,7 +7676,7 @@
       "source_location": "L245",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testmultisectionini_test_three_sections_numeric",
-      "community": 59,
+      "community": 45,
       "norm_label": ".test_three_sections_numeric()"
     },
     {
@@ -7686,7 +7686,7 @@
       "source_location": "L265",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testmultisectionini_test_single_section_no_name",
-      "community": 59,
+      "community": 45,
       "norm_label": ".test_single_section_no_name()"
     },
     {
@@ -7696,7 +7696,7 @@
       "source_location": "L276",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testmultisectionini_test_case_insensitive_type_key",
-      "community": 59,
+      "community": 45,
       "norm_label": ".test_case_insensitive_type_key()"
     },
     {
@@ -7706,7 +7706,7 @@
       "source_location": "L287",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testmultisectionini_test_case_insensitive_param_keys",
-      "community": 59,
+      "community": 45,
       "norm_label": ".test_case_insensitive_param_keys()"
     },
     {
@@ -7716,7 +7716,7 @@
       "source_location": "L305",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testmultisectionini_test_section_with_multipole_file_ref",
-      "community": 59,
+      "community": 45,
       "norm_label": ".test_section_with_multipole_file_ref()"
     },
     {
@@ -7726,7 +7726,7 @@
       "source_location": "L316",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testmultisectionini_test_section_with_cylspline_file_ref",
-      "community": 59,
+      "community": 45,
       "norm_label": ".test_section_with_cylspline_file_ref()"
     },
     {
@@ -7736,7 +7736,7 @@
       "source_location": "L328",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testmultisectionini_test_mixed_composite_bfe_plus_analytic",
-      "community": 59,
+      "community": 45,
       "norm_label": ".test_mixed_composite_bfe_plus_analytic()"
     },
     {
@@ -7756,7 +7756,7 @@
       "source_location": "L363",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testdiskgpuaccuracy_pots",
-      "community": 116,
+      "community": 45,
       "norm_label": ".pots()"
     },
     {
@@ -7826,7 +7826,7 @@
       "source_location": "L443",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_testkinggpuaccuracy_pots",
-      "community": 116,
+      "community": 45,
       "norm_label": ".pots()"
     },
     {
@@ -7966,7 +7966,7 @@
       "source_location": "L149",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_rationale_149",
-      "community": 59,
+      "community": 89,
       "norm_label": "default gpu=false returns agama.potential, not a gpu object."
     },
     {
@@ -7986,7 +7986,7 @@
       "source_location": "L183",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_rationale_183",
-      "community": 11,
+      "community": 89,
       "norm_label": "evolving gpu=true with center= \u2192 evolvingpotentialgpu inside shiftedpotentialgpu"
     },
     {
@@ -7996,7 +7996,7 @@
       "source_location": "L204",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_rationale_204",
-      "community": 59,
+      "community": 45,
       "norm_label": "write a potential config file with the given suffix (any extension works)."
     },
     {
@@ -8006,7 +8006,7 @@
       "source_location": "L210",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_rationale_210",
-      "community": 59,
+      "community": 45,
       "norm_label": "_is_potential_ini detects multi-section content regardless of extension."
     },
     {
@@ -8016,7 +8016,7 @@
       "source_location": "L222",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_rationale_222",
-      "community": 59,
+      "community": 45,
       "norm_label": "[potential halo] + [potential disk] headers with a .dat extension."
     },
     {
@@ -8026,7 +8026,7 @@
       "source_location": "L246",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_rationale_246",
-      "community": 59,
+      "community": 45,
       "norm_label": "[potential 0] + [potential 1] + [potential 2] (numbered headers)."
     },
     {
@@ -8036,7 +8036,7 @@
       "source_location": "L266",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_rationale_266",
-      "community": 59,
+      "community": 45,
       "norm_label": "plain [potential] header \u2192 single gpu pot, not composite."
     },
     {
@@ -8046,7 +8046,7 @@
       "source_location": "L277",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_rationale_277",
-      "community": 59,
+      "community": 45,
       "norm_label": "type = nfw (uppercase) should be recognised."
     },
     {
@@ -8056,7 +8056,7 @@
       "source_location": "L288",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_rationale_288",
-      "community": 59,
+      "community": 45,
       "norm_label": "mixed-case param keys: mass=, scaleradius= should work."
     },
     {
@@ -8066,7 +8066,7 @@
       "source_location": "L306",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_rationale_306",
-      "community": 59,
+      "community": 45,
       "norm_label": "[potential] type=multipole file=<path> \u2192 multipolepotentialgpu."
     },
     {
@@ -8076,7 +8076,7 @@
       "source_location": "L317",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_rationale_317",
-      "community": 59,
+      "community": 45,
       "norm_label": "[potential bar] type=cylspline file=<path> \u2192 cylsplinepotentialgpu."
     },
     {
@@ -8086,7 +8086,7 @@
       "source_location": "L329",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_load_paths_rationale_329",
-      "community": 59,
+      "community": 45,
       "norm_label": "composite: multipole file + analytic nfw section."
     },
     {
@@ -8176,7 +8176,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision",
-      "community": 116,
+      "community": 78,
       "norm_label": "test_multipole_precision.py"
     },
     {
@@ -8186,7 +8186,7 @@
       "source_location": "L39",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision_pots",
-      "community": 116,
+      "community": 78,
       "norm_label": "pots()"
     },
     {
@@ -8196,7 +8196,7 @@
       "source_location": "L45",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision_dirs",
-      "community": 116,
+      "community": 78,
       "norm_label": "_dirs()"
     },
     {
@@ -8206,7 +8206,7 @@
       "source_location": "L50",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision_rel",
-      "community": 116,
+      "community": 78,
       "norm_label": "_rel()"
     },
     {
@@ -8216,7 +8216,7 @@
       "source_location": "L62",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision_test_pointwise",
-      "community": 116,
+      "community": 78,
       "norm_label": "test_pointwise()"
     },
     {
@@ -8226,7 +8226,7 @@
       "source_location": "L74",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision_test_tidal_difference",
-      "community": 116,
+      "community": 78,
       "norm_label": "test_tidal_difference()"
     },
     {
@@ -8236,7 +8236,7 @@
       "source_location": "L85",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision_test_hessian_and_density_stay_float64",
-      "community": 116,
+      "community": 78,
       "norm_label": "test_hessian_and_density_stay_float64()"
     },
     {
@@ -8246,7 +8246,7 @@
       "source_location": "L93",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision_test_invalid_precision",
-      "community": 116,
+      "community": 78,
       "norm_label": "test_invalid_precision()"
     },
     {
@@ -8256,7 +8256,7 @@
       "source_location": "L104",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision_test_force_on_axis",
-      "community": 116,
+      "community": 78,
       "norm_label": "test_force_on_axis()"
     },
     {
@@ -8266,7 +8266,7 @@
       "source_location": "L118",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision_test_potentialgpu_file_precision",
-      "community": 116,
+      "community": 78,
       "norm_label": "test_potentialgpu_file_precision()"
     },
     {
@@ -8276,7 +8276,7 @@
       "source_location": "L124",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision_test_ini_components_get_precision",
-      "community": 116,
+      "community": 78,
       "norm_label": "test_ini_components_get_precision()"
     },
     {
@@ -8286,7 +8286,7 @@
       "source_location": "L133",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision_test_load_agama_potential_precision",
-      "community": 116,
+      "community": 78,
       "norm_label": "test_load_agama_potential_precision()"
     },
     {
@@ -8296,7 +8296,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision_rationale_1",
-      "community": 116,
+      "community": 78,
       "norm_label": "test_multipole_precision.py ~~~~~~~~~~~~~~~~~~~~~~~~~~~ tests for ``multipolepot"
     },
     {
@@ -8306,7 +8306,7 @@
       "source_location": "L75",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_multipole_precision_rationale_75",
-      "community": 116,
+      "community": 78,
       "norm_label": "df over 10 pc at 40 kpc: ~1e-7 f_ns r/d, below the pure-float32 4e-4."
     },
     {
@@ -9096,7 +9096,7 @@
       "source_location": "L90",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_mult_base",
-      "community": 37,
+      "community": 24,
       "norm_label": "mult_base()"
     },
     {
@@ -9136,7 +9136,7 @@
       "source_location": "L110",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_mult_series",
-      "community": 122,
+      "community": 88,
       "norm_label": "mult_series()"
     },
     {
@@ -9156,7 +9156,7 @@
       "source_location": "L120",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_cylsp_series",
-      "community": 122,
+      "community": 61,
       "norm_label": "cylsp_series()"
     },
     {
@@ -9176,7 +9176,7 @@
       "source_location": "L130",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_cylsp3_series",
-      "community": 122,
+      "community": 61,
       "norm_label": "cylsp3_series()"
     },
     {
@@ -9276,7 +9276,7 @@
       "source_location": "L219",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_mult_string_round_trip_timeless",
-      "community": 37,
+      "community": 24,
       "norm_label": "test_mult_string_round_trip_timeless()"
     },
     {
@@ -9286,7 +9286,7 @@
       "source_location": "L227",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_mult_string_round_trip_per_snapshot_of_series",
-      "community": 37,
+      "community": 24,
       "norm_label": "test_mult_string_round_trip_per_snapshot_of_series()"
     },
     {
@@ -9296,7 +9296,7 @@
       "source_location": "L234",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_cylsp_string_round_trip_timeless",
-      "community": 24,
+      "community": 61,
       "norm_label": "test_cylsp_string_round_trip_timeless()"
     },
     {
@@ -9306,7 +9306,7 @@
       "source_location": "L242",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_cylsp_string_round_trip_per_snapshot_of_series",
-      "community": 24,
+      "community": 61,
       "norm_label": "test_cylsp_string_round_trip_per_snapshot_of_series()"
     },
     {
@@ -9316,7 +9316,7 @@
       "source_location": "L249",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_to_coef_strings_returns_one_string_per_time",
-      "community": 37,
+      "community": 24,
       "norm_label": "test_to_coef_strings_returns_one_string_per_time()"
     },
     {
@@ -9326,7 +9326,7 @@
       "source_location": "L257",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_to_coef_strings_single_element_without_time_axis",
-      "community": 37,
+      "community": 24,
       "norm_label": "test_to_coef_strings_single_element_without_time_axis()"
     },
     {
@@ -9336,7 +9336,7 @@
       "source_location": "L267",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_h5_round_trip_group_all_mult",
-      "community": 78,
+      "community": 24,
       "norm_label": "test_h5_round_trip_group_all_mult()"
     },
     {
@@ -9346,7 +9346,7 @@
       "source_location": "L277",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_h5_round_trip_group_all_cylsp",
-      "community": 78,
+      "community": 24,
       "norm_label": "test_h5_round_trip_group_all_cylsp()"
     },
     {
@@ -9356,7 +9356,7 @@
       "source_location": "L287",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_h5_explicit_group_name_ordering",
-      "community": 78,
+      "community": 24,
       "norm_label": "test_h5_explicit_group_name_ordering()"
     },
     {
@@ -9366,7 +9366,7 @@
       "source_location": "L311",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_h5_explicit_group_name_pairs_stored_times_correctly",
-      "community": 78,
+      "community": 24,
       "norm_label": "test_h5_explicit_group_name_pairs_stored_times_correctly()"
     },
     {
@@ -9376,7 +9376,7 @@
       "source_location": "L331",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_h5_write_times_false_and_no_times_arg_raises",
-      "community": 78,
+      "community": 24,
       "norm_label": "test_h5_write_times_false_and_no_times_arg_raises()"
     },
     {
@@ -9386,7 +9386,7 @@
       "source_location": "L338",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_h5_write_times_false_but_explicit_times_still_works",
-      "community": 78,
+      "community": 24,
       "norm_label": "test_h5_write_times_false_but_explicit_times_still_works()"
     },
     {
@@ -9536,7 +9536,7 @@
       "source_location": "L480",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_stack_grid_mismatch_raises",
-      "community": 122,
+      "community": 24,
       "norm_label": "test_stack_grid_mismatch_raises()"
     },
     {
@@ -9546,7 +9546,7 @@
       "source_location": "L490",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_stack_label_mismatch_raises",
-      "community": 122,
+      "community": 24,
       "norm_label": "test_stack_label_mismatch_raises()"
     },
     {
@@ -9556,7 +9556,7 @@
       "source_location": "L499",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_stack_metadata_mismatch_raises",
-      "community": 122,
+      "community": 24,
       "norm_label": "test_stack_metadata_mismatch_raises()"
     },
     {
@@ -9566,7 +9566,7 @@
       "source_location": "L508",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_stack_mixed_types_raises",
-      "community": 122,
+      "community": 24,
       "norm_label": "test_stack_mixed_types_raises()"
     },
     {
@@ -9576,7 +9576,7 @@
       "source_location": "L513",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_stack_item_already_has_time_axis_raises",
-      "community": 122,
+      "community": 24,
       "norm_label": "test_stack_item_already_has_time_axis_raises()"
     },
     {
@@ -9586,7 +9586,7 @@
       "source_location": "L518",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_stack_cylsp_grid_and_m_values_mismatch_raise",
-      "community": 122,
+      "community": 24,
       "norm_label": "test_stack_cylsp_grid_and_m_values_mismatch_raise()"
     },
     {
@@ -9596,7 +9596,7 @@
       "source_location": "L531",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_cylsp_three_section_series_h5_round_trip",
-      "community": 78,
+      "community": 24,
       "norm_label": "test_cylsp_three_section_series_h5_round_trip()"
     },
     {
@@ -9676,7 +9676,7 @@
       "source_location": "L607",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_sequence_of_paths_reads_back_same_arrays",
-      "community": 78,
+      "community": 24,
       "norm_label": "test_sequence_of_paths_reads_back_same_arrays()"
     },
     {
@@ -9686,7 +9686,7 @@
       "source_location": "L621",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_evolving_ini_round_trip_times_come_from_file",
-      "community": 78,
+      "community": 24,
       "norm_label": "test_evolving_ini_round_trip_times_come_from_file()"
     },
     {
@@ -9696,7 +9696,7 @@
       "source_location": "L635",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_sequence_of_paths_and_ini_agree",
-      "community": 122,
+      "community": 24,
       "norm_label": "test_sequence_of_paths_and_ini_agree()"
     },
     {
@@ -9816,7 +9816,7 @@
       "source_location": "L758",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_sequence_sources_accept_any_ordered_container",
-      "community": 78,
+      "community": 24,
       "norm_label": "test_sequence_sources_accept_any_ordered_container()"
     },
     {
@@ -9826,7 +9826,7 @@
       "source_location": "L767",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_group_name_accepts_any_ordered_container",
-      "community": 78,
+      "community": 24,
       "norm_label": "test_group_name_accepts_any_ordered_container()"
     },
     {
@@ -9836,7 +9836,7 @@
       "source_location": "L777",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_group_name_rejected_for_sequence_source",
-      "community": 78,
+      "community": 24,
       "norm_label": "test_group_name_rejected_for_sequence_source()"
     },
     {
@@ -9846,7 +9846,7 @@
       "source_location": "L783",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_test_group_name_rejected_for_ini_source",
-      "community": 78,
+      "community": 24,
       "norm_label": "test_group_name_rejected_for_ini_source()"
     },
     {
@@ -9896,7 +9896,7 @@
       "source_location": "L312",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_rationale_312",
-      "community": 78,
+      "community": 24,
       "norm_label": "regression: an explicit *group_name* must take each group's time from the     ar"
     },
     {
@@ -9926,7 +9926,7 @@
       "source_location": "L759",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_series_rationale_759",
-      "community": 78,
+      "community": 24,
       "norm_label": "np.sort(glob(...)) and generators are natural ways to build an ordered list."
     },
     {
@@ -10106,7 +10106,7 @@
       "source_location": "L214",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_spheroid_shape_test_routing_rejects_inapplicable_keywords",
-      "community": 116,
+      "community": 18,
       "norm_label": "test_routing_rejects_inapplicable_keywords()"
     },
     {
@@ -10236,7 +10236,7 @@
       "source_location": "L45",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_spline_resample_mult_series",
-      "community": 122,
+      "community": 24,
       "norm_label": "mult_series()"
     },
     {
@@ -10246,7 +10246,7 @@
       "source_location": "L57",
       "_origin": "ast",
       "id": "nbody_streams_agama_helper_tests_test_spline_resample_cylsp_series",
-      "community": 122,
+      "community": 24,
       "norm_label": "cylsp_series()"
     },
     {
@@ -11846,7 +11846,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_cuda_kernels",
-      "community": 6,
+      "community": 50,
       "norm_label": "cuda_kernels.py"
     },
     {
@@ -11856,7 +11856,7 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "nbody_streams_cuda_kernels_direct_source",
-      "community": 6,
+      "community": 50,
       "norm_label": "direct_source()"
     },
     {
@@ -11866,7 +11866,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_cuda_kernels_rationale_1",
-      "community": 6,
+      "community": 50,
       "norm_label": "cuda source for the direct-sum kernels.  the kernels live in ``nbody_streams/cud"
     },
     {
@@ -11876,7 +11876,7 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "nbody_streams_cuda_kernels_rationale_18",
-      "community": 6,
+      "community": 50,
       "norm_label": "return ``direct.cu`` with ``softening.cuh`` inlined.      inlining keeps cupy's"
     },
     {
@@ -12306,7 +12306,7 @@
       "source_location": "L399",
       "_origin": "ast",
       "id": "nbody_streams_fields_get_kernel",
-      "community": 6,
+      "community": 50,
       "norm_label": "_get_kernel()"
     },
     {
@@ -12386,7 +12386,7 @@
       "source_location": "L769",
       "_origin": "ast",
       "id": "nbody_streams_fields_direct_forces_gpu_soa",
-      "community": 50,
+      "community": 46,
       "norm_label": "_direct_forces_gpu_soa()"
     },
     {
@@ -12516,7 +12516,7 @@
       "source_location": "L400",
       "_origin": "ast",
       "id": "nbody_streams_fields_rationale_400",
-      "community": 6,
+      "community": 50,
       "norm_label": "return the compiled cuda kernel for forces or potential.      parameters     ---"
     },
     {
@@ -12596,7 +12596,7 @@
       "source_location": "L770",
       "_origin": "ast",
       "id": "nbody_streams_fields_rationale_770",
-      "community": 50,
+      "community": 46,
       "norm_label": "direct-sum accelerations for an integrator's hot loop.      ``pos`` is a cupy (n"
     },
     {
@@ -12656,7 +12656,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io",
-      "community": 46,
+      "community": 289,
       "norm_label": "nbody_io.py"
     },
     {
@@ -12676,7 +12676,7 @@
       "source_location": "L36",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_is_uniform",
-      "community": 291,
+      "community": 289,
       "norm_label": "_is_uniform()"
     },
     {
@@ -12686,7 +12686,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_py_ndarray",
-      "community": 291,
+      "community": 289,
       "norm_label": "ndarray"
     },
     {
@@ -12696,7 +12696,7 @@
       "source_location": "L53",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_worker_write_shared",
-      "community": 291,
+      "community": 289,
       "norm_label": "_worker_write_shared()"
     },
     {
@@ -12706,7 +12706,7 @@
       "source_location": "L118",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_worker_write_shared_multi",
-      "community": 291,
+      "community": 289,
       "norm_label": "_worker_write_shared_multi()"
     },
     {
@@ -12766,7 +12766,7 @@
       "source_location": "L548",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_particlereader_extract_orbits",
-      "community": 291,
+      "community": 289,
       "norm_label": ".extract_orbits()"
     },
     {
@@ -12846,7 +12846,7 @@
       "source_location": "L1021",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_compact_per_particle",
-      "community": 46,
+      "community": 289,
       "norm_label": "_compact_per_particle()"
     },
     {
@@ -12856,7 +12856,7 @@
       "source_location": "L1036",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_expand_per_particle",
-      "community": 46,
+      "community": 289,
       "norm_label": "_expand_per_particle()"
     },
     {
@@ -12886,7 +12886,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_rationale_1",
-      "community": 46,
+      "community": 289,
       "norm_label": "nbody_streams.nbody_io  i/o utilities for n-body snapshots and restart data.  pr"
     },
     {
@@ -12906,7 +12906,7 @@
       "source_location": "L37",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_rationale_37",
-      "community": 291,
+      "community": 289,
       "norm_label": "check whether all elements of *arr* are equal to within relative tolerance."
     },
     {
@@ -12916,7 +12916,7 @@
       "source_location": "L54",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_rationale_54",
-      "community": 291,
+      "community": 289,
       "norm_label": "worker executed in a separate process. reads one snapshot from disk and writes"
     },
     {
@@ -12926,7 +12926,7 @@
       "source_location": "L119",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_rationale_119",
-      "community": 291,
+      "community": 289,
       "norm_label": "worker for n-species parallel extraction.      args (tuple):         snap_index"
     },
     {
@@ -12976,7 +12976,7 @@
       "source_location": "L554",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_rationale_554",
-      "community": 291,
+      "community": 289,
       "norm_label": "extract orbits for selected particle types across snapshots,         using paral"
     },
     {
@@ -13016,7 +13016,7 @@
       "source_location": "L1022",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_rationale_1022",
-      "community": 46,
+      "community": 289,
       "norm_label": "``{key: value}`` for a constant array, ``{key + \"_per_species\": values}``     wh"
     },
     {
@@ -13026,7 +13026,7 @@
       "source_location": "L1037",
       "_origin": "ast",
       "id": "nbody_streams_nbody_io_rationale_1037",
-      "community": 46,
+      "community": 289,
       "norm_label": "inverse of :func:`_compact_per_particle`: an (n,) float64 array or none."
     },
     {
@@ -13226,7 +13226,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_sim",
-      "community": 46,
+      "community": 3,
       "norm_label": "sim.py"
     },
     {
@@ -13256,7 +13256,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_sim_rationale_1",
-      "community": 46,
+      "community": 3,
       "norm_label": "nbody_streams.sim unified high-level simulation entry point for multi-species n-"
     },
     {
@@ -13276,7 +13276,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_species",
-      "community": 3,
+      "community": 289,
       "norm_label": "species.py"
     },
     {
@@ -13336,7 +13336,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_species_py_ndarray",
-      "community": 303,
+      "community": 289,
       "norm_label": "ndarray"
     },
     {
@@ -13366,7 +13366,7 @@
       "source_location": "L125",
       "_origin": "ast",
       "id": "nbody_streams_species_validate_species",
-      "community": 303,
+      "community": 289,
       "norm_label": "_validate_species()"
     },
     {
@@ -13376,7 +13376,7 @@
       "source_location": "L156",
       "_origin": "ast",
       "id": "nbody_streams_species_split_by_species",
-      "community": 3,
+      "community": 289,
       "norm_label": "_split_by_species()"
     },
     {
@@ -13396,7 +13396,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_species_rationale_1",
-      "community": 3,
+      "community": 289,
       "norm_label": "nbody_streams.species species definitions and helper functions for multi-species"
     },
     {
@@ -13456,7 +13456,7 @@
       "source_location": "L126",
       "_origin": "ast",
       "id": "nbody_streams_species_rationale_126",
-      "community": 303,
+      "community": 289,
       "norm_label": "validate *species* list against *phase_space* shape.      checks     ------"
     },
     {
@@ -13466,7 +13466,7 @@
       "source_location": "L157",
       "_origin": "ast",
       "id": "nbody_streams_species_rationale_157",
-      "community": 3,
+      "community": 289,
       "norm_label": "split a combined ``(n_total, 6)`` phase-space array into per-species slices."
     },
     {
@@ -14126,7 +14126,7 @@
       "source_location": "L140",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_particle4_octant",
-      "community": 86,
+      "community": 63,
       "norm_label": "octant()"
     },
     {
@@ -14156,7 +14156,7 @@
       "source_location": "L25",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_kernelsuccess",
-      "community": 31,
+      "community": 60,
       "norm_label": "kernelsuccess()"
     },
     {
@@ -14256,7 +14256,7 @@
       "source_location": "L76",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_groupdata",
-      "community": 52,
+      "community": 298,
       "norm_label": "groupdata"
     },
     {
@@ -14266,7 +14266,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_h_int2",
-      "community": 52,
+      "community": 298,
       "norm_label": "int2"
     },
     {
@@ -14276,7 +14276,7 @@
       "source_location": "L79",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_groupdata_packed_data",
-      "community": 52,
+      "community": 298,
       "norm_label": "packed_data"
     },
     {
@@ -14286,7 +14286,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_h_host",
-      "community": 52,
+      "community": 298,
       "norm_label": "__host__"
     },
     {
@@ -14296,7 +14296,7 @@
       "source_location": "L81",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_groupdata_device",
-      "community": 52,
+      "community": 298,
       "norm_label": "__device__"
     },
     {
@@ -14306,7 +14306,7 @@
       "source_location": "L81",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_groupdata_groupdata",
-      "community": 52,
+      "community": 298,
       "norm_label": ".groupdata()"
     },
     {
@@ -14316,7 +14316,7 @@
       "source_location": "L88",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_groupdata_pbeg",
-      "community": 52,
+      "community": 298,
       "norm_label": ".pbeg()"
     },
     {
@@ -14326,7 +14326,7 @@
       "source_location": "L89",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_groupdata_np",
-      "community": 52,
+      "community": 298,
       "norm_label": ".np()"
     },
     {
@@ -14346,7 +14346,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_h_uint4",
-      "community": 60,
+      "community": 298,
       "norm_label": "uint4"
     },
     {
@@ -14366,7 +14366,7 @@
       "source_location": "L111",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_celldata_celldata",
-      "community": 60,
+      "community": 298,
       "norm_label": ".celldata()"
     },
     {
@@ -15276,7 +15276,7 @@
       "source_location": "L357",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_treecode_treecode_growbuildbuffers",
-      "community": 60,
+      "community": 32,
       "norm_label": "growbuildbuffers"
     },
     {
@@ -15456,7 +15456,7 @@
       "source_location": "L139",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_force_max_n",
-      "community": 65,
+      "community": 54,
       "norm_label": "_max_n()"
     },
     {
@@ -15486,7 +15486,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_force_py_ndarray",
-      "community": 54,
+      "community": 97,
       "norm_label": "ndarray"
     },
     {
@@ -15496,7 +15496,7 @@
       "source_location": "L217",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_force_coerce_eps",
-      "community": 54,
+      "community": 97,
       "norm_label": "_coerce_eps()"
     },
     {
@@ -15516,7 +15516,7 @@
       "source_location": "L268",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_force_treegpu_init",
-      "community": 65,
+      "community": 91,
       "norm_label": ".__init__()"
     },
     {
@@ -15586,7 +15586,7 @@
       "source_location": "L353",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_force_tree_gravity_gpu",
-      "community": 51,
+      "community": 97,
       "norm_label": "tree_gravity_gpu()"
     },
     {
@@ -15646,7 +15646,7 @@
       "source_location": "L140",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_force_rationale_140",
-      "community": 65,
+      "community": 54,
       "norm_label": "largest n whose tree (plus ``extra_bytes_per_particle`` that the caller     will"
     },
     {
@@ -15656,7 +15656,7 @@
       "source_location": "L218",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_force_rationale_218",
-      "community": 54,
+      "community": 97,
       "norm_label": "return a contiguous float32 cupy array of length n for eps.      accepts:"
     },
     {
@@ -15696,7 +15696,7 @@
       "source_location": "L367",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_force_rationale_367",
-      "community": 51,
+      "community": 97,
       "norm_label": "compute gravitational accelerations and potential using the gpu tree code     (b"
     },
     {
@@ -16346,7 +16346,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_computemultipoles",
-      "community": 304,
+      "community": 60,
       "norm_label": "computemultipoles.cu"
     },
     {
@@ -16356,7 +16356,7 @@
       "source_location": "L28",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_computemultipoles_addmonopole",
-      "community": 304,
+      "community": 60,
       "norm_label": "addmonopole()"
     },
     {
@@ -16366,7 +16366,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_computemultipoles_cu_device",
-      "community": 304,
+      "community": 60,
       "norm_label": "__device__"
     },
     {
@@ -16376,7 +16376,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_computemultipoles_cu_double4",
-      "community": 304,
+      "community": 60,
       "norm_label": "double4"
     },
     {
@@ -16396,7 +16396,7 @@
       "source_location": "L52",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_computemultipoles_addquadrupole",
-      "community": 304,
+      "community": 60,
       "norm_label": "addquadrupole()"
     },
     {
@@ -16406,7 +16406,7 @@
       "source_location": "L87",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_computemultipoles_storecell",
-      "community": 304,
+      "community": 60,
       "norm_label": "storecell()"
     },
     {
@@ -16416,7 +16416,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_computemultipoles_cu_float3",
-      "community": 304,
+      "community": 60,
       "norm_label": "float3"
     },
     {
@@ -16426,7 +16426,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_computemultipoles_cu_float4",
-      "community": 304,
+      "community": 60,
       "norm_label": "float4"
     },
     {
@@ -16476,7 +16476,7 @@
       "source_location": "L305",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_computemultipoles_treecode_real_t_computemultipoles",
-      "community": 31,
+      "community": 60,
       "norm_label": "treecode<real_t>::computemultipoles()"
     },
     {
@@ -17016,7 +17016,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_run_gpu_tree",
-      "community": 46,
+      "community": 54,
       "norm_label": "run_gpu_tree.py"
     },
     {
@@ -17026,7 +17026,7 @@
       "source_location": "L114",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_run_gpu_tree_stepwatchdog",
-      "community": 65,
+      "community": 54,
       "norm_label": "_stepwatchdog"
     },
     {
@@ -17036,7 +17036,7 @@
       "source_location": "L134",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_run_gpu_tree_stepwatchdog_init",
-      "community": 65,
+      "community": 54,
       "norm_label": ".__init__()"
     },
     {
@@ -17046,7 +17046,7 @@
       "source_location": "L144",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_run_gpu_tree_stepwatchdog_run",
-      "community": 65,
+      "community": 54,
       "norm_label": "._run()"
     },
     {
@@ -17056,7 +17056,7 @@
       "source_location": "L156",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_run_gpu_tree_stepwatchdog_enter",
-      "community": 65,
+      "community": 54,
       "norm_label": ".__enter__()"
     },
     {
@@ -17066,7 +17066,7 @@
       "source_location": "L161",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_run_gpu_tree_stepwatchdog_exit",
-      "community": 65,
+      "community": 54,
       "norm_label": ".__exit__()"
     },
     {
@@ -17076,7 +17076,7 @@
       "source_location": "L165",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_run_gpu_tree_stepwatchdog_close",
-      "community": 65,
+      "community": 54,
       "norm_label": ".close()"
     },
     {
@@ -17086,7 +17086,7 @@
       "source_location": "L169",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_run_gpu_tree_stepwatchdog_del",
-      "community": 65,
+      "community": 54,
       "norm_label": ".__del__()"
     },
     {
@@ -17096,7 +17096,7 @@
       "source_location": "L177",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_run_gpu_tree_run_nbody_gpu_tree",
-      "community": 65,
+      "community": 54,
       "norm_label": "run_nbody_gpu_tree()"
     },
     {
@@ -17106,7 +17106,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_run_gpu_tree_py_ndarray",
-      "community": 65,
+      "community": 54,
       "norm_label": "ndarray"
     },
     {
@@ -17116,7 +17116,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_run_gpu_tree_rationale_1",
-      "community": 46,
+      "community": 54,
       "norm_label": "nbody_streams.tree_gpu.run_gpu_tree ==================================== kdk lea"
     },
     {
@@ -17126,7 +17126,7 @@
       "source_location": "L115",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_run_gpu_tree_rationale_115",
-      "community": 65,
+      "community": 54,
       "norm_label": "background-thread watchdog for gpu leapfrog loops.      per-step overhead is ~1"
     },
     {
@@ -17136,7 +17136,7 @@
       "source_location": "L208",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_run_gpu_tree_rationale_208",
-      "community": 65,
+      "community": 54,
       "norm_label": "run a gpu-tree n-body simulation with kdk leapfrog integration.      force evalu"
     },
     {
@@ -17426,7 +17426,7 @@
       "source_location": "L144",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_api_time_helper_api",
-      "community": 54,
+      "community": 97,
       "norm_label": "time_helper_api()"
     },
     {
@@ -17466,7 +17466,7 @@
       "source_location": "L145",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_api_rationale_145",
-      "community": 54,
+      "community": 97,
       "norm_label": "time the tree_gravity_gpu() python helper function."
     },
     {
@@ -17756,7 +17756,7 @@
       "source_location": "L106",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_guards_test_integrator_galilean_invariance",
-      "community": 65,
+      "community": 97,
       "norm_label": "test_integrator_galilean_invariance()"
     },
     {
@@ -17786,7 +17786,7 @@
       "source_location": "L107",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_guards_rationale_107",
-      "community": 65,
+      "community": 97,
       "norm_label": "cluster (m=1e5 msun, a=1 pc) at 40 kpc moving at 200 km/s evolves like at rest."
     },
     {
@@ -17806,7 +17806,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_limits",
-      "community": 91,
+      "community": 122,
       "norm_label": "test_limits.py"
     },
     {
@@ -17816,7 +17816,7 @@
       "source_location": "L22",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_limits_test_packing_roundtrip_selftest",
-      "community": 91,
+      "community": 122,
       "norm_label": "test_packing_roundtrip_selftest()"
     },
     {
@@ -17826,7 +17826,7 @@
       "source_location": "L26",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_limits_test_limits_match_library",
-      "community": 91,
+      "community": 122,
       "norm_label": "test_limits_match_library()"
     },
     {
@@ -17836,7 +17836,7 @@
       "source_location": "L31",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_limits_positions",
-      "community": 91,
+      "community": 122,
       "norm_label": "_positions()"
     },
     {
@@ -17846,7 +17846,7 @@
       "source_location": "L45",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_limits_test_realistic_trees_fit_initial_capacity",
-      "community": 91,
+      "community": 122,
       "norm_label": "test_realistic_trees_fit_initial_capacity()"
     },
     {
@@ -17856,7 +17856,7 @@
       "source_location": "L64",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_limits_test_guard_rejects_too_many_particles",
-      "community": 91,
+      "community": 122,
       "norm_label": "test_guard_rejects_too_many_particles()"
     },
     {
@@ -17866,7 +17866,7 @@
       "source_location": "L71",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_limits_free",
-      "community": 91,
+      "community": 122,
       "norm_label": "_free()"
     },
     {
@@ -17876,7 +17876,7 @@
       "source_location": "L76",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_limits_test_guard_model_covers_measured_footprint",
-      "community": 91,
+      "community": 122,
       "norm_label": "test_guard_model_covers_measured_footprint()"
     },
     {
@@ -17886,7 +17886,7 @@
       "source_location": "L101",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_limits_test_memory_fraction",
-      "community": 91,
+      "community": 122,
       "norm_label": "test_memory_fraction()"
     },
     {
@@ -17896,7 +17896,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_limits_rationale_1",
-      "community": 91,
+      "community": 122,
       "norm_label": "test_limits.py -- index-packing limits, build capacities and the memory guard."
     },
     {
@@ -17906,7 +17906,7 @@
       "source_location": "L102",
       "_origin": "ast",
       "id": "nbody_streams_tree_gpu_tests_test_limits_rationale_102",
-      "community": 91,
+      "community": 122,
       "norm_label": "set_memory_fraction scales the guard; bad values raise; default 0.8."
     },
     {
@@ -20160,6 +20160,246 @@
       "norm_label": "high-level sph surface-density renderer with gpu/cpu dispatch.      computes smo"
     },
     {
+      "label": "build_logo.py",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo",
+      "community": 65,
+      "norm_label": "build_logo.py"
+    },
+    {
+      "label": "resample()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L48",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_resample",
+      "community": 65,
+      "norm_label": "resample()"
+    },
+    {
+      "label": "rdp()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L57",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_rdp",
+      "community": 65,
+      "norm_label": "rdp()"
+    },
+    {
+      "label": "rdp_closed()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L71",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_rdp_closed",
+      "community": 65,
+      "norm_label": "rdp_closed()"
+    },
+    {
+      "label": "fmt()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L78",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_fmt",
+      "community": 65,
+      "norm_label": "fmt()"
+    },
+    {
+      "label": "smooth_d()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L82",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_smooth_d",
+      "community": 65,
+      "norm_label": "smooth_d()"
+    },
+    {
+      "label": "shift_path()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L102",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_shift_path",
+      "community": 65,
+      "norm_label": "shift_path()"
+    },
+    {
+      "label": "path_points()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L116",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_path_points",
+      "community": 65,
+      "norm_label": "path_points()"
+    },
+    {
+      "label": "galaxy()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L121",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_galaxy",
+      "community": 65,
+      "norm_label": "galaxy()"
+    },
+    {
+      "label": "unit_height()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L148",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_unit_height",
+      "community": 65,
+      "norm_label": "unit_height()"
+    },
+    {
+      "label": "clusters()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L152",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_clusters",
+      "community": 65,
+      "norm_label": "clusters()"
+    },
+    {
+      "label": "galaxy_svg()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L185",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_galaxy_svg",
+      "community": 65,
+      "norm_label": "galaxy_svg()"
+    },
+    {
+      "label": "wordmark()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L219",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_wordmark",
+      "community": 65,
+      "norm_label": "wordmark()"
+    },
+    {
+      "label": "mark()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L266",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_mark",
+      "community": 65,
+      "norm_label": "mark()"
+    },
+    {
+      "label": "render_png()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L278",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_render_png",
+      "community": 65,
+      "norm_label": "render_png()"
+    },
+    {
+      "label": "social()",
+      "file_type": "code",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L315",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_social",
+      "community": 65,
+      "norm_label": "social()"
+    },
+    {
+      "label": "Build every nbody_streams logo asset from source/logo_source.json.      python p",
+      "file_type": "rationale",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_rationale_1",
+      "community": 65,
+      "norm_label": "build every nbody_streams logo asset from source/logo_source.json.      python p"
+    },
+    {
+      "label": "closed polygon -> cubic Bezier path through its points; corners stay sharp",
+      "file_type": "rationale",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L83",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_rationale_83",
+      "community": 65,
+      "norm_label": "closed polygon -> cubic bezier path through its points; corners stay sharp"
+    },
+    {
+      "label": "shift an absolute M/L/Q/C path horizontally",
+      "file_type": "rationale",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L103",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_rationale_103",
+      "community": 65,
+      "norm_label": "shift an absolute m/l/q/c path horizontally"
+    },
+    {
+      "label": "barred two-arm logarithmic spiral drawn as one tapered ribbon (svg coords, y dow",
+      "file_type": "rationale",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L122",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_rationale_122",
+      "community": 65,
+      "norm_label": "barred two-arm logarithmic spiral drawn as one tapered ribbon (svg coords, y dow"
+    },
+    {
+      "label": "artist's-impression detail: bright knots on the arms, tiny stars off the arms an",
+      "file_type": "rationale",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L153",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_rationale_153",
+      "community": 65,
+      "norm_label": "artist's-impression detail: bright knots on the arms, tiny stars off the arms an"
+    },
+    {
+      "label": "disk glow, arms, core halo, core, clusters; returns the disk's right edge (svg x",
+      "file_type": "rationale",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L186",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_rationale_186",
+      "community": 65,
+      "norm_label": "disk glow, arms, core halo, core, clusters; returns the disk's right edge (svg x"
+    },
+    {
+      "label": "svg text -> png via librsvg + cairo (ctypes); transparent unless bg=(r,g,b) in 0",
+      "file_type": "rationale",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L279",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_rationale_279",
+      "community": 65,
+      "norm_label": "svg text -> png via librsvg + cairo (ctypes); transparent unless bg=(r,g,b) in 0"
+    },
+    {
+      "label": "white 1280 x 640 card: wordmark ink 980 px wide, tagline 46 px below, block cent",
+      "file_type": "rationale",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L316",
+      "_origin": "ast",
+      "id": "plots_logo_source_build_logo_rationale_316",
+      "community": 65,
+      "norm_label": "white 1280 x 640 card: wordmark ink 980 px wide, tagline 46 px below, block cent"
+    },
+    {
       "label": "setup.py",
       "file_type": "code",
       "source_file": "setup.py",
@@ -22206,7 +22446,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "tests_test_direct_fused",
-      "community": 50,
+      "community": 46,
       "norm_label": "test_direct_fused.py"
     },
     {
@@ -22216,7 +22456,7 @@
       "source_location": "L25",
       "_origin": "ast",
       "id": "tests_test_direct_fused_cluster",
-      "community": 50,
+      "community": 46,
       "norm_label": "_cluster()"
     },
     {
@@ -22226,7 +22466,7 @@
       "source_location": "L35",
       "_origin": "ast",
       "id": "tests_test_direct_fused_test_soa_hot_path_matches_public",
-      "community": 50,
+      "community": 46,
       "norm_label": "test_soa_hot_path_matches_public()"
     },
     {
@@ -22236,7 +22476,7 @@
       "source_location": "L53",
       "_origin": "ast",
       "id": "tests_test_direct_fused_test_run_nbody_gpu_precisions_agree",
-      "community": 50,
+      "community": 46,
       "norm_label": "test_run_nbody_gpu_precisions_agree()"
     },
     {
@@ -22246,7 +22486,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "tests_test_direct_fused_rationale_1",
-      "community": 50,
+      "community": 46,
       "norm_label": "fused gpu direct-sum paths.  1. ``_direct_forces_gpu_soa`` (the integrator's hot"
     },
     {
@@ -22636,7 +22876,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "tests_test_multi_species",
-      "community": 3,
+      "community": 289,
       "norm_label": "test_multi_species.py"
     },
     {
@@ -22806,7 +23046,7 @@
       "source_location": "L149",
       "_origin": "ast",
       "id": "tests_test_multi_species_testvalidatespecies",
-      "community": 303,
+      "community": 289,
       "norm_label": "testvalidatespecies"
     },
     {
@@ -22816,7 +23056,7 @@
       "source_location": "L150",
       "_origin": "ast",
       "id": "tests_test_multi_species_testvalidatespecies_test_valid",
-      "community": 303,
+      "community": 289,
       "norm_label": ".test_valid()"
     },
     {
@@ -22826,7 +23066,7 @@
       "source_location": "L155",
       "_origin": "ast",
       "id": "tests_test_multi_species_testvalidatespecies_test_n_mismatch_raises",
-      "community": 303,
+      "community": 289,
       "norm_label": ".test_n_mismatch_raises()"
     },
     {
@@ -22836,7 +23076,7 @@
       "source_location": "L161",
       "_origin": "ast",
       "id": "tests_test_multi_species_testvalidatespecies_test_duplicate_name_raises",
-      "community": 303,
+      "community": 289,
       "norm_label": ".test_duplicate_name_raises()"
     },
     {
@@ -22846,7 +23086,7 @@
       "source_location": "L167",
       "_origin": "ast",
       "id": "tests_test_multi_species_testvalidatespecies_test_empty_list_raises",
-      "community": 303,
+      "community": 289,
       "norm_label": ".test_empty_list_raises()"
     },
     {
@@ -22856,7 +23096,7 @@
       "source_location": "L176",
       "_origin": "ast",
       "id": "tests_test_multi_species_testsplitbyspecies",
-      "community": 3,
+      "community": 289,
       "norm_label": "testsplitbyspecies"
     },
     {
@@ -22866,7 +23106,7 @@
       "source_location": "L177",
       "_origin": "ast",
       "id": "tests_test_multi_species_testsplitbyspecies_test_two_species",
-      "community": 3,
+      "community": 289,
       "norm_label": ".test_two_species()"
     },
     {
@@ -22876,7 +23116,7 @@
       "source_location": "L185",
       "_origin": "ast",
       "id": "tests_test_multi_species_testsplitbyspecies_test_three_species",
-      "community": 3,
+      "community": 289,
       "norm_label": ".test_three_species()"
     },
     {
@@ -22946,7 +23186,7 @@
       "source_location": "L231",
       "_origin": "ast",
       "id": "tests_test_multi_species_testisuniform",
-      "community": 291,
+      "community": 289,
       "norm_label": "testisuniform"
     },
     {
@@ -22956,7 +23196,7 @@
       "source_location": "L232",
       "_origin": "ast",
       "id": "tests_test_multi_species_testisuniform_test_uniform",
-      "community": 291,
+      "community": 289,
       "norm_label": ".test_uniform()"
     },
     {
@@ -22966,7 +23206,7 @@
       "source_location": "L238",
       "_origin": "ast",
       "id": "tests_test_multi_species_testisuniform_test_non_uniform",
-      "community": 291,
+      "community": 289,
       "norm_label": ".test_non_uniform()"
     },
     {
@@ -22976,7 +23216,7 @@
       "source_location": "L243",
       "_origin": "ast",
       "id": "tests_test_multi_species_testisuniform_test_single_element",
-      "community": 291,
+      "community": 289,
       "norm_label": ".test_single_element()"
     },
     {
@@ -23056,7 +23296,7 @@
       "source_location": "L324",
       "_origin": "ast",
       "id": "tests_test_multi_species_testparticlereaderbackwardcompat",
-      "community": 305,
+      "community": 289,
       "norm_label": "testparticlereaderbackwardcompat"
     },
     {
@@ -23066,7 +23306,7 @@
       "source_location": "L325",
       "_origin": "ast",
       "id": "tests_test_multi_species_testparticlereaderbackwardcompat_write_old_format",
-      "community": 305,
+      "community": 289,
       "norm_label": "._write_old_format()"
     },
     {
@@ -23076,7 +23316,7 @@
       "source_location": "L337",
       "_origin": "ast",
       "id": "tests_test_multi_species_testparticlereaderbackwardcompat_test_reads_num_dark_star",
-      "community": 305,
+      "community": 289,
       "norm_label": ".test_reads_num_dark_star()"
     },
     {
@@ -23086,7 +23326,7 @@
       "source_location": "L343",
       "_origin": "ast",
       "id": "tests_test_multi_species_testparticlereaderbackwardcompat_test_reads_mass_dark_star",
-      "community": 305,
+      "community": 289,
       "norm_label": ".test_reads_mass_dark_star()"
     },
     {
@@ -23096,7 +23336,7 @@
       "source_location": "L349",
       "_origin": "ast",
       "id": "tests_test_multi_species_testparticlereaderbackwardcompat_test_read_snapshot_dark_star_shape",
-      "community": 305,
+      "community": 289,
       "norm_label": ".test_read_snapshot_dark_star_shape()"
     },
     {
@@ -23106,7 +23346,7 @@
       "source_location": "L356",
       "_origin": "ast",
       "id": "tests_test_multi_species_testparticlereaderbackwardcompat_test_read_snapshot_part_species_dict",
-      "community": 305,
+      "community": 289,
       "norm_label": ".test_read_snapshot_part_species_dict()"
     },
     {
@@ -23116,7 +23356,7 @@
       "source_location": "L363",
       "_origin": "ast",
       "id": "tests_test_multi_species_testparticlereaderbackwardcompat_test_species_list_populated",
-      "community": 305,
+      "community": 289,
       "norm_label": ".test_species_list_populated()"
     },
     {
@@ -23206,7 +23446,7 @@
       "source_location": "L445",
       "_origin": "ast",
       "id": "tests_test_multi_species_testrestartfilespecies",
-      "community": 3,
+      "community": 46,
       "norm_label": "testrestartfilespecies"
     },
     {
@@ -23236,7 +23476,7 @@
       "source_location": "L493",
       "_origin": "ast",
       "id": "tests_test_multi_species_testrestartfilespecies_test_no_restart_returns_none",
-      "community": 3,
+      "community": 46,
       "norm_label": ".test_no_restart_returns_none()"
     },
     {
@@ -23316,7 +23556,7 @@
       "source_location": "L611",
       "_origin": "ast",
       "id": "tests_test_multi_species_testrunsimulationvalidation",
-      "community": 289,
+      "community": 35,
       "norm_label": "testrunsimulationvalidation"
     },
     {
@@ -23326,7 +23566,7 @@
       "source_location": "L612",
       "_origin": "ast",
       "id": "tests_test_multi_species_testrunsimulationvalidation_test_bad_architecture_raises",
-      "community": 289,
+      "community": 35,
       "norm_label": ".test_bad_architecture_raises()"
     },
     {
@@ -23336,7 +23576,7 @@
       "source_location": "L619",
       "_origin": "ast",
       "id": "tests_test_multi_species_testrunsimulationvalidation_test_bad_method_raises",
-      "community": 289,
+      "community": 35,
       "norm_label": ".test_bad_method_raises()"
     },
     {
@@ -23346,7 +23586,7 @@
       "source_location": "L626",
       "_origin": "ast",
       "id": "tests_test_multi_species_testrunsimulationvalidation_test_species_n_mismatch_raises",
-      "community": 289,
+      "community": 35,
       "norm_label": ".test_species_n_mismatch_raises()"
     },
     {
@@ -23356,7 +23596,7 @@
       "source_location": "L633",
       "_origin": "ast",
       "id": "tests_test_multi_species_testrunsimulationvalidation_test_wrong_phase_space_shape_raises",
-      "community": 289,
+      "community": 35,
       "norm_label": ".test_wrong_phase_space_shape_raises()"
     },
     {
@@ -23366,7 +23606,7 @@
       "source_location": "L640",
       "_origin": "ast",
       "id": "tests_test_multi_species_testrunsimulationvalidation_test_performance_warning_via_run_simulation",
-      "community": 289,
+      "community": 35,
       "norm_label": ".test_performance_warning_via_run_simulation()"
     },
     {
@@ -23476,7 +23716,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "tests_test_multi_species_rationale_1",
-      "community": 3,
+      "community": 289,
       "norm_label": "tests/test_multi_species.py tests for the multi-species simulation pipeline intr"
     },
     {
@@ -23516,7 +23756,7 @@
       "source_location": "L326",
       "_origin": "ast",
       "id": "tests_test_multi_species_rationale_326",
-      "community": 305,
+      "community": 289,
       "norm_label": "write an hdf5 file in the old two-species format."
     },
     {
@@ -23546,7 +23786,7 @@
       "source_location": "L641",
       "_origin": "ast",
       "id": "tests_test_multi_species_rationale_641",
-      "community": 289,
+      "community": 35,
       "norm_label": "run_simulation emits performancewarning for large cpu direct n."
     },
     {
@@ -24366,7 +24606,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "tests_test_recentre",
-      "community": 81,
+      "community": 6,
       "norm_label": "test_recentre.py"
     },
     {
@@ -24376,7 +24616,7 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "tests_test_recentre_cluster",
-      "community": 81,
+      "community": 6,
       "norm_label": "_cluster()"
     },
     {
@@ -24386,7 +24626,7 @@
       "source_location": "L25",
       "_origin": "ast",
       "id": "tests_test_recentre_p99",
-      "community": 81,
+      "community": 6,
       "norm_label": "_p99()"
     },
     {
@@ -24396,7 +24636,7 @@
       "source_location": "L33",
       "_origin": "ast",
       "id": "tests_test_recentre_test_to_float32_relative",
-      "community": 81,
+      "community": 6,
       "norm_label": "test_to_float32_relative()"
     },
     {
@@ -24406,7 +24646,7 @@
       "source_location": "L50",
       "_origin": "ast",
       "id": "tests_test_recentre_test_direct_gpu_float64_input_far_from_origin",
-      "community": 81,
+      "community": 6,
       "norm_label": "test_direct_gpu_float64_input_far_from_origin()"
     },
     {
@@ -24416,7 +24656,7 @@
       "source_location": "L61",
       "_origin": "ast",
       "id": "tests_test_recentre_test_tree_float64_input_far_from_origin",
-      "community": 81,
+      "community": 6,
       "norm_label": "test_tree_float64_input_far_from_origin()"
     },
     {
@@ -24426,7 +24666,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "tests_test_recentre_rationale_1",
-      "community": 81,
+      "community": 6,
       "norm_label": "float64 positions far from the origin keep float32 precision.  a 1-pc hernquist"
     },
     {
@@ -26086,7 +26326,7 @@
       "source_location": "L120",
       "_origin": "ast",
       "id": "readme_quick_start",
-      "community": 98,
+      "community": 303,
       "norm_label": "quick start"
     },
     {
@@ -26096,7 +26336,7 @@
       "source_location": "L190",
       "_origin": "ast",
       "id": "readme_example_notebooks",
-      "community": 98,
+      "community": 303,
       "norm_label": "example notebooks"
     },
     {
@@ -26133,7 +26373,7 @@
       "label": "License",
       "file_type": "document",
       "source_file": "README.md",
-      "source_location": "L410",
+      "source_location": "L409",
       "_origin": "ast",
       "id": "readme_license",
       "community": 98,
@@ -27426,7 +27666,7 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "docs_fields_compute_nbody_forces_gpu",
-      "community": 309,
+      "community": 145,
       "norm_label": "compute_nbody_forces_gpu"
     },
     {
@@ -27436,7 +27676,7 @@
       "source_location": "L65",
       "_origin": "ast",
       "id": "docs_fields_parameters",
-      "community": 309,
+      "community": 145,
       "norm_label": "parameters"
     },
     {
@@ -27446,7 +27686,7 @@
       "source_location": "L78",
       "_origin": "ast",
       "id": "docs_fields_returns",
-      "community": 309,
+      "community": 145,
       "norm_label": "returns"
     },
     {
@@ -27456,7 +27696,7 @@
       "source_location": "L82",
       "_origin": "ast",
       "id": "docs_fields_raises",
-      "community": 309,
+      "community": 145,
       "norm_label": "raises"
     },
     {
@@ -27466,7 +27706,7 @@
       "source_location": "L90",
       "_origin": "ast",
       "id": "docs_fields_example",
-      "community": 309,
+      "community": 145,
       "norm_label": "example"
     },
     {
@@ -27886,7 +28126,7 @@
       "source_location": "L78",
       "_origin": "ast",
       "id": "docs_main_run_simulation",
-      "community": 298,
+      "community": 308,
       "norm_label": "run_simulation"
     },
     {
@@ -27896,7 +28136,7 @@
       "source_location": "L106",
       "_origin": "ast",
       "id": "docs_main_parameters_106",
-      "community": 298,
+      "community": 308,
       "norm_label": "parameters"
     },
     {
@@ -27906,7 +28146,7 @@
       "source_location": "L131",
       "_origin": "ast",
       "id": "docs_main_backend_specific_kwargs",
-      "community": 298,
+      "community": 308,
       "norm_label": "backend-specific kwargs"
     },
     {
@@ -27916,7 +28156,7 @@
       "source_location": "L144",
       "_origin": "ast",
       "id": "docs_main_dynamical_friction_kwargs",
-      "community": 298,
+      "community": 308,
       "norm_label": "dynamical friction kwargs"
     },
     {
@@ -27926,7 +28166,7 @@
       "source_location": "L160",
       "_origin": "ast",
       "id": "docs_main_returns",
-      "community": 298,
+      "community": 308,
       "norm_label": "returns"
     },
     {
@@ -27936,7 +28176,7 @@
       "source_location": "L173",
       "_origin": "ast",
       "id": "docs_main_raises",
-      "community": 298,
+      "community": 308,
       "norm_label": "raises"
     },
     {
@@ -27946,7 +28186,7 @@
       "source_location": "L182",
       "_origin": "ast",
       "id": "docs_main_softening_kernels_hardcoded_per_backend",
-      "community": 298,
+      "community": 308,
       "norm_label": "softening kernels (hardcoded per backend)"
     },
     {
@@ -27956,7 +28196,7 @@
       "source_location": "L191",
       "_origin": "ast",
       "id": "docs_main_example_single_species",
-      "community": 298,
+      "community": 308,
       "norm_label": "example: single species"
     },
     {
@@ -27966,7 +28206,7 @@
       "source_location": "L208",
       "_origin": "ast",
       "id": "docs_main_example_multi_species_dark_matter_stars",
-      "community": 298,
+      "community": 308,
       "norm_label": "example: multi-species dark matter + stars"
     },
     {
@@ -27976,7 +28216,7 @@
       "source_location": "L230",
       "_origin": "ast",
       "id": "docs_main_example_gpu_tree_backend",
-      "community": 298,
+      "community": 308,
       "norm_label": "example: gpu tree backend"
     },
     {
@@ -27986,7 +28226,7 @@
       "source_location": "L242",
       "_origin": "ast",
       "id": "docs_main_example_with_external_agama_potential",
-      "community": 298,
+      "community": 308,
       "norm_label": "example: with external agama potential"
     },
     {
@@ -27996,7 +28236,7 @@
       "source_location": "L258",
       "_origin": "ast",
       "id": "docs_main_example_with_chandrasekhar_dynamical_friction",
-      "community": 298,
+      "community": 308,
       "norm_label": "example: with chandrasekhar dynamical friction"
     },
     {
@@ -28246,7 +28486,7 @@
       "source_location": "L23",
       "_origin": "ast",
       "id": "docs_run_run_nbody_gpu",
-      "community": 124,
+      "community": 291,
       "norm_label": "run_nbody_gpu"
     },
     {
@@ -28256,7 +28496,7 @@
       "source_location": "L53",
       "_origin": "ast",
       "id": "docs_run_parameters",
-      "community": 124,
+      "community": 291,
       "norm_label": "parameters"
     },
     {
@@ -28266,7 +28506,7 @@
       "source_location": "L80",
       "_origin": "ast",
       "id": "docs_run_returns",
-      "community": 124,
+      "community": 291,
       "norm_label": "returns"
     },
     {
@@ -28276,7 +28516,7 @@
       "source_location": "L84",
       "_origin": "ast",
       "id": "docs_run_raises",
-      "community": 124,
+      "community": 291,
       "norm_label": "raises"
     },
     {
@@ -28286,7 +28526,7 @@
       "source_location": "L91",
       "_origin": "ast",
       "id": "docs_run_integration_scheme",
-      "community": 124,
+      "community": 291,
       "norm_label": "integration scheme"
     },
     {
@@ -28296,7 +28536,7 @@
       "source_location": "L102",
       "_origin": "ast",
       "id": "docs_run_gpu_memory_management",
-      "community": 124,
+      "community": 291,
       "norm_label": "gpu memory management"
     },
     {
@@ -28306,7 +28546,7 @@
       "source_location": "L108",
       "_origin": "ast",
       "id": "docs_run_snapshot_and_restart_behaviour",
-      "community": 124,
+      "community": 291,
       "norm_label": "snapshot and restart behaviour"
     },
     {
@@ -28316,7 +28556,7 @@
       "source_location": "L114",
       "_origin": "ast",
       "id": "docs_run_example_basic_self_gravity",
-      "community": 124,
+      "community": 291,
       "norm_label": "example: basic self-gravity"
     },
     {
@@ -28326,7 +28566,7 @@
       "source_location": "L133",
       "_origin": "ast",
       "id": "docs_run_example_with_external_potential",
-      "community": 124,
+      "community": 291,
       "norm_label": "example: with external potential"
     },
     {
@@ -28336,7 +28576,7 @@
       "source_location": "L151",
       "_origin": "ast",
       "id": "docs_run_example_resume_from_crash",
-      "community": 124,
+      "community": 291,
       "norm_label": "example: resume from crash"
     },
     {
@@ -29663,111 +29903,51 @@
       "label": "Files",
       "file_type": "document",
       "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L5",
+      "source_location": "L18",
       "_origin": "ast",
       "id": "plots_logo_nbody_streams_logo_spec_files",
       "community": 293,
       "norm_label": "files"
     },
     {
-      "label": "Typeface",
+      "label": "Coordinates",
       "file_type": "document",
       "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L26",
+      "source_location": "L42",
       "_origin": "ast",
-      "id": "plots_logo_nbody_streams_logo_spec_typeface",
+      "id": "plots_logo_nbody_streams_logo_spec_coordinates",
       "community": 293,
-      "norm_label": "typeface"
+      "norm_label": "coordinates"
     },
     {
-      "label": "Colours",
+      "label": "Colours (theme-proof)",
       "file_type": "document",
       "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L37",
+      "source_location": "L46",
       "_origin": "ast",
-      "id": "plots_logo_nbody_streams_logo_spec_colours",
+      "id": "plots_logo_nbody_streams_logo_spec_colours_theme_proof",
       "community": 293,
-      "norm_label": "colours"
+      "norm_label": "colours (theme-proof)"
     },
     {
-      "label": "Gradients",
+      "label": "Construction",
       "file_type": "document",
       "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L60",
+      "source_location": "L74",
       "_origin": "ast",
-      "id": "plots_logo_nbody_streams_logo_spec_gradients",
+      "id": "plots_logo_nbody_streams_logo_spec_construction",
       "community": 293,
-      "norm_label": "gradients"
+      "norm_label": "construction"
     },
     {
-      "label": "Stream (first s): arm geometry",
+      "label": "History",
       "file_type": "document",
       "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L73",
+      "source_location": "L116",
       "_origin": "ast",
-      "id": "plots_logo_nbody_streams_logo_spec_stream_first_s_arm_geometry",
+      "id": "plots_logo_nbody_streams_logo_spec_history",
       "community": 293,
-      "norm_label": "stream (first s): arm geometry"
-    },
-    {
-      "label": "t and r (slanted 11\u00b0)",
-      "file_type": "document",
-      "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L97",
-      "_origin": "ast",
-      "id": "plots_logo_nbody_streams_logo_spec_t_and_r_slanted_11",
-      "community": 293,
-      "norm_label": "t and r (slanted 11\u00b0)"
-    },
-    {
-      "label": "Galaxy (final s)",
-      "file_type": "document",
-      "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L104",
-      "_origin": "ast",
-      "id": "plots_logo_nbody_streams_logo_spec_galaxy_final_s",
-      "community": 293,
-      "norm_label": "galaxy (final s)"
-    },
-    {
-      "label": "o (nbody)",
-      "file_type": "document",
-      "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L110",
-      "_origin": "ast",
-      "id": "plots_logo_nbody_streams_logo_spec_o_nbody",
-      "community": 293,
-      "norm_label": "o (nbody)"
-    },
-    {
-      "label": "Exported coordinates",
-      "file_type": "document",
-      "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L114",
-      "_origin": "ast",
-      "id": "plots_logo_nbody_streams_logo_spec_exported_coordinates",
-      "community": 293,
-      "norm_label": "exported coordinates"
-    },
-    {
-      "label": "Mark",
-      "file_type": "document",
-      "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L118",
-      "_origin": "ast",
-      "id": "plots_logo_nbody_streams_logo_spec_mark",
-      "community": 293,
-      "norm_label": "mark"
-    },
-    {
-      "label": "Social preview",
-      "file_type": "document",
-      "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L130",
-      "_origin": "ast",
-      "id": "plots_logo_nbody_streams_logo_spec_social_preview",
-      "community": 293,
-      "norm_label": "social preview"
+      "norm_label": "history"
     },
     {
       "label": "dark()",
@@ -53623,6 +53803,17 @@
       "source": "nbody_streams_agama_helper_spheroid_spheroidpotentialgpu_phi",
       "target": "nbody_streams_agama_helper_spheroid_spheroidpotentialgpu_state",
       "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "nbody_streams/agama_helper/_spheroid.py",
+      "source_location": "L512",
+      "weight": 1.0,
+      "source": "nbody_streams_agama_helper_spheroid_spheroidpotentialgpu_repr",
+      "target": "plots_logo_source_build_logo_fmt"
     },
     {
       "relation": "contains",
@@ -82329,6 +82520,434 @@
       "target": "nbody_streams_viz_sph_kernels_render_surface_density"
     },
     {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L152",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_clusters",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L78",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_fmt",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L121",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_galaxy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L185",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_galaxy_svg",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L266",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_mark",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L116",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_path_points",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L57",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_rdp",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L71",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_rdp_closed",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L278",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_render_png",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L48",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_resample",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L102",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_shift_path",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L82",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_smooth_d",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L315",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_social",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L148",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_unit_height",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L219",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo",
+      "target": "plots_logo_source_build_logo_wordmark",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_rationale_1",
+      "target": "plots_logo_source_build_logo",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L129",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_galaxy",
+      "target": "plots_logo_source_build_logo_resample",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L73",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_rdp_closed",
+      "target": "plots_logo_source_build_logo_rdp",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L202",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_galaxy_svg",
+      "target": "plots_logo_source_build_logo_rdp_closed",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L112",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_shift_path",
+      "target": "plots_logo_source_build_logo_fmt",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L92",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_smooth_d",
+      "target": "plots_logo_source_build_logo_fmt",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L202",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_galaxy_svg",
+      "target": "plots_logo_source_build_logo_smooth_d",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L83",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_rationale_83",
+      "target": "plots_logo_source_build_logo_smooth_d",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L243",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_wordmark",
+      "target": "plots_logo_source_build_logo_smooth_d",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L103",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_rationale_103",
+      "target": "plots_logo_source_build_logo_shift_path",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L226",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_wordmark",
+      "target": "plots_logo_source_build_logo_shift_path",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L225",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_wordmark",
+      "target": "plots_logo_source_build_logo_path_points",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L269",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_mark",
+      "target": "plots_logo_source_build_logo_galaxy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L122",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_rationale_122",
+      "target": "plots_logo_source_build_logo_galaxy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L149",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_unit_height",
+      "target": "plots_logo_source_build_logo_galaxy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L228",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_wordmark",
+      "target": "plots_logo_source_build_logo_galaxy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L268",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_mark",
+      "target": "plots_logo_source_build_logo_unit_height",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L227",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_wordmark",
+      "target": "plots_logo_source_build_logo_unit_height",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L212",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_galaxy_svg",
+      "target": "plots_logo_source_build_logo_clusters",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L153",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_rationale_153",
+      "target": "plots_logo_source_build_logo_clusters",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L271",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_mark",
+      "target": "plots_logo_source_build_logo_galaxy_svg",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L186",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_rationale_186",
+      "target": "plots_logo_source_build_logo_galaxy_svg",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L253",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_wordmark",
+      "target": "plots_logo_source_build_logo_galaxy_svg",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L279",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_rationale_279",
+      "target": "plots_logo_source_build_logo_render_png",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L319",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_social",
+      "target": "plots_logo_source_build_logo_render_png",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/source/build_logo.py",
+      "source_location": "L316",
+      "weight": 1.0,
+      "source": "plots_logo_source_build_logo_rationale_316",
+      "target": "plots_logo_source_build_logo_social",
+      "confidence_score": 1.0
+    },
+    {
       "relation": "indirect_call",
       "confidence": "INFERRED",
       "source_file": "setup.py",
@@ -90708,7 +91327,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "README.md",
-      "source_location": "L410",
+      "source_location": "L409",
       "weight": 1.0,
       "source": "readme",
       "target": "readme_license",
@@ -94328,27 +94947,37 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L37",
+      "source_location": "L46",
       "weight": 1.0,
       "source": "plots_logo_nbody_streams_logo_spec_nbody_streams_logo_spec",
-      "target": "plots_logo_nbody_streams_logo_spec_colours",
+      "target": "plots_logo_nbody_streams_logo_spec_colours_theme_proof",
       "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L114",
+      "source_location": "L74",
       "weight": 1.0,
       "source": "plots_logo_nbody_streams_logo_spec_nbody_streams_logo_spec",
-      "target": "plots_logo_nbody_streams_logo_spec_exported_coordinates",
+      "target": "plots_logo_nbody_streams_logo_spec_construction",
       "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L5",
+      "source_location": "L42",
+      "weight": 1.0,
+      "source": "plots_logo_nbody_streams_logo_spec_nbody_streams_logo_spec",
+      "target": "plots_logo_nbody_streams_logo_spec_coordinates",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "plots/logo/nbody_streams_logo_spec.md",
+      "source_location": "L18",
       "weight": 1.0,
       "source": "plots_logo_nbody_streams_logo_spec_nbody_streams_logo_spec",
       "target": "plots_logo_nbody_streams_logo_spec_files",
@@ -94358,80 +94987,10 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L104",
+      "source_location": "L116",
       "weight": 1.0,
       "source": "plots_logo_nbody_streams_logo_spec_nbody_streams_logo_spec",
-      "target": "plots_logo_nbody_streams_logo_spec_galaxy_final_s",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L60",
-      "weight": 1.0,
-      "source": "plots_logo_nbody_streams_logo_spec_nbody_streams_logo_spec",
-      "target": "plots_logo_nbody_streams_logo_spec_gradients",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L118",
-      "weight": 1.0,
-      "source": "plots_logo_nbody_streams_logo_spec_nbody_streams_logo_spec",
-      "target": "plots_logo_nbody_streams_logo_spec_mark",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L110",
-      "weight": 1.0,
-      "source": "plots_logo_nbody_streams_logo_spec_nbody_streams_logo_spec",
-      "target": "plots_logo_nbody_streams_logo_spec_o_nbody",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L130",
-      "weight": 1.0,
-      "source": "plots_logo_nbody_streams_logo_spec_nbody_streams_logo_spec",
-      "target": "plots_logo_nbody_streams_logo_spec_social_preview",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L73",
-      "weight": 1.0,
-      "source": "plots_logo_nbody_streams_logo_spec_nbody_streams_logo_spec",
-      "target": "plots_logo_nbody_streams_logo_spec_stream_first_s_arm_geometry",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L97",
-      "weight": 1.0,
-      "source": "plots_logo_nbody_streams_logo_spec_nbody_streams_logo_spec",
-      "target": "plots_logo_nbody_streams_logo_spec_t_and_r_slanted_11",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "plots/logo/nbody_streams_logo_spec.md",
-      "source_location": "L26",
-      "weight": 1.0,
-      "source": "plots_logo_nbody_streams_logo_spec_nbody_streams_logo_spec",
-      "target": "plots_logo_nbody_streams_logo_spec_typeface",
+      "target": "plots_logo_nbody_streams_logo_spec_history",
       "confidence_score": 1.0
     },
     {
@@ -94566,5 +95125,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "98f9bdf527eea970e623cccac1f1cb8f196960b1"
+  "built_at_commit": "e17f841f05cdecb5ce2aa78a99711d6f992d3523"
 }
