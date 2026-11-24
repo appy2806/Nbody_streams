@@ -88,26 +88,26 @@ The o outline itself is unchanged from v2.4.0.
 - the calligraphic t, with a wedge top and curled foot
 - the r, whose head grows out of the crossbar
 
-The traced outline was lightly smoothed, with corners kept sharp. The seam where the trial's ribbon folds into the r head was replaced by a single cubic curve. The stored polygons are `str_main` (leading arm + t + r) and `str_tail` (trailing arm). The renderer draws each polygon as cubic Béziers that pass through its points.
+The traced outline was lightly smoothed, with corners kept sharp. The seam where the trial's ribbon folds into the r head was replaced by a single cubic curve. The stored polygons are `str_main` (leading arm + t + r) and `str_tail` (trailing arm). The renderer draws each polygon as cubic Beziers that pass through its points.
 
 The stream fill is a horizontal gradient: muted at the trailing tip, mid-gradient at 55 %, and text colour at x = 3990, which is reached by the t. The progenitor is a circle at (3454.2, 512.6) with r = 79.0. It has a text-colour ring and a pale fill of radius 0.76 r.
 
 **Galaxy s.** A barred two-arm logarithmic spiral. Parameters in units of the scale H:
 
-- Spiral: bar position angle 170°, 160° of winding per arm, half-bar 0.07, radius 0.5 at the tip, r(t) = 0.07 exp[ln(0.5/0.07) t^0.85].
+- Spiral: bar position angle 170 deg, 160 deg of winding per arm, half-bar 0.07, radius 0.5 at the tip, r(t) = 0.07 exp[ln(0.5/0.07) t^0.85].
 - Projection: x compressed by 0.64 (inclination).
-- Width: full width 0.185 H, tapering as (1 − u^1.6)^0.7, and pinched to 0.7 at the bar.
+- Width: full width 0.185 H, tapering as (1 - u^1.6)^0.7, and pinched to 0.7 at the bar.
 - Size: H is set so the galaxy's ink height is 575 units, the same as the e and a. The ink bottom sits at y = 776.4, and the left ink edge 50 units right of the m.
-- Arm fill: a gradient along the tip-to-tip axis, going tip colour → text (0.3) → text (0.7) → tip colour.
+- Arm fill: a gradient along the tip-to-tip axis, going tip colour -> text (0.3) -> text (0.7) -> tip colour.
 - Layers, from back to front:
-  1. A disk glow: an ellipse of 0.50 × 0.42 H rotated −25°, filled with a radial gradient whose opacity goes 1 → 0.4 → 0.
+  1. A disk glow: an ellipse of 0.50 x 0.42 H rotated -25 deg, filled with a radial gradient whose opacity goes 1 -> 0.4 -> 0.
   2. The arms.
-  3. A core halo: an ellipse 2.1 times the core size, with radial opacity 0.75 (light) or 0.85 (dark) → 0.
-  4. A crisp core: an ellipse of 0.115 × 0.095 H aligned with the projected bar. It has no outline.
+  3. A core halo: an ellipse 2.1 times the core size, with radial opacity 0.75 (light) or 0.85 (dark) -> 0.
+  4. A crisp core: an ellipse of 0.115 x 0.095 H aligned with the projected bar. It has no outline.
   5. Star clusters, placed by a fixed random seed (11):
-     - 5 knots per arm on the arm (r = 0.009–0.016 H)
-     - 5 stars per arm just outside it (r = 0.005–0.010 H)
-     - 7 stars around the core (r = 0.005–0.009 H)
+     - 5 knots per arm on the arm (r = 0.009-0.016 H)
+     - 5 stars per arm just outside it (r = 0.005-0.010 H)
+     - 7 stars around the core (r = 0.005-0.009 H)
 
 **Mark.** The galaxy alone, centred in a 512 x 512 square, with ink height 0.62 of the square and the disk glow scaled by 0.92. It still reads as a spiral at 32 px.
 
