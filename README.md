@@ -11,6 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.8--3.13-4c8eda" alt="Python 3.8-3.13">
+  <a href="#installation"><img src="https://img.shields.io/badge/GPU-CUDA%2012%2B%20(optional)-6d9f3f" alt="GPU: CUDA 12+ (optional)"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8aa1b4" alt="MIT license"></a>
   <a href="https://doi.org/10.5281/zenodo.20834762"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.20834762.svg" alt="Zenodo DOI"></a>
   <a href="https://doi.org/10.3847/1538-4357/ae89af"><img src="https://img.shields.io/badge/ApJ-1008%2C%2091%20(2026)-e8916b" alt="ApJ 1008, 91 (2026)"></a>
